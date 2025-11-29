@@ -37,7 +37,9 @@ QtObject {
             "System default": "System default",
             "d": "d",
             "h": "h",
-            "m": "m"
+            "m": "m",
+            "Refresh interval:": "Refresh interval:",
+            "minutes": "minutes"
         },
         "hu_HU": {
             "Claude Usage": "Claude használat",
@@ -60,7 +62,9 @@ QtObject {
             "System default": "Rendszer alapértelmezett",
             "d": "n",
             "h": "ó",
-            "m": "p"
+            "m": "p",
+            "Refresh interval:": "Frissítési gyakoriság:",
+            "minutes": "perc"
         },
         "de_DE": {
             "Claude Usage": "Claude Nutzung",
@@ -83,7 +87,9 @@ QtObject {
             "System default": "Systemstandard",
             "d": "T",
             "h": "Std",
-            "m": "Min"
+            "m": "Min",
+            "Refresh interval:": "Aktualisierungsintervall:",
+            "minutes": "Minuten"
         },
         "fr_FR": {
             "Claude Usage": "Utilisation Claude",
@@ -106,7 +112,9 @@ QtObject {
             "System default": "Système par défaut",
             "d": "j",
             "h": "h",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Intervalle de rafraîchissement:",
+            "minutes": "minutes"
         },
         "es_ES": {
             "Claude Usage": "Uso de Claude",
@@ -129,7 +137,9 @@ QtObject {
             "System default": "Predeterminado del sistema",
             "d": "d",
             "h": "h",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Intervalo de actualización:",
+            "minutes": "minutos"
         },
         "it_IT": {
             "Claude Usage": "Utilizzo Claude",
@@ -152,7 +162,9 @@ QtObject {
             "System default": "Predefinito di sistema",
             "d": "g",
             "h": "h",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Intervallo di aggiornamento:",
+            "minutes": "minuti"
         },
         "pt_BR": {
             "Claude Usage": "Uso do Claude",
@@ -175,7 +187,9 @@ QtObject {
             "System default": "Padrão do sistema",
             "d": "d",
             "h": "h",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Intervalo de atualização:",
+            "minutes": "minutos"
         },
         "ru_RU": {
             "Claude Usage": "Использование Claude",
@@ -198,7 +212,9 @@ QtObject {
             "System default": "По умолчанию системы",
             "d": "д",
             "h": "ч",
-            "m": "мин"
+            "m": "мин",
+            "Refresh interval:": "Интервал обновления:",
+            "minutes": "минут"
         },
         "pl_PL": {
             "Claude Usage": "Użycie Claude",
@@ -221,7 +237,9 @@ QtObject {
             "System default": "Domyślny systemowy",
             "d": "d",
             "h": "g",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Częstotliwość odświeżania:",
+            "minutes": "minut"
         },
         "nl_NL": {
             "Claude Usage": "Claude Gebruik",
@@ -244,7 +262,9 @@ QtObject {
             "System default": "Systeemstandaard",
             "d": "d",
             "h": "u",
-            "m": "min"
+            "m": "min",
+            "Refresh interval:": "Vernieuwingsinterval:",
+            "minutes": "minuten"
         },
         "tr_TR": {
             "Claude Usage": "Claude Kullanımı",
@@ -267,7 +287,9 @@ QtObject {
             "System default": "Sistem varsayılanı",
             "d": "g",
             "h": "sa",
-            "m": "dk"
+            "m": "dk",
+            "Refresh interval:": "Yenileme aralığı:",
+            "minutes": "dakika"
         },
         "ja_JP": {
             "Claude Usage": "Claude 使用状況",
@@ -290,7 +312,9 @@ QtObject {
             "System default": "システムデフォルト",
             "d": "日",
             "h": "時",
-            "m": "分"
+            "m": "分",
+            "Refresh interval:": "更新間隔:",
+            "minutes": "分"
         },
         "ko_KR": {
             "Claude Usage": "Claude 사용량",
@@ -313,7 +337,9 @@ QtObject {
             "System default": "시스템 기본값",
             "d": "일",
             "h": "시",
-            "m": "분"
+            "m": "분",
+            "Refresh interval:": "새로고침 간격:",
+            "minutes": "분"
         },
         "zh_CN": {
             "Claude Usage": "Claude 使用情况",
@@ -336,7 +362,9 @@ QtObject {
             "System default": "系统默认",
             "d": "天",
             "h": "时",
-            "m": "分"
+            "m": "分",
+            "Refresh interval:": "刷新间隔:",
+            "minutes": "分钟"
         },
         "zh_TW": {
             "Claude Usage": "Claude 使用狀況",
@@ -359,7 +387,9 @@ QtObject {
             "System default": "系統預設",
             "d": "天",
             "h": "時",
-            "m": "分"
+            "m": "分",
+            "Refresh interval:": "重新整理間隔:",
+            "minutes": "分鐘"
         }
     })
 

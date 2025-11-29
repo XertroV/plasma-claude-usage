@@ -491,7 +491,7 @@ PlasmoidItem {
 
     Timer {
         id: refreshTimer
-        interval: 60000  // Refresh every minute
+        interval: (Plasmoid.configuration.refreshInterval || 1) * 60000
         running: true
         repeat: true
         onTriggered: loadCredentials()

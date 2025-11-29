@@ -13,6 +13,7 @@ KCM.SimpleKCM {
     id: configPage
 
     property string cfg_language
+    property int cfg_refreshInterval
 
     // Translation helper
     Translations {
@@ -45,6 +46,26 @@ KCM.SimpleKCM {
 
             onActivated: index => {
                 cfg_language = languageValues[index]
+            }
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: tr("Refresh interval:")
+
+            QQC2.SpinBox {
+                id: refreshSpinBox
+                from: 1
+                to: 999
+                stepSize: 1
+                value: cfg_refreshInterval
+
+                onValueChanged: {
+                    cfg_refreshInterval = value
+                }
+            }
+
+            QQC2.Label {
+                text: tr("minutes")
             }
         }
     }

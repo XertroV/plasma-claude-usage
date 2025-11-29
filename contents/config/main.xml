@@ -10,5 +10,9 @@
             <label>UI Language</label>
             <default>system</default>
         </entry>
+        <entry name="refreshInterval" type="Int">
+            <label>Refresh interval in minutes</label>
+            <default>1</default>
+        </entry>
     </group>
 </kcfg>
