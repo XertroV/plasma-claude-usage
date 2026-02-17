@@ -30,6 +30,9 @@ PlasmoidItem {
 
     readonly property string usageApiUrl: "https://api.anthropic.com/api/oauth/usage"
     readonly property string displayName: Plasmoid.configuration.displayName || "Claude"
+    property real sessionTimePercent: 0
+    property real weeklyTimePercent: 0
+    property bool modelSectionExpanded: false
 
     // Data source for reading credentials file
     Plasma5Support.DataSource {
@@ -120,10 +123,12 @@ PlasmoidItem {
                         if (fiveHour.resets_at) {
                             root.sessionResetTime = new Date(fiveHour.resets_at)
                             root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
+                            updateSessionTimePercent()
                         }
                         if (sevenDay.resets_at) {
                             root.weeklyResetTime = new Date(sevenDay.resets_at)
                             root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
+                            updateWeeklyTimePercent()
                         }
 
                         root.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
@@ -335,6 +340,35 @@ PlasmoidItem {
                     }
                 }
 
+                // Time elapsed bar
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: root.sessionResetTime !== null
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 5
+                        radius: 2
+                        color: Kirigami.Theme.backgroundColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                        Rectangle {
+                            width: parent.width * Math.min(root.sessionTimePercent / 100, 1)
+                            height: parent.height
+                            radius: 2
+                            color: getPaceColor(root.sessionUsagePercent, root.sessionTimePercent)
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        text: root.sessionTimePercent.toFixed(0) + "%"
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        color: getPaceColor(root.sessionUsagePercent, root.sessionTimePercent)
+                        Layout.preferredWidth: implicitWidth
+                    }
+                }
+
                 PlasmaComponents.Label {
                     visible: root.sessionReset !== ""
                     text: i18n.tr("Resets at:") + " " + root.sessionReset + (root.sessionResetTime ? " (" + formatTimeRemaining(root.sessionResetTime) + ")" : "")
@@ -377,6 +411,35 @@ PlasmoidItem {
                     }
                 }
 
+                // Time elapsed bar
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: root.weeklyResetTime !== null
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 5
+                        radius: 2
+                        color: Kirigami.Theme.backgroundColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                        Rectangle {
+                            width: parent.width * Math.min(root.weeklyTimePercent / 100, 1)
+                            height: parent.height
+                            radius: 2
+                            color: getPaceColor(root.weeklyUsagePercent, root.weeklyTimePercent)
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        text: root.weeklyTimePercent.toFixed(0) + "%"
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        color: getPaceColor(root.weeklyUsagePercent, root.weeklyTimePercent)
+                        Layout.preferredWidth: implicitWidth
+                    }
+                }
+
                 PlasmaComponents.Label {
                     visible: root.weeklyReset !== ""
                     text: i18n.tr("Resets:") + " " + root.weeklyReset + (root.weeklyResetTime ? " (" + formatTimeRemaining(root.weeklyResetTime) + ")" : "")
@@ -393,17 +456,33 @@ PlasmoidItem {
                 opacity: 0.3
             }
 
-            // Model breakdown
-            PlasmaComponents.Label {
-                text: i18n.tr("By Model (Weekly)")
-                font.bold: true
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            // Model breakdown (collapsible)
+            RowLayout {
+                Layout.fillWidth: true
+
+                MouseArea {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: modelHeaderLabel.implicitHeight
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.modelSectionExpanded = !root.modelSectionExpanded
+
+                    RowLayout {
+                        anchors.fill: parent
+                        PlasmaComponents.Label {
+                            id: modelHeaderLabel
+                            text: (root.modelSectionExpanded ? "▾ " : "▸ ") + i18n.tr("By Model (Weekly)")
+                            font.bold: true
+                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
             }
 
             // Sonnet
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.sonnetWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.sonnetWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Sonnet")
@@ -433,7 +512,7 @@ PlasmoidItem {
             // Opus
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.opusWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.opusWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Opus")
@@ -462,14 +541,12 @@ PlasmoidItem {
 
             // No model data message
             PlasmaComponents.Label {
-                visible: root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0
+                visible: root.modelSectionExpanded && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0
                 text: i18n.tr("No model breakdown available")
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                 color: Kirigami.Theme.disabledTextColor
                 font.italic: true
             }
-
-            Item { Layout.fillHeight: true }
 
             // Footer
             Rectangle {
@@ -502,6 +579,45 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: loadCredentials()
+    }
+
+    Timer {
+        id: timePercentTimer
+        interval: 60000
+        running: root.sessionResetTime !== null || root.weeklyResetTime !== null
+        repeat: true
+        onTriggered: {
+            updateSessionTimePercent()
+            updateWeeklyTimePercent()
+        }
+    }
+
+    function updateSessionTimePercent() {
+        if (!root.sessionResetTime) return
+        var now = new Date()
+        var resetMs = root.sessionResetTime.getTime()
+        var periodMs = 5 * 60 * 60 * 1000
+        var startMs = resetMs - periodMs
+        var elapsed = now.getTime() - startMs
+        root.sessionTimePercent = Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
+    }
+
+    function updateWeeklyTimePercent() {
+        if (!root.weeklyResetTime) return
+        var now = new Date()
+        var resetMs = root.weeklyResetTime.getTime()
+        var periodMs = 7 * 24 * 60 * 60 * 1000
+        var startMs = resetMs - periodMs
+        var elapsed = now.getTime() - startMs
+        root.weeklyTimePercent = Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
+    }
+
+    function getPaceColor(usagePercent, timePercent) {
+        if (timePercent < 1) timePercent = 1
+        var pace = usagePercent / timePercent
+        if (pace < 0.8) return Kirigami.Theme.positiveTextColor
+        if (pace < 1.1) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.negativeTextColor
     }
 
     function getUsageColor(percent) {
