@@ -14,5 +14,13 @@
             <label>Refresh interval in minutes</label>
             <default>1</default>
         </entry>
+        <entry name="displayName" type="String">
+            <label>Display name for the widget</label>
+            <default></default>
+        </entry>
+        <entry name="credentialsPath" type="String">
+            <label>Path to credentials file</label>
+            <default></default>
+        </entry>
     </group>
 </kcfg>

@@ -29,6 +29,7 @@ PlasmoidItem {
     property var weeklyResetTime: null
 
     readonly property string usageApiUrl: "https://api.anthropic.com/api/oauth/usage"
+    readonly property string displayName: Plasmoid.configuration.displayName || "Claude"
 
     // Data source for reading credentials file
     Plasma5Support.DataSource {
@@ -81,8 +82,14 @@ PlasmoidItem {
     function loadCredentials() {
         root.isLoading = true
         root.errorMsg = ""
-        // Use $HOME environment variable
-        fileReader.connectSource("cat $HOME/.claude/.credentials.json 2>/dev/null")
+        var credPath = Plasmoid.configuration.credentialsPath || ""
+        if (credPath === "") {
+            fileReader.connectSource("cat $HOME/.claude/.credentials.json 2>/dev/null")
+        } else {
+            // Shell-quote user-provided path to prevent command injection
+            var safePath = "'" + credPath.replace(/'/g, "'\\''") + "'"
+            fileReader.connectSource("cat " + safePath + " 2>/dev/null")
+        }
     }
 
     function fetchUsageFromApi() {
@@ -240,7 +247,7 @@ PlasmoidItem {
             RowLayout {
                 Layout.fillWidth: true
                 PlasmaComponents.Label {
-                    text: i18n.tr("Claude Usage")
+                    text: root.displayName + " " + i18n.tr("Usage")
                     font.bold: true
                     font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.3
                 }
@@ -529,6 +536,6 @@ PlasmoidItem {
     }
 
     Plasmoid.icon: "claude-usage"
-    toolTipMainText: i18n.tr("Claude Usage")
+    toolTipMainText: root.displayName + " " + i18n.tr("Usage")
     toolTipSubText: i18n.tr("Session (5hr)") + ": " + Math.round(root.sessionUsagePercent) + "% | " + i18n.tr("Weekly (7day)") + ": " + Math.round(root.weeklyUsagePercent) + "%"
 }

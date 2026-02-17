@@ -14,6 +14,8 @@ KCM.SimpleKCM {
 
     property string cfg_language
     property int cfg_refreshInterval
+    property string cfg_displayName
+    property string cfg_credentialsPath
 
     // Translation helper
     Translations {
@@ -37,6 +39,28 @@ KCM.SimpleKCM {
     ]
 
     Kirigami.FormLayout {
+        QQC2.TextField {
+            id: displayNameField
+            Kirigami.FormData.label: tr("Display name:")
+            placeholderText: "Claude"
+            text: cfg_displayName
+
+            onTextChanged: {
+                cfg_displayName = text
+            }
+        }
+
+        QQC2.TextField {
+            id: credentialsPathField
+            Kirigami.FormData.label: tr("Credentials file path:")
+            placeholderText: "~/.claude/.credentials.json"
+            text: cfg_credentialsPath
+
+            onTextChanged: {
+                cfg_credentialsPath = text
+            }
+        }
+
         QQC2.ComboBox {
             id: languageCombo
             Kirigami.FormData.label: tr("Language:")
