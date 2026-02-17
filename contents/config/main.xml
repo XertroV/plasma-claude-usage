@@ -34,5 +34,13 @@
             <label>Pace display format</label>
             <default>percent</default>
         </entry>
+        <entry name="sessionColorMode" type="String">
+            <label>Session bar color mode</label>
+            <default>capacity</default>
+        </entry>
+        <entry name="weeklyColorMode" type="String">
+            <label>Weekly bar color mode</label>
+            <default>efficiency</default>
+        </entry>
     </group>
 </kcfg>

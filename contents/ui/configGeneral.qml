@@ -19,6 +19,8 @@ KCM.SimpleKCM {
     property string cfg_credentialsPath
     property int cfg_sessionWeeklyRatio
     property string cfg_paceFormat
+    property string cfg_sessionColorMode
+    property string cfg_weeklyColorMode
 
     readonly property var providerValues: ["claude", "codex", "zai"]
     readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Z.ai (GLM)"]
@@ -147,6 +149,42 @@ KCM.SimpleKCM {
 
             onActivated: index => {
                 cfg_paceFormat = formatValues[index]
+            }
+        }
+
+        QQC2.ComboBox {
+            id: sessionColorCombo
+            Kirigami.FormData.label: tr("Session bar color:")
+
+            readonly property var colorModeValues: ["capacity", "efficiency"]
+            readonly property var colorModeNames: [
+                tr("Capacity (green = under pace)"),
+                tr("Efficiency (green = on pace)")
+            ]
+
+            model: colorModeNames
+            currentIndex: Math.max(0, colorModeValues.indexOf(cfg_sessionColorMode))
+
+            onActivated: index => {
+                cfg_sessionColorMode = colorModeValues[index]
+            }
+        }
+
+        QQC2.ComboBox {
+            id: weeklyColorCombo
+            Kirigami.FormData.label: tr("Weekly bar color:")
+
+            readonly property var colorModeValues: ["capacity", "efficiency"]
+            readonly property var colorModeNames: [
+                tr("Capacity (green = under pace)"),
+                tr("Efficiency (green = on pace)")
+            ]
+
+            model: colorModeNames
+            currentIndex: Math.max(0, colorModeValues.indexOf(cfg_weeklyColorMode))
+
+            onActivated: index => {
+                cfg_weeklyColorMode = colorModeValues[index]
             }
         }
     }

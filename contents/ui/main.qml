@@ -29,6 +29,7 @@ PlasmoidItem {
     property bool isLoading: false
     property var sessionResetTime: null
     property var weeklyResetTime: null
+    property real weeklyPeriodMs: 7 * 24 * 60 * 60 * 1000  // default 7 days
 
     readonly property string provider: Plasmoid.configuration.provider || "claude"
     readonly property string usageApiUrl: {
@@ -322,6 +323,7 @@ PlasmoidItem {
         // TIME_LIMIT = monthly MCP tool usage → weekly slot (repurposed)
         if (timeLimit) {
             root.weeklyUsagePercent = timeLimit.percentage || 0
+            root.weeklyPeriodMs = 30 * 24 * 60 * 60 * 1000  // monthly
             if (timeLimit.nextResetTime) {
                 root.weeklyResetTime = new Date(timeLimit.nextResetTime)
                 root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
@@ -387,7 +389,7 @@ PlasmoidItem {
                 Layout.preferredWidth: 10
                 Layout.preferredHeight: 10
                 radius: 5
-                color: getUsageColor(root.sessionUsagePercent)
+                color: getSessionColor()
             }
 
             PlasmaComponents.Label {
@@ -409,7 +411,7 @@ PlasmoidItem {
                 Layout.preferredWidth: 10
                 Layout.preferredHeight: 10
                 radius: 5
-                color: getUsageColor(root.weeklyUsagePercent)
+                color: getWeeklyColor()
             }
 
             PlasmaComponents.Label {
@@ -513,7 +515,7 @@ PlasmoidItem {
                     Item { Layout.fillWidth: true }
                     PlasmaComponents.Label {
                         text: root.sessionUsagePercent.toFixed(1) + "%"
-                        color: getUsageColor(root.sessionUsagePercent)
+                        color: getSessionColor()
                         font.bold: true
                     }
                 }
@@ -529,7 +531,7 @@ PlasmoidItem {
                         width: parent.width * Math.min(root.sessionUsagePercent / 100, 1)
                         height: parent.height
                         radius: 5
-                        color: getUsageColor(root.sessionUsagePercent)
+                        color: getSessionColor()
                     }
                 }
 
@@ -550,14 +552,14 @@ PlasmoidItem {
                             width: parent.width * Math.min(root.sessionTimePercent / 100, 1)
                             height: parent.height
                             radius: 2
-                            color: getPaceColor(root.sessionUsagePercent, root.sessionTimePercent)
+                            color: getSessionColor()
                         }
                     }
 
                     PlasmaComponents.Label {
                         text: root.sessionTimePercent.toFixed(0) + "%"
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        color: getPaceColor(root.sessionUsagePercent, root.sessionTimePercent)
+                        color: getSessionColor()
                         Layout.preferredWidth: implicitWidth
                     }
                 }
@@ -584,7 +586,7 @@ PlasmoidItem {
                     Item { Layout.fillWidth: true }
                     PlasmaComponents.Label {
                         text: root.weeklyUsagePercent.toFixed(1) + "%"
-                        color: getUsageColor(root.weeklyUsagePercent)
+                        color: getWeeklyColor()
                         font.bold: true
                     }
                 }
@@ -600,7 +602,7 @@ PlasmoidItem {
                         width: parent.width * Math.min(root.weeklyUsagePercent / 100, 1)
                         height: parent.height
                         radius: 5
-                        color: getUsageColor(root.weeklyUsagePercent)
+                        color: getWeeklyColor()
                     }
                 }
 
@@ -621,14 +623,14 @@ PlasmoidItem {
                             width: parent.width * Math.min(root.weeklyTimePercent / 100, 1)
                             height: parent.height
                             radius: 2
-                            color: getPaceColor(root.weeklyUsagePercent, root.weeklyTimePercent)
+                            color: getWeeklyColor()
                         }
                     }
 
                     PlasmaComponents.Label {
                         text: root.weeklyTimePercent.toFixed(0) + "%"
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        color: getPaceColor(root.weeklyUsagePercent, root.weeklyTimePercent)
+                        color: getWeeklyColor()
                         Layout.preferredWidth: implicitWidth
                     }
                 }
@@ -847,7 +849,7 @@ PlasmoidItem {
         if (!root.weeklyResetTime) return
         var now = new Date()
         var resetMs = root.weeklyResetTime.getTime()
-        var periodMs = 7 * 24 * 60 * 60 * 1000
+        var periodMs = root.weeklyPeriodMs
         var startMs = resetMs - periodMs
         var elapsed = now.getTime() - startMs
         root.weeklyTimePercent = Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
@@ -932,6 +934,42 @@ PlasmoidItem {
         if (percent < 50) return Kirigami.Theme.positiveTextColor
         if (percent < 80) return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.negativeTextColor
+    }
+
+    // Capacity mode: green when under pace, warns as you go over
+    function capacityPaceColor(pace) {
+        if (pace <= 1.0) return Kirigami.Theme.positiveTextColor
+        if (pace < 2.0) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.negativeTextColor
+    }
+
+    // Efficiency mode: green when on pace (~1.0), orange when deviating, red when very over, blue when way under
+    function efficiencyPaceColor(pace) {
+        if (pace >= 0.8 && pace <= 1.1) return Kirigami.Theme.positiveTextColor
+        if (pace < 0.4) return Kirigami.Theme.activeTextColor
+        if (pace < 0.8) return Kirigami.Theme.neutralTextColor
+        if (pace < 1.5) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.negativeTextColor
+    }
+
+    function getSessionColor() {
+        if (root.sessionTimePercent > 0) {
+            var timeP = Math.max(1, root.sessionTimePercent)
+            var pace = root.sessionUsagePercent / timeP
+            var mode = Plasmoid.configuration.sessionColorMode || "capacity"
+            return mode === "efficiency" ? efficiencyPaceColor(pace) : capacityPaceColor(pace)
+        }
+        return getUsageColor(root.sessionUsagePercent)
+    }
+
+    function getWeeklyColor() {
+        if (root.weeklyTimePercent > 0) {
+            var timeP = Math.max(1, root.weeklyTimePercent)
+            var pace = root.weeklyUsagePercent / timeP
+            var mode = Plasmoid.configuration.weeklyColorMode || "efficiency"
+            return mode === "efficiency" ? efficiencyPaceColor(pace) : capacityPaceColor(pace)
+        }
+        return getUsageColor(root.weeklyUsagePercent)
     }
 
     function formatTimeRemaining(resetTime) {
