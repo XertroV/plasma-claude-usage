@@ -28,11 +28,22 @@ PlasmoidItem {
     property var sessionResetTime: null
     property var weeklyResetTime: null
 
-    readonly property string usageApiUrl: "https://api.anthropic.com/api/oauth/usage"
-    readonly property string displayName: Plasmoid.configuration.displayName || "Claude"
+    readonly property string provider: Plasmoid.configuration.provider || "claude"
+    readonly property string usageApiUrl: {
+        if (provider === "codex") return "https://chatgpt.com/backend-api/wham/usage"
+        if (provider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
+        return "https://api.anthropic.com/api/oauth/usage"
+    }
+    readonly property string displayName: Plasmoid.configuration.displayName || (function() {
+        if (provider === "codex") return "Codex"
+        if (provider === "zai") return "Z.ai"
+        return "Claude"
+    })()
+    property string accountId: ""
     property real sessionTimePercent: 0
     property real weeklyTimePercent: 0
     property bool modelSectionExpanded: false
+    property real requiredPace: 0
 
     // Data source for reading credentials file
     Plasma5Support.DataSource {
@@ -49,25 +60,13 @@ PlasmoidItem {
             if (stdout.length > 10) {
                 try {
                     var creds = JSON.parse(stdout)
-                    var oauth = creds.claudeAiOauth || {}
-                    root.accessToken = oauth.accessToken || ""
 
-                    // Get plan name from tier
-                    var tier = oauth.rateLimitTier || "default_claude_pro"
-                    var planMap = {
-                        "default_claude_pro": "Pro",
-                        "default_claude_max_5x": "Max 5x",
-                        "default_claude_max_20x": "Max 20x"
-                    }
-                    root.planName = planMap[tier] || tier
-
-                    console.log("Claude Usage: Token found, plan:", root.planName)
-
-                    if (root.accessToken) {
-                        fetchUsageFromApi()
+                    if (root.provider === "codex") {
+                        parseCodexCredentials(creds)
+                    } else if (root.provider === "zai") {
+                        parseZaiCredentials(creds)
                     } else {
-                        root.errorMsg = i18n.tr("Not logged in")
-                        root.isLoading = false
+                        parseClaudeCredentials(creds)
                     }
                 } catch (e) {
                     console.log("Claude Usage: Failed to parse credentials:", e)
@@ -82,12 +81,87 @@ PlasmoidItem {
         }
     }
 
+    function parseClaudeCredentials(creds) {
+        var oauth = creds.claudeAiOauth || {}
+        root.accessToken = oauth.accessToken || ""
+
+        var tier = oauth.rateLimitTier || "default_claude_pro"
+        var planMap = {
+            "default_claude_pro": "Pro",
+            "default_claude_max_5x": "Max 5x",
+            "default_claude_max_20x": "Max 20x"
+        }
+        root.planName = planMap[tier] || tier
+
+        console.log("Claude Usage: Token found, plan:", root.planName)
+
+        if (root.accessToken) {
+            fetchUsageFromApi()
+        } else {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+        }
+    }
+
+    function parseCodexCredentials(creds) {
+        // Support both native ~/.codex/auth.json and OpenCode auth.json formats
+        var tokens = creds.tokens || {}
+        var openai = creds.openai || {}
+        root.accessToken = tokens.access_token || openai.access || ""
+        root.accountId = tokens.account_id || openai.accountId || ""
+
+        // Try to extract plan from id_token JWT payload
+        var idToken = tokens.id_token || ""
+        if (idToken) {
+            try {
+                var parts = idToken.split(".")
+                if (parts.length >= 2) {
+                    var payload = JSON.parse(Qt.atob(parts[1]))
+                    var plan = payload.plan_type || ""
+                    if (plan) {
+                        root.planName = plan.charAt(0).toUpperCase() + plan.slice(1)
+                    }
+                }
+            } catch (e) {
+                console.log("Claude Usage: Could not parse Codex id_token:", e)
+            }
+        }
+
+        console.log("Claude Usage: Codex token found, plan:", root.planName)
+
+        if (root.accessToken) {
+            fetchUsageFromApi()
+        } else {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+        }
+    }
+
+    function parseZaiCredentials(creds) {
+        // OpenCode auth.json format: { "zai-coding-plan": { "type": "api", "key": "..." } }
+        var zai = creds["zai-coding-plan"] || {}
+        root.accessToken = zai.key || ""
+
+        console.log("Claude Usage: Z.ai token found, length:", root.accessToken.length)
+
+        if (root.accessToken) {
+            fetchUsageFromApi()
+        } else {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+        }
+    }
+
     function loadCredentials() {
         root.isLoading = true
         root.errorMsg = ""
         var credPath = Plasmoid.configuration.credentialsPath || ""
         if (credPath === "") {
-            fileReader.connectSource("cat $HOME/.claude/.credentials.json 2>/dev/null")
+            var defaultPath
+            if (root.provider === "codex") defaultPath = "$HOME/.codex/auth.json"
+            else if (root.provider === "zai") defaultPath = "$HOME/.local/share/opencode/auth.json"
+            else defaultPath = "$HOME/.claude/.credentials.json"
+            fileReader.connectSource("cat " + defaultPath + " 2>/dev/null")
         } else {
             // Shell-quote user-provided path to prevent command injection
             var safePath = "'" + credPath.replace(/'/g, "'\\''") + "'"
@@ -100,7 +174,14 @@ PlasmoidItem {
         xhr.open("GET", usageApiUrl)
         xhr.setRequestHeader("Authorization", "Bearer " + root.accessToken)
         xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.setRequestHeader("anthropic-beta", "oauth-2025-04-20")
+
+        if (root.provider === "codex") {
+            if (root.accountId) {
+                xhr.setRequestHeader("ChatGPT-Account-Id", root.accountId)
+            }
+        } else if (root.provider === "claude") {
+            xhr.setRequestHeader("anthropic-beta", "oauth-2025-04-20")
+        }
 
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
@@ -110,25 +191,12 @@ PlasmoidItem {
                     try {
                         var data = JSON.parse(xhr.responseText)
 
-                        var fiveHour = data.five_hour || {}
-                        var sevenDay = data.seven_day || {}
-                        var sevenDaySonnet = data.seven_day_sonnet || {}
-                        var sevenDayOpus = data.seven_day_opus || {}
-
-                        root.sessionUsagePercent = fiveHour.utilization || 0
-                        root.weeklyUsagePercent = sevenDay.utilization || 0
-                        root.sonnetWeeklyPercent = sevenDaySonnet ? (sevenDaySonnet.utilization || 0) : 0
-                        root.opusWeeklyPercent = sevenDayOpus ? (sevenDayOpus.utilization || 0) : 0
-
-                        if (fiveHour.resets_at) {
-                            root.sessionResetTime = new Date(fiveHour.resets_at)
-                            root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
-                            updateSessionTimePercent()
-                        }
-                        if (sevenDay.resets_at) {
-                            root.weeklyResetTime = new Date(sevenDay.resets_at)
-                            root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
-                            updateWeeklyTimePercent()
+                        if (root.provider === "codex") {
+                            parseCodexUsage(data)
+                        } else if (root.provider === "zai") {
+                            parseZaiUsage(data)
+                        } else {
+                            parseClaudeUsage(data)
                         }
 
                         root.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
@@ -150,6 +218,107 @@ PlasmoidItem {
         }
 
         xhr.send()
+    }
+
+    function parseClaudeUsage(data) {
+        var fiveHour = data.five_hour || {}
+        var sevenDay = data.seven_day || {}
+        var sevenDaySonnet = data.seven_day_sonnet || {}
+        var sevenDayOpus = data.seven_day_opus || {}
+
+        root.sessionUsagePercent = fiveHour.utilization || 0
+        root.weeklyUsagePercent = sevenDay.utilization || 0
+        root.sonnetWeeklyPercent = sevenDaySonnet ? (sevenDaySonnet.utilization || 0) : 0
+        root.opusWeeklyPercent = sevenDayOpus ? (sevenDayOpus.utilization || 0) : 0
+
+        if (fiveHour.resets_at) {
+            root.sessionResetTime = new Date(fiveHour.resets_at)
+            root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
+            updateSessionTimePercent()
+        }
+        if (sevenDay.resets_at) {
+            root.weeklyResetTime = new Date(sevenDay.resets_at)
+            root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
+            updateWeeklyTimePercent()
+        }
+        updateRequiredPace()
+    }
+
+    function parseCodexUsage(data) {
+        var rateLimit = data.rate_limit || {}
+        var primary = rateLimit.primary_window || {}
+        var secondary = rateLimit.secondary_window || {}
+
+        root.sessionUsagePercent = primary.used_percent || 0
+        root.weeklyUsagePercent = secondary.used_percent || 0
+        root.sonnetWeeklyPercent = 0
+        root.opusWeeklyPercent = 0
+
+        if (primary.reset_at) {
+            root.sessionResetTime = new Date(primary.reset_at * 1000)
+            root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
+            updateSessionTimePercent()
+        }
+        if (secondary.reset_at) {
+            root.weeklyResetTime = new Date(secondary.reset_at * 1000)
+            root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
+            updateWeeklyTimePercent()
+        }
+        updateRequiredPace()
+
+        // Update plan name from API response if not already set from JWT
+        if (data.plan_type && !root.planName) {
+            var plan = data.plan_type
+            root.planName = plan.charAt(0).toUpperCase() + plan.slice(1)
+        }
+    }
+
+    function parseZaiUsage(data) {
+        // Response: { data: { limits: [...], planName: "..." } } or { limits: [...] }
+        var container = data.data || data
+        var limits = container.limits || []
+
+        // Find TOKENS_LIMIT entries; first is session (5hr), second is weekly if present
+        var tokenLimits = []
+        for (var i = 0; i < limits.length; i++) {
+            if (limits[i].type === "TOKENS_LIMIT") {
+                tokenLimits.push(limits[i])
+            }
+        }
+
+        // If only one limit, treat as session; if multiple, first=session, second=weekly
+        if (tokenLimits.length > 0) {
+            root.sessionUsagePercent = tokenLimits[0].percentage || 0
+            if (tokenLimits[0].nextResetTime) {
+                root.sessionResetTime = new Date(tokenLimits[0].nextResetTime)
+                root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
+                updateSessionTimePercent()
+            }
+        }
+        if (tokenLimits.length > 1) {
+            root.weeklyUsagePercent = tokenLimits[1].percentage || 0
+            if (tokenLimits[1].nextResetTime) {
+                root.weeklyResetTime = new Date(tokenLimits[1].nextResetTime)
+                root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
+                updateWeeklyTimePercent()
+            }
+        } else if (tokenLimits.length === 1) {
+            // Only one window available
+            root.weeklyUsagePercent = 0
+        }
+
+        // No per-model breakdown for Z.ai
+        root.sonnetWeeklyPercent = 0
+        root.opusWeeklyPercent = 0
+        updateRequiredPace()
+
+        // Plan name from response
+        var planName = container.planName || container.packageName || data.plan_type || ""
+        if (planName) {
+            root.planName = planName.charAt(0).toUpperCase() + planName.slice(1)
+        } else if (!root.planName) {
+            root.planName = "Z.ai"
+        }
     }
 
     function refresh() {
@@ -440,11 +609,40 @@ PlasmoidItem {
                     }
                 }
 
-                PlasmaComponents.Label {
+                RowLayout {
+                    Layout.fillWidth: true
                     visible: root.weeklyReset !== ""
-                    text: i18n.tr("Resets:") + " " + root.weeklyReset + (root.weeklyResetTime ? " (" + formatTimeRemaining(root.weeklyResetTime) + ")" : "")
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.disabledTextColor
+
+                    PlasmaComponents.Label {
+                        text: i18n.tr("Resets:") + " " + root.weeklyReset + (root.weeklyResetTime ? " (" + formatTimeRemaining(root.weeklyResetTime) + ")" : "")
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                    Item { Layout.fillWidth: true }
+                    PlasmaComponents.Label {
+                        visible: root.weeklyResetTime !== null && root.weeklyUsagePercent < 100
+                        text: i18n.tr("Pace:") + " " + formatPaceShort()
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        color: getPaceRequiredColor(root.requiredPace)
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: root.weeklyResetTime !== null && root.weeklyUsagePercent < 100
+
+                    PlasmaComponents.Label {
+                        text: i18n.tr("Required pace:")
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                    Item { Layout.fillWidth: true }
+                    PlasmaComponents.Label {
+                        text: formatPace()
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        font.bold: true
+                        color: getPaceRequiredColor(root.requiredPace)
+                    }
                 }
             }
 
@@ -589,6 +787,7 @@ PlasmoidItem {
         onTriggered: {
             updateSessionTimePercent()
             updateWeeklyTimePercent()
+            updateRequiredPace()
         }
     }
 
@@ -617,6 +816,73 @@ PlasmoidItem {
         var pace = usagePercent / timePercent
         if (pace < 0.8) return Kirigami.Theme.positiveTextColor
         if (pace < 1.1) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.negativeTextColor
+    }
+
+    function updateRequiredPace() {
+        if (!root.weeklyResetTime) {
+            root.requiredPace = 0
+            return
+        }
+        var ratio = Plasmoid.configuration.sessionWeeklyRatio || 10
+        var remainingWeekly = 100 - root.weeklyUsagePercent
+        if (remainingWeekly <= 0) {
+            root.requiredPace = 0
+            return
+        }
+        var hoursNeeded = (remainingWeekly / ratio) * 5
+        var now = new Date()
+        var hoursRemaining = (root.weeklyResetTime.getTime() - now.getTime()) / 3600000
+        if (hoursRemaining <= 0) {
+            root.requiredPace = 999
+            return
+        }
+        root.requiredPace = hoursNeeded / hoursRemaining
+    }
+
+    function formatPace() {
+        var fmt = Plasmoid.configuration.paceFormat || "percent"
+        var ratio = Plasmoid.configuration.sessionWeeklyRatio || 10
+        var remainingWeekly = 100 - root.weeklyUsagePercent
+        var hoursNeeded = Math.max(0, (remainingWeekly / ratio) * 5)
+        var hoursRemaining = 0
+        if (root.weeklyResetTime) {
+            hoursRemaining = Math.max(0, (root.weeklyResetTime.getTime() - new Date().getTime()) / 3600000)
+        }
+        var sessionsNeeded = hoursNeeded / 5
+        var sessionsRemaining = hoursRemaining / 5
+
+        if (fmt === "sessions") {
+            return i18n.tr("Pace:") + " " + sessionsNeeded.toFixed(1) + " / " + sessionsRemaining.toFixed(1)
+        } else if (fmt === "hours") {
+            return i18n.tr("Pace:") + " " + hoursNeeded.toFixed(1) + i18n.tr("h") + " / " + hoursRemaining.toFixed(1) + i18n.tr("h")
+        }
+        return i18n.tr("Pace:") + " " + Math.round(root.requiredPace * 100) + "%"
+    }
+
+    function formatPaceShort() {
+        var fmt = Plasmoid.configuration.paceFormat || "percent"
+        var ratio = Plasmoid.configuration.sessionWeeklyRatio || 10
+        var remainingWeekly = 100 - root.weeklyUsagePercent
+        var hoursNeeded = Math.max(0, (remainingWeekly / ratio) * 5)
+        var hoursRemaining = 0
+        if (root.weeklyResetTime) {
+            hoursRemaining = Math.max(0, (root.weeklyResetTime.getTime() - new Date().getTime()) / 3600000)
+        }
+        var sessionsNeeded = hoursNeeded / 5
+        var sessionsRemaining = hoursRemaining / 5
+
+        if (fmt === "sessions") {
+            return sessionsNeeded.toFixed(1) + " / " + sessionsRemaining.toFixed(1)
+        } else if (fmt === "hours") {
+            return hoursNeeded.toFixed(0) + i18n.tr("h") + " / " + hoursRemaining.toFixed(0) + i18n.tr("h")
+        }
+        return Math.round(root.requiredPace * 100) + "%"
+    }
+
+    function getPaceRequiredColor(pace) {
+        if (pace < 0.5) return Kirigami.Theme.positiveTextColor
+        if (pace < 0.85) return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.negativeTextColor
     }
 

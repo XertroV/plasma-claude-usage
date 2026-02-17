@@ -12,10 +12,16 @@ import org.kde.kcmutils as KCM
 KCM.SimpleKCM {
     id: configPage
 
+    property string cfg_provider
     property string cfg_language
     property int cfg_refreshInterval
     property string cfg_displayName
     property string cfg_credentialsPath
+    property int cfg_sessionWeeklyRatio
+    property string cfg_paceFormat
+
+    readonly property var providerValues: ["claude", "codex", "zai"]
+    readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Z.ai (GLM)"]
 
     // Translation helper
     Translations {
@@ -39,10 +45,22 @@ KCM.SimpleKCM {
     ]
 
     Kirigami.FormLayout {
+        QQC2.ComboBox {
+            id: providerCombo
+            Kirigami.FormData.label: tr("Provider:")
+
+            model: providerNames
+            currentIndex: Math.max(0, providerValues.indexOf(cfg_provider))
+
+            onActivated: index => {
+                cfg_provider = providerValues[index]
+            }
+        }
+
         QQC2.TextField {
             id: displayNameField
             Kirigami.FormData.label: tr("Display name:")
-            placeholderText: "Claude"
+            placeholderText: cfg_provider === "codex" ? "Codex" : cfg_provider === "zai" ? "Z.ai" : "Claude"
             text: cfg_displayName
 
             onTextChanged: {
@@ -53,7 +71,7 @@ KCM.SimpleKCM {
         QQC2.TextField {
             id: credentialsPathField
             Kirigami.FormData.label: tr("Credentials file path:")
-            placeholderText: "~/.claude/.credentials.json"
+            placeholderText: cfg_provider === "codex" ? "~/.codex/auth.json" : cfg_provider === "zai" ? "~/.local/share/opencode/auth.json" : "~/.claude/.credentials.json"
             text: cfg_credentialsPath
 
             onTextChanged: {
@@ -90,6 +108,45 @@ KCM.SimpleKCM {
 
             QQC2.Label {
                 text: tr("minutes")
+            }
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: tr("Session/weekly ratio (%):")
+
+            QQC2.SpinBox {
+                id: ratioSpinBox
+                from: 1
+                to: 100
+                stepSize: 1
+                value: cfg_sessionWeeklyRatio
+
+                onValueChanged: {
+                    cfg_sessionWeeklyRatio = value
+                }
+            }
+
+            QQC2.Label {
+                text: tr("% weekly per 5hr session")
+            }
+        }
+
+        QQC2.ComboBox {
+            id: paceFormatCombo
+            Kirigami.FormData.label: tr("Pace format:")
+
+            readonly property var formatValues: ["percent", "sessions", "hours"]
+            readonly property var formatNames: [
+                tr("Percentage (73%)"),
+                tr("Sessions (3.2 / 8.4)"),
+                tr("Hours (16h / 22h)")
+            ]
+
+            model: formatNames
+            currentIndex: Math.max(0, formatValues.indexOf(cfg_paceFormat))
+
+            onActivated: index => {
+                cfg_paceFormat = formatValues[index]
             }
         }
     }

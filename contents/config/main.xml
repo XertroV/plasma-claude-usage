@@ -6,6 +6,10 @@
     <kcfgfile name=""/>
 
     <group name="General">
+        <entry name="provider" type="String">
+            <label>Usage provider</label>
+            <default>claude</default>
+        </entry>
         <entry name="language" type="String">
             <label>UI Language</label>
             <default>system</default>
@@ -21,6 +25,14 @@
         <entry name="credentialsPath" type="String">
             <label>Path to credentials file</label>
             <default></default>
+        </entry>
+        <entry name="sessionWeeklyRatio" type="Int">
+            <label>Session-to-weekly ratio (1 full 5hr session = N% weekly)</label>
+            <default>10</default>
+        </entry>
+        <entry name="paceFormat" type="String">
+            <label>Pace display format</label>
+            <default>percent</default>
         </entry>
     </group>
 </kcfg>
