@@ -16,7 +16,7 @@
         </entry>
         <entry name="refreshInterval" type="Int">
             <label>Refresh interval in minutes</label>
-            <default>1</default>
+            <default>5</default>
         </entry>
         <entry name="displayName" type="String">
             <label>Display name for the widget</label>

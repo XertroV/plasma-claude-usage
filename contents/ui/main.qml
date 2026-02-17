@@ -18,6 +18,8 @@ PlasmoidItem {
     property real weeklyUsagePercent: 0
     property real sonnetWeeklyPercent: 0
     property real opusWeeklyPercent: 0
+    // Additional rate limits (Codex Spark, etc.) - list of {name, percent} objects
+    property var additionalLimits: []
     property string lastUpdate: ""
     property string planName: ""
     property string sessionReset: ""
@@ -39,6 +41,8 @@ PlasmoidItem {
         if (provider === "zai") return "Z.ai"
         return "Claude"
     })()
+    readonly property string sessionLabel: provider === "zai" ? i18n.tr("Tokens (5hr)") : i18n.tr("Session (5hr)")
+    readonly property string weeklyLabel: provider === "zai" ? i18n.tr("Monthly (MCP)") : i18n.tr("Weekly (7day)")
     property string accountId: ""
     property real sessionTimePercent: 0
     property real weeklyTimePercent: 0
@@ -172,8 +176,14 @@ PlasmoidItem {
     function fetchUsageFromApi() {
         var xhr = new XMLHttpRequest()
         xhr.open("GET", usageApiUrl)
-        xhr.setRequestHeader("Authorization", "Bearer " + root.accessToken)
         xhr.setRequestHeader("Content-Type", "application/json")
+
+        if (root.provider === "zai") {
+            // Z.ai API uses raw API key without "Bearer" prefix
+            xhr.setRequestHeader("Authorization", root.accessToken)
+        } else {
+            xhr.setRequestHeader("Authorization", "Bearer " + root.accessToken)
+        }
 
         if (root.provider === "codex") {
             if (root.accountId) {
@@ -228,6 +238,7 @@ PlasmoidItem {
 
         root.sessionUsagePercent = fiveHour.utilization || 0
         root.weeklyUsagePercent = sevenDay.utilization || 0
+        root.additionalLimits = []
         root.sonnetWeeklyPercent = sevenDaySonnet ? (sevenDaySonnet.utilization || 0) : 0
         root.opusWeeklyPercent = sevenDayOpus ? (sevenDayOpus.utilization || 0) : 0
 
@@ -266,6 +277,18 @@ PlasmoidItem {
         }
         updateRequiredPace()
 
+        // Parse additional rate limits (e.g. Spark model)
+        var extras = data.additional_rate_limits || []
+        var parsed = []
+        for (var i = 0; i < extras.length; i++) {
+            var entry = extras[i]
+            var name = entry.limit_name || entry.metered_feature || ("Limit " + i)
+            var rl = entry.rate_limit || {}
+            var sw = rl.secondary_window || rl.primary_window || {}
+            parsed.push({ name: name, percent: sw.used_percent || 0 })
+        }
+        root.additionalLimits = parsed
+
         // Update plan name from API response if not already set from JWT
         if (data.plan_type && !root.planName) {
             var plan = data.plan_type
@@ -278,39 +301,40 @@ PlasmoidItem {
         var container = data.data || data
         var limits = container.limits || []
 
-        // Find TOKENS_LIMIT entries; first is session (5hr), second is weekly if present
-        var tokenLimits = []
+        // Find limit entries by type
+        var tokenLimit = null
+        var timeLimit = null
         for (var i = 0; i < limits.length; i++) {
-            if (limits[i].type === "TOKENS_LIMIT") {
-                tokenLimits.push(limits[i])
-            }
+            if (limits[i].type === "TOKENS_LIMIT") tokenLimit = limits[i]
+            else if (limits[i].type === "TIME_LIMIT") timeLimit = limits[i]
         }
 
-        // If only one limit, treat as session; if multiple, first=session, second=weekly
-        if (tokenLimits.length > 0) {
-            root.sessionUsagePercent = tokenLimits[0].percentage || 0
-            if (tokenLimits[0].nextResetTime) {
-                root.sessionResetTime = new Date(tokenLimits[0].nextResetTime)
+        // TOKENS_LIMIT = 5hr rolling token usage → session slot
+        if (tokenLimit) {
+            root.sessionUsagePercent = tokenLimit.percentage || 0
+            if (tokenLimit.nextResetTime) {
+                root.sessionResetTime = new Date(tokenLimit.nextResetTime)
                 root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
                 updateSessionTimePercent()
             }
         }
-        if (tokenLimits.length > 1) {
-            root.weeklyUsagePercent = tokenLimits[1].percentage || 0
-            if (tokenLimits[1].nextResetTime) {
-                root.weeklyResetTime = new Date(tokenLimits[1].nextResetTime)
+
+        // TIME_LIMIT = monthly MCP tool usage → weekly slot (repurposed)
+        if (timeLimit) {
+            root.weeklyUsagePercent = timeLimit.percentage || 0
+            if (timeLimit.nextResetTime) {
+                root.weeklyResetTime = new Date(timeLimit.nextResetTime)
                 root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
                 updateWeeklyTimePercent()
             }
-        } else if (tokenLimits.length === 1) {
-            // Only one window available
+        } else {
             root.weeklyUsagePercent = 0
         }
 
         // No per-model breakdown for Z.ai
         root.sonnetWeeklyPercent = 0
         root.opusWeeklyPercent = 0
-        updateRequiredPace()
+        root.additionalLimits = []
 
         // Plan name from response
         var planName = container.planName || container.packageName || data.plan_type || ""
@@ -483,7 +507,7 @@ PlasmoidItem {
                 RowLayout {
                     Layout.fillWidth: true
                     PlasmaComponents.Label {
-                        text: i18n.tr("Session (5hr)")
+                        text: root.sessionLabel
                         font.bold: true
                     }
                     Item { Layout.fillWidth: true }
@@ -554,7 +578,7 @@ PlasmoidItem {
                 RowLayout {
                     Layout.fillWidth: true
                     PlasmaComponents.Label {
-                        text: i18n.tr("Weekly (7day)")
+                        text: root.weeklyLabel
                         font.bold: true
                     }
                     Item { Layout.fillWidth: true }
@@ -627,36 +651,21 @@ PlasmoidItem {
                     }
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    visible: root.weeklyResetTime !== null && root.weeklyUsagePercent < 100
-
-                    PlasmaComponents.Label {
-                        text: i18n.tr("Required pace:")
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        color: Kirigami.Theme.disabledTextColor
-                    }
-                    Item { Layout.fillWidth: true }
-                    PlasmaComponents.Label {
-                        text: formatPace()
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        font.bold: true
-                        color: getPaceRequiredColor(root.requiredPace)
-                    }
-                }
             }
 
-            // Separator
+            // Separator (hidden for z.ai which has no model breakdown)
             Rectangle {
+                visible: root.provider !== "zai"
                 Layout.fillWidth: true
                 height: 1
                 color: Kirigami.Theme.disabledTextColor
                 opacity: 0.3
             }
 
-            // Model breakdown (collapsible)
+            // Model breakdown (collapsible) - hidden for z.ai
             RowLayout {
                 Layout.fillWidth: true
+                visible: root.provider !== "zai"
 
                 MouseArea {
                     Layout.fillWidth: true
@@ -677,10 +686,10 @@ PlasmoidItem {
                 }
             }
 
-            // Sonnet
+            // Sonnet (Claude)
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.sonnetWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && root.sonnetWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Sonnet")
@@ -707,10 +716,10 @@ PlasmoidItem {
                 }
             }
 
-            // Opus
+            // Opus (Claude)
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.opusWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && root.opusWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Opus")
@@ -737,9 +746,42 @@ PlasmoidItem {
                 }
             }
 
+            // Additional rate limits (Codex Spark, etc.)
+            Repeater {
+                model: root.modelSectionExpanded ? root.additionalLimits : []
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.Label {
+                        text: modelData.name
+                    }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        Layout.preferredWidth: 60
+                        height: 8
+                        radius: 3
+                        color: Kirigami.Theme.backgroundColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                        Rectangle {
+                            width: parent.width * Math.min(modelData.percent / 100, 1)
+                            height: parent.height
+                            radius: 3
+                            color: getUsageColor(modelData.percent)
+                        }
+                    }
+                    PlasmaComponents.Label {
+                        text: modelData.percent.toFixed(0) + "%"
+                        Layout.preferredWidth: 40
+                        horizontalAlignment: Text.AlignRight
+                    }
+                }
+            }
+
             // No model data message
             PlasmaComponents.Label {
-                visible: root.modelSectionExpanded && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0 && root.additionalLimits.length === 0
                 text: i18n.tr("No model breakdown available")
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                 color: Kirigami.Theme.disabledTextColor
@@ -919,5 +961,5 @@ PlasmoidItem {
 
     Plasmoid.icon: "claude-usage"
     toolTipMainText: root.displayName + " " + i18n.tr("Usage")
-    toolTipSubText: i18n.tr("Session (5hr)") + ": " + Math.round(root.sessionUsagePercent) + "% | " + i18n.tr("Weekly (7day)") + ": " + Math.round(root.weeklyUsagePercent) + "%"
+    toolTipSubText: root.sessionLabel + ": " + Math.round(root.sessionUsagePercent) + "% | " + root.weeklyLabel + ": " + Math.round(root.weeklyUsagePercent) + "%"
 }
