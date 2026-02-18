@@ -10,6 +10,14 @@
             <label>Usage provider</label>
             <default>claude</default>
         </entry>
+        <entry name="opencodeSubProvider" type="String">
+            <label>OpenCode sub-provider</label>
+            <default>anthropic</default>
+        </entry>
+        <entry name="opencodeAccountIndex" type="Int">
+            <label>OpenCode Anthropic account index</label>
+            <default>0</default>
+        </entry>
         <entry name="language" type="String">
             <label>UI Language</label>
             <default>system</default>

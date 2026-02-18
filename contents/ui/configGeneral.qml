@@ -21,9 +21,11 @@ KCM.SimpleKCM {
     property string cfg_paceFormat
     property string cfg_sessionColorMode
     property string cfg_weeklyColorMode
+    property string cfg_opencodeSubProvider
+    property int cfg_opencodeAccountIndex
 
-    readonly property var providerValues: ["claude", "codex", "zai"]
-    readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Z.ai (GLM)"]
+    readonly property var providerValues: ["claude", "codex", "zai", "opencode"]
+    readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Z.ai (GLM)", "OpenCode"]
 
     // Translation helper
     Translations {
@@ -46,6 +48,8 @@ KCM.SimpleKCM {
         "日本語", "한국어", "简体中文", "繁體中文"
     ]
 
+    property var accountOptions: ["Account 1", "Account 2", "Account 3"]
+
     Kirigami.FormLayout {
         QQC2.ComboBox {
             id: providerCombo
@@ -56,6 +60,35 @@ KCM.SimpleKCM {
 
             onActivated: index => {
                 cfg_provider = providerValues[index]
+            }
+        }
+
+        QQC2.ComboBox {
+            id: opencodeSubProviderCombo
+            Kirigami.FormData.label: tr("OpenCode provider:")
+            visible: cfg_provider === "opencode"
+
+            readonly property var subProviderValues: ["anthropic", "openai", "zai", "kimi", "gemini"]
+            readonly property var subProviderNames: ["Anthropic (Claude)", "OpenAI", "Z.ai", "Kimi", "Gemini"]
+
+            model: subProviderNames
+            currentIndex: Math.max(0, subProviderValues.indexOf(cfg_opencodeSubProvider))
+
+            onActivated: index => {
+                cfg_opencodeSubProvider = subProviderValues[index]
+            }
+        }
+
+        QQC2.ComboBox {
+            id: accountCombo
+            Kirigami.FormData.label: tr("Anthropic account:")
+            visible: cfg_provider === "opencode" && cfg_opencodeSubProvider === "anthropic"
+
+            model: accountOptions
+            currentIndex: cfg_opencodeAccountIndex
+
+            onActivated: index => {
+                cfg_opencodeAccountIndex = index
             }
         }
 

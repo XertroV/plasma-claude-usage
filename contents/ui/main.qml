@@ -32,14 +32,25 @@ PlasmoidItem {
     property real weeklyPeriodMs: 7 * 24 * 60 * 60 * 1000  // default 7 days
 
     readonly property string provider: Plasmoid.configuration.provider || "claude"
+    readonly property string opencodeSubProvider: Plasmoid.configuration.opencodeSubProvider || "anthropic"
+    readonly property int opencodeAccountIndex: Plasmoid.configuration.opencodeAccountIndex || 0
     readonly property string usageApiUrl: {
         if (provider === "codex") return "https://chatgpt.com/backend-api/wham/usage"
         if (provider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
+        if (provider === "opencode") {
+            if (opencodeSubProvider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
+            if (opencodeSubProvider === "openai") return "https://chatgpt.com/backend-api/wham/usage"
+            return "https://api.anthropic.com/api/oauth/usage"  // anthropic + others
+        }
         return "https://api.anthropic.com/api/oauth/usage"
     }
     readonly property string displayName: Plasmoid.configuration.displayName || (function() {
         if (provider === "codex") return "Codex"
         if (provider === "zai") return "Z.ai"
+        if (provider === "opencode") {
+            var names = { "anthropic": "Claude", "openai": "Codex", "zai": "Z.ai", "kimi": "Kimi", "gemini": "Gemini" }
+            return (names[opencodeSubProvider] || opencodeSubProvider) + " (OC)"
+        }
         return "Claude"
     })()
     readonly property string sessionLabel: provider === "zai" ? i18n.tr("Tokens (5hr)") : i18n.tr("Session (5hr)")
@@ -70,6 +81,8 @@ PlasmoidItem {
                         parseCodexCredentials(creds)
                     } else if (root.provider === "zai") {
                         parseZaiCredentials(creds)
+                    } else if (root.provider === "opencode") {
+                        parseOpencodeCredentials(creds)
                     } else {
                         parseClaudeCredentials(creds)
                     }
@@ -157,6 +170,37 @@ PlasmoidItem {
         }
     }
 
+    function parseOpencodeCredentials(creds) {
+        var sub = root.opencodeSubProvider || "anthropic"
+
+        if (sub === "anthropic") {
+            // anthropic-accounts.json: { accounts: [{ access, expires, ... }] }
+            if (creds.accounts && Array.isArray(creds.accounts)) {
+                var accountIndex = root.opencodeAccountIndex || 0
+                if (accountIndex < creds.accounts.length) {
+                    root.accessToken = creds.accounts[accountIndex].access || ""
+                    console.log("Claude Usage: OpenCode anthropic account", accountIndex, "token length:", root.accessToken.length)
+                }
+            } else {
+                // Fallback: auth.json with { anthropic: { access, expires } }
+                root.accessToken = (creds.anthropic || {}).access || ""
+                console.log("Claude Usage: OpenCode anthropic fallback token length:", root.accessToken.length)
+            }
+        } else {
+            // auth.json: { "<sub>": { access: "..." } } or { "<sub>": { key: "..." } }
+            var subCreds = creds[sub] || {}
+            root.accessToken = subCreds.access || subCreds.key || ""
+            console.log("Claude Usage: OpenCode", sub, "token length:", root.accessToken.length)
+        }
+
+        if (root.accessToken) {
+            fetchUsageFromApi()
+        } else {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+        }
+    }
+
     function loadCredentials() {
         root.isLoading = true
         root.errorMsg = ""
@@ -165,6 +209,13 @@ PlasmoidItem {
             var defaultPath
             if (root.provider === "codex") defaultPath = "$HOME/.codex/auth.json"
             else if (root.provider === "zai") defaultPath = "$HOME/.local/share/opencode/auth.json"
+            else if (root.provider === "opencode") {
+                // Anthropic gets the multi-account file; all others use auth.json
+                if (root.opencodeSubProvider === "anthropic")
+                    defaultPath = "$HOME/.config/opencode/anthropic-accounts.json"
+                else
+                    defaultPath = "$HOME/.local/share/opencode/auth.json"
+            }
             else defaultPath = "$HOME/.claude/.credentials.json"
             fileReader.connectSource("cat " + defaultPath + " 2>/dev/null")
         } else {
@@ -179,19 +230,22 @@ PlasmoidItem {
         xhr.open("GET", usageApiUrl)
         xhr.setRequestHeader("Content-Type", "application/json")
 
-        if (root.provider === "zai") {
+        var isZai = root.provider === "zai" || (root.provider === "opencode" && root.opencodeSubProvider === "zai")
+        if (isZai) {
             // Z.ai API uses raw API key without "Bearer" prefix
             xhr.setRequestHeader("Authorization", root.accessToken)
         } else {
             xhr.setRequestHeader("Authorization", "Bearer " + root.accessToken)
         }
 
-        if (root.provider === "codex") {
+        var isAnthropic = root.provider === "claude" || (root.provider === "opencode" && root.opencodeSubProvider === "anthropic")
+        var isCodex = root.provider === "codex" || (root.provider === "opencode" && root.opencodeSubProvider === "openai")
+        if (isAnthropic) {
+            xhr.setRequestHeader("anthropic-beta", "oauth-2025-04-20")
+        } else if (isCodex) {
             if (root.accountId) {
                 xhr.setRequestHeader("ChatGPT-Account-Id", root.accountId)
             }
-        } else if (root.provider === "claude") {
-            xhr.setRequestHeader("anthropic-beta", "oauth-2025-04-20")
         }
 
         xhr.onreadystatechange = function() {
@@ -202,9 +256,10 @@ PlasmoidItem {
                     try {
                         var data = JSON.parse(xhr.responseText)
 
-                        if (root.provider === "codex") {
+                        var sub = root.provider === "opencode" ? root.opencodeSubProvider : root.provider
+                        if (sub === "codex" || sub === "openai") {
                             parseCodexUsage(data)
-                        } else if (root.provider === "zai") {
+                        } else if (sub === "zai") {
                             parseZaiUsage(data)
                         } else {
                             parseClaudeUsage(data)
