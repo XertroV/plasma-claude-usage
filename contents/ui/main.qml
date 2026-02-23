@@ -30,6 +30,7 @@ PlasmoidItem {
     property var sessionResetTime: null
     property var weeklyResetTime: null
     property real weeklyPeriodMs: 7 * 24 * 60 * 60 * 1000  // default 7 days
+    readonly property bool isKimi: provider === "opencode" && opencodeSubProvider === "kimi"
 
     readonly property string provider: Plasmoid.configuration.provider || "claude"
     readonly property string opencodeSubProvider: Plasmoid.configuration.opencodeSubProvider || "anthropic"
@@ -40,6 +41,7 @@ PlasmoidItem {
         if (provider === "opencode") {
             if (opencodeSubProvider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
             if (opencodeSubProvider === "openai") return "https://chatgpt.com/backend-api/wham/usage"
+            if (opencodeSubProvider === "kimi") return "https://api.kimi.com/coding/v1/usages"
             return "https://api.anthropic.com/api/oauth/usage"  // anthropic + others
         }
         return "https://api.anthropic.com/api/oauth/usage"
@@ -188,7 +190,9 @@ PlasmoidItem {
             }
         } else {
             // auth.json: { "<sub>": { access: "..." } } or { "<sub>": { key: "..." } }
-            var subCreds = creds[sub] || {}
+            // Kimi credentials are stored under "kimi-for-coding" key in OpenCode's auth.json
+            var lookupKey = sub === "kimi" ? "kimi-for-coding" : sub
+            var subCreds = creds[lookupKey] || creds[sub] || {}
             root.accessToken = subCreds.access || subCreds.key || ""
             console.log("Claude Usage: OpenCode", sub, "token length:", root.accessToken.length)
         }
@@ -261,6 +265,8 @@ PlasmoidItem {
                             parseCodexUsage(data)
                         } else if (sub === "zai") {
                             parseZaiUsage(data)
+                        } else if (sub === "kimi") {
+                            parseKimiUsage(data)
                         } else {
                             parseClaudeUsage(data)
                         }
@@ -400,6 +406,66 @@ PlasmoidItem {
         } else if (!root.planName) {
             root.planName = "Z.ai"
         }
+    }
+
+    function parseKimiUsage(data) {
+        // Primary usage object → weekly slot
+        var usage = data.usage || {}
+        if (usage.limit > 0) {
+            root.weeklyUsagePercent = (usage.used || 0) / usage.limit * 100
+        } else {
+            root.weeklyUsagePercent = 0
+        }
+
+        var resetAt = usage.reset_at || usage.resetAt || usage.reset_time || usage.resetTime || ""
+        if (resetAt) {
+            root.weeklyResetTime = new Date(resetAt)
+            root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
+            updateWeeklyTimePercent()
+        }
+
+        // Limits array → find session-level (~5 hour) window
+        var limits = data.limits || []
+        var sessionLimit = null
+        for (var i = 0; i < limits.length; i++) {
+            var entry = limits[i]
+            var w = entry.window || {}
+            var duration = w.duration || 0
+            var unit = (w.timeUnit || w.time_unit || "").toUpperCase()
+            var minutes = unit === "MINUTE" ? duration
+                        : unit === "HOUR"   ? duration * 60
+                        : unit === "DAY"    ? duration * 1440
+                        : 0
+            // Accept windows in the 2–8 hour range as "session"
+            if (minutes >= 120 && minutes <= 480) {
+                sessionLimit = entry
+                break
+            }
+        }
+        // Fallback: use first limit entry if no 5h window found
+        if (!sessionLimit && limits.length > 0) sessionLimit = limits[0]
+
+        if (sessionLimit) {
+            var detail = sessionLimit.detail || {}
+            if (detail.limit > 0) {
+                root.sessionUsagePercent = (detail.used || 0) / detail.limit * 100
+            }
+            var sReset = sessionLimit.reset_at || sessionLimit.resetAt || ""
+            if (sReset) {
+                root.sessionResetTime = new Date(sReset)
+                root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
+                updateSessionTimePercent()
+            }
+        } else {
+            root.sessionUsagePercent = 0
+        }
+
+        root.sonnetWeeklyPercent = 0
+        root.opusWeeklyPercent = 0
+        root.additionalLimits = []
+        root.planName = "Kimi"
+        updateRequiredPace()
+        console.log("Claude Usage: Kimi session:", root.sessionUsagePercent, "weekly:", root.weeklyUsagePercent)
     }
 
     function refresh() {
@@ -710,19 +776,19 @@ PlasmoidItem {
 
             }
 
-            // Separator (hidden for z.ai which has no model breakdown)
+            // Separator (hidden for z.ai and kimi which have no model breakdown)
             Rectangle {
-                visible: root.provider !== "zai"
+                visible: root.provider !== "zai" && !root.isKimi
                 Layout.fillWidth: true
                 height: 1
                 color: Kirigami.Theme.disabledTextColor
                 opacity: 0.3
             }
 
-            // Model breakdown (collapsible) - hidden for z.ai
+            // Model breakdown (collapsible) - hidden for z.ai and kimi
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.provider !== "zai"
+                visible: root.provider !== "zai" && !root.isKimi
 
                 MouseArea {
                     Layout.fillWidth: true
@@ -746,7 +812,7 @@ PlasmoidItem {
             // Sonnet (Claude)
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.provider !== "zai" && root.sonnetWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.sonnetWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Sonnet")
@@ -776,7 +842,7 @@ PlasmoidItem {
             // Opus (Claude)
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.provider !== "zai" && root.opusWeeklyPercent > 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.opusWeeklyPercent > 0
 
                 PlasmaComponents.Label {
                     text: i18n.tr("Opus")
@@ -838,7 +904,7 @@ PlasmoidItem {
 
             // No model data message
             PlasmaComponents.Label {
-                visible: root.modelSectionExpanded && root.provider !== "zai" && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0 && root.additionalLimits.length === 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0 && root.additionalLimits.length === 0
                 text: i18n.tr("No model breakdown available")
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                 color: Kirigami.Theme.disabledTextColor
@@ -998,12 +1064,19 @@ PlasmoidItem {
         return Kirigami.Theme.negativeTextColor
     }
 
-    // Efficiency mode: green when on pace (~1.0), orange when deviating, red when very over, blue when way under
-    function efficiencyPaceColor(pace) {
-        if (pace >= 0.8 && pace <= 1.1) return Kirigami.Theme.positiveTextColor
-        if (pace < 0.4) return Kirigami.Theme.activeTextColor
-        if (pace < 0.8) return Kirigami.Theme.neutralTextColor
-        if (pace < 1.5) return Kirigami.Theme.neutralTextColor
+    // Efficiency mode: margins widen the further you are from the end of the period.
+    // Early on you can be way off pace and still course-correct; near the end you can't.
+    function efficiencyPaceColor(pace, timePercent) {
+        var remaining = 1.0 - Math.min(timePercent, 100) / 100
+        // Upper green: how far over pace is still fine? Wide early, tight at end.
+        var upperGreen  = 1.0 + remaining * 1.0   // 2.0x early → 1.0x at end
+        // Upper orange: above this = red
+        var upperOrange = 1.0 + remaining * 3.0   // 4.0x early → 1.0x at end
+        // Lower blue: so far under that quota will likely be wasted
+        var lowerBlue   = 0.25 * remaining        // 0.25 early → 0 at end
+        if (pace < lowerBlue)   return Kirigami.Theme.activeTextColor
+        if (pace <= upperGreen) return Kirigami.Theme.positiveTextColor
+        if (pace < upperOrange) return Kirigami.Theme.neutralTextColor
         return Kirigami.Theme.negativeTextColor
     }
 
@@ -1012,7 +1085,7 @@ PlasmoidItem {
             var timeP = Math.max(1, root.sessionTimePercent)
             var pace = root.sessionUsagePercent / timeP
             var mode = Plasmoid.configuration.sessionColorMode || "capacity"
-            return mode === "efficiency" ? efficiencyPaceColor(pace) : capacityPaceColor(pace)
+            return mode === "efficiency" ? efficiencyPaceColor(pace, timeP) : capacityPaceColor(pace)
         }
         return getUsageColor(root.sessionUsagePercent)
     }
@@ -1022,7 +1095,7 @@ PlasmoidItem {
             var timeP = Math.max(1, root.weeklyTimePercent)
             var pace = root.weeklyUsagePercent / timeP
             var mode = Plasmoid.configuration.weeklyColorMode || "efficiency"
-            return mode === "efficiency" ? efficiencyPaceColor(pace) : capacityPaceColor(pace)
+            return mode === "efficiency" ? efficiencyPaceColor(pace, timeP) : capacityPaceColor(pace)
         }
         return getUsageColor(root.weeklyUsagePercent)
     }
