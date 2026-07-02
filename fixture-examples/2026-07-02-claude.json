@@ -1,0 +1,103 @@
+{
+    "five_hour": {
+        "utilization": 54.0,
+        "resets_at": "2026-07-02T06:10:00.861899+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null
+    },
+    "seven_day": {
+        "utilization": 7.0,
+        "resets_at": "2026-07-05T17:00:00.861920+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null
+    },
+    "seven_day_oauth_apps": null,
+    "seven_day_opus": null,
+    "seven_day_sonnet": null,
+    "seven_day_cowork": null,
+    "seven_day_omelette": null,
+    "tangelo": null,
+    "iguana_necktie": null,
+    "omelette_promotional": null,
+    "nimbus_quill": null,
+    "cinder_cove": null,
+    "amber_ladder": null,
+    "extra_usage": {
+        "is_enabled": true,
+        "monthly_limit": 500,
+        "used_credits": 0.0,
+        "utilization": null,
+        "currency": "AUD",
+        "decimal_places": 2,
+        "disabled_reason": null,
+        "daily": null,
+        "weekly": null
+    },
+    "limits": [
+        {
+            "kind": "session",
+            "group": "session",
+            "percent": 54,
+            "severity": "normal",
+            "resets_at": "2026-07-02T06:10:00.861899+00:00",
+            "scope": null,
+            "is_active": true
+        },
+        {
+            "kind": "weekly_all",
+            "group": "weekly",
+            "percent": 7,
+            "severity": "normal",
+            "resets_at": "2026-07-05T17:00:00.861920+00:00",
+            "scope": null,
+            "is_active": false
+        },
+        {
+            "kind": "weekly_scoped",
+            "group": "weekly",
+            "percent": 5,
+            "severity": "normal",
+            "resets_at": "2026-07-05T16:59:59.862225+00:00",
+            "scope": {
+                "model": {
+                    "id": null,
+                    "display_name": "Fable"
+                },
+                "surface": null
+            },
+            "is_active": false
+        }
+    ],
+    "spend": {
+        "used": {
+            "amount_minor": 0,
+            "currency": "AUD",
+            "exponent": 2
+        },
+        "limit": {
+            "amount_minor": 500,
+            "currency": "AUD",
+            "exponent": 2
+        },
+        "percent": 0,
+        "severity": "normal",
+        "enabled": true,
+        "disabled_reason": null,
+        "cap": {
+            "money": {
+                "amount_minor": 500,
+                "currency": "AUD",
+                "exponent": 2
+            },
+            "credits": null
+        },
+        "balance": null,
+        "auto_reload": null,
+        "disclaimer": "Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)",
+        "can_purchase_credits": true,
+        "can_toggle": true
+    },
+    "member_dashboard_available": false
+}

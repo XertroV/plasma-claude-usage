@@ -16,8 +16,8 @@ PlasmoidItem {
 
     property real sessionUsagePercent: 0
     property real weeklyUsagePercent: 0
-    property real sonnetWeeklyPercent: 0
-    property real opusWeeklyPercent: 0
+    // Per-model weekly limits from limits[] array (weekly_scoped) - list of {name, percent} objects
+    property var weeklyModelLimits: []
     // Additional rate limits (Codex Spark, etc.) - list of {name, percent} objects
     property var additionalLimits: []
     property string lastUpdate: ""
@@ -295,14 +295,30 @@ PlasmoidItem {
     function parseClaudeUsage(data) {
         var fiveHour = data.five_hour || {}
         var sevenDay = data.seven_day || {}
-        var sevenDaySonnet = data.seven_day_sonnet || {}
         var sevenDayOpus = data.seven_day_opus || {}
 
         root.sessionUsagePercent = fiveHour.utilization || 0
         root.weeklyUsagePercent = sevenDay.utilization || 0
         root.additionalLimits = []
-        root.sonnetWeeklyPercent = sevenDaySonnet ? (sevenDaySonnet.utilization || 0) : 0
-        root.opusWeeklyPercent = sevenDayOpus ? (sevenDayOpus.utilization || 0) : 0
+
+        // Parse per-model weekly limits from limits[] array (weekly_scoped entries)
+        var modelLimits = []
+        var limits = data.limits || []
+        for (var i = 0; i < limits.length; i++) {
+            var entry = limits[i]
+            if (entry.kind === "weekly_scoped" && entry.scope && entry.scope.model) {
+                var modelName = entry.scope.model.display_name || entry.scope.model.id || "Unknown"
+                modelLimits.push({ name: modelName, percent: entry.percent || 0 })
+            }
+        }
+
+        // Fallback: use legacy top-level fields if limits[] had no weekly_scoped entries
+        if (modelLimits.length === 0) {
+            if (sevenDayOpus && sevenDayOpus.utilization) {
+                modelLimits.push({ name: "Opus", percent: sevenDayOpus.utilization })
+            }
+        }
+        root.weeklyModelLimits = modelLimits
 
         if (fiveHour.resets_at) {
             root.sessionResetTime = new Date(fiveHour.resets_at)
@@ -324,8 +340,7 @@ PlasmoidItem {
 
         root.sessionUsagePercent = primary.used_percent || 0
         root.weeklyUsagePercent = secondary.used_percent || 0
-        root.sonnetWeeklyPercent = 0
-        root.opusWeeklyPercent = 0
+        root.weeklyModelLimits = []
 
         if (primary.reset_at) {
             root.sessionResetTime = new Date(primary.reset_at * 1000)
@@ -395,8 +410,7 @@ PlasmoidItem {
         }
 
         // No per-model breakdown for Z.ai
-        root.sonnetWeeklyPercent = 0
-        root.opusWeeklyPercent = 0
+        root.weeklyModelLimits = []
         root.additionalLimits = []
 
         // Plan name from response
@@ -460,8 +474,7 @@ PlasmoidItem {
             root.sessionUsagePercent = 0
         }
 
-        root.sonnetWeeklyPercent = 0
-        root.opusWeeklyPercent = 0
+        root.weeklyModelLimits = []
         root.additionalLimits = []
         root.planName = "Kimi"
         updateRequiredPace()
@@ -809,63 +822,36 @@ PlasmoidItem {
                 }
             }
 
-            // Sonnet (Claude)
-            RowLayout {
-                Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.sonnetWeeklyPercent > 0
+            // Per-model weekly limits (Claude weekly_scoped entries)
+            Repeater {
+                model: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi ? root.weeklyModelLimits : []
 
-                PlasmaComponents.Label {
-                    text: i18n.tr("Sonnet")
-                }
-                Item { Layout.fillWidth: true }
-                Rectangle {
-                    Layout.preferredWidth: 60
-                    height: 8
-                    radius: 3
-                    color: Kirigami.Theme.backgroundColor
-                    border.color: Kirigami.Theme.disabledTextColor
-                    border.width: 1
-                    Rectangle {
-                        width: parent.width * Math.min(root.sonnetWeeklyPercent / 100, 1)
-                        height: parent.height
-                        radius: 3
-                        color: getUsageColor(root.sonnetWeeklyPercent)
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.Label {
+                        text: modelData.name
                     }
-                }
-                PlasmaComponents.Label {
-                    text: root.sonnetWeeklyPercent.toFixed(0) + "%"
-                    Layout.preferredWidth: 40
-                    horizontalAlignment: Text.AlignRight
-                }
-            }
-
-            // Opus (Claude)
-            RowLayout {
-                Layout.fillWidth: true
-                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.opusWeeklyPercent > 0
-
-                PlasmaComponents.Label {
-                    text: i18n.tr("Opus")
-                }
-                Item { Layout.fillWidth: true }
-                Rectangle {
-                    Layout.preferredWidth: 60
-                    height: 8
-                    radius: 3
-                    color: Kirigami.Theme.backgroundColor
-                    border.color: Kirigami.Theme.disabledTextColor
-                    border.width: 1
+                    Item { Layout.fillWidth: true }
                     Rectangle {
-                        width: parent.width * Math.min(root.opusWeeklyPercent / 100, 1)
-                        height: parent.height
+                        Layout.preferredWidth: 60
+                        height: 8
                         radius: 3
-                        color: getUsageColor(root.opusWeeklyPercent)
+                        color: Kirigami.Theme.backgroundColor
+                        border.color: Kirigami.Theme.disabledTextColor
+                        border.width: 1
+                        Rectangle {
+                            width: parent.width * Math.min(modelData.percent / 100, 1)
+                            height: parent.height
+                            radius: 3
+                            color: getUsageColor(modelData.percent)
+                        }
                     }
-                }
-                PlasmaComponents.Label {
-                    text: root.opusWeeklyPercent.toFixed(0) + "%"
-                    Layout.preferredWidth: 40
-                    horizontalAlignment: Text.AlignRight
+                    PlasmaComponents.Label {
+                        text: modelData.percent.toFixed(0) + "%"
+                        Layout.preferredWidth: 40
+                        horizontalAlignment: Text.AlignRight
+                    }
                 }
             }
 
@@ -904,7 +890,7 @@ PlasmoidItem {
 
             // No model data message
             PlasmaComponents.Label {
-                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.sonnetWeeklyPercent === 0 && root.opusWeeklyPercent === 0 && root.additionalLimits.length === 0
+                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.weeklyModelLimits.length === 0 && root.additionalLimits.length === 0
                 text: i18n.tr("No model breakdown available")
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                 color: Kirigami.Theme.disabledTextColor
