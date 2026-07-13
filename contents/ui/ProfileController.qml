@@ -3,7 +3,7 @@ import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
 import "js/QuotaParsers.js" as QP
 
-QtObject {
+Item {
     id: controller
 
     property var plasmoid
