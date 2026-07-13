@@ -3,8 +3,7 @@ import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "components/PanelView.qml"
-import "components/ExpandedView.qml"
+import "components" as Comp
 import "js/QuotaCommon.js" as QC
 
 PlasmoidItem {
@@ -15,16 +14,13 @@ PlasmoidItem {
         currentLanguage: Plasmoid.configuration.language || "system"
     }
 
-    readonly property var controller: pcLoader.item
-
-    Loader {
-        id: pcLoader
-        source: Qt.resolvedUrl("ProfileController.qml")
-        onLoaded: {
-            item.plasmoid = Plasmoid
-            item.i18n = i18n
+    ProfileController {
+        id: controller
+        plasmoid: Plasmoid
+        i18n: i18n
+        Component.onCompleted: {
             if (Plasmoid.configuration.discoverOnLoad !== false)
-                item.discoverProfiles()
+                discoverProfiles()
         }
     }
 
@@ -44,8 +40,8 @@ PlasmoidItem {
             anchors.centerIn: parent
             spacing: 1
 
-            PanelView {
-                controller: root.controller
+            Comp.PanelView {
+                controller: controller
                 sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
                 weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
                 showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
@@ -70,9 +66,9 @@ PlasmoidItem {
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
             }
 
-            ExpandedView {
+            Comp.ExpandedView {
                 Layout.fillWidth: true
-                controller: root.controller
+                controller: controller
                 i18n: i18n
                 sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
                 weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"

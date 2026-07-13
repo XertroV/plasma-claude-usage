@@ -6,8 +6,8 @@ import "../js/QuotaCommon.js" as QC
 ColumnLayout {
     id: expandedRoot
 
-    required property var controller
-    required property var i18n
+    property var controller: null
+    property var i18n: null
     property string sessionColorMode: "capacity"
     property string weeklyColorMode: "efficiency"
     property bool showBankedBadge: true
@@ -15,7 +15,7 @@ ColumnLayout {
 
     spacing: Kirigami.Units.mediumSpacing
 
-    function tr(t) { return i18n.tr(t) }
+    function tr(t) { return i18n ? i18n.tr(t) : t }
 
     function sectionKey(profileId) { return profileId + "_extras" }
     function isExpanded(profileId) { return !!expandedSections[sectionKey(profileId)] }
@@ -68,7 +68,7 @@ ColumnLayout {
                 QuotaSlot {
                     Layout.fillWidth: true
                     windowData: modelData
-                    nowMs: controller.nowMs
+                    nowMs: controller ? controller.nowMs : 0
                     colorMode: (modelData.id === "session" || (modelData.id && modelData.id.indexOf("5h") === 0))
                         ? sessionColorMode : weeklyColorMode
                     compact: false
@@ -142,6 +142,7 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
+        visible: !!controller
         PlasmaComponents.Label {
             text: controller.lastGlobalUpdate !== "" ? tr("Updated:") + " " + controller.lastGlobalUpdate : tr("Loading...")
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize

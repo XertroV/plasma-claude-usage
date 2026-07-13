@@ -21,44 +21,123 @@ QtObject {
 
     function tr(text) { return i18n ? i18n.tr(text) : text }
 
+    function cfgValue(key, fallback) {
+        if (!plasmoid || !plasmoid.configuration) return fallback
+        var v = plasmoid.configuration[key]
+        return (v === undefined || v === null) ? fallback : v
+    }
+
     function parseJsonConfig(raw, fallback) {
         if (!raw || raw === "") return fallback
         try { return JSON.parse(raw) } catch (e) { return fallback }
     }
 
+    function normalizePath(path) {
+        if (!path) return ""
+        var p = String(path).replace(/\/+$/, "")
+        if (p.indexOf("/.claude/") >= 0 || p.indexOf("/.claude-") >= 0) {
+            p = p.replace(/\/\.credentials\.json$/, "")
+        }
+        return p
+    }
+
+    function pathsEqual(a, b) {
+        if (!a || !b) return false
+        return String(a) === String(b) || normalizePath(a) === normalizePath(b)
+    }
+
+    function isLegacySingleInstance() {
+        if (cfgValue("credentialsPath", "")) return true
+        if (cfgValue("displayName", "")) return true
+        var provider = cfgValue("provider", "claude")
+        if (provider !== "claude") return true
+        if (provider === "opencode") {
+            var sub = cfgValue("opencodeSubProvider", "anthropic")
+            if (sub !== "anthropic") return true
+        }
+        return false
+    }
+
+    function legacyProfileMatches(meta) {
+        var credPath = cfgValue("credentialsPath", "")
+        if (credPath) return pathsEqual(meta.credPath, credPath)
+
+        var provider = cfgValue("provider", "claude")
+        if (provider === "opencode") {
+            var sub = cfgValue("opencodeSubProvider", "anthropic")
+            if (sub === "kimi") return meta.provider === "kimi"
+            if (sub === "zai") return meta.provider === "zai"
+            if (sub === "openai") return meta.provider === "codex"
+            if (sub === "anthropic") {
+                return meta.provider === "claude"
+                    || (meta.provider === "opencode" && meta.profileKey === "anthropic-accounts")
+            }
+            return meta.provider === "opencode"
+        }
+        if (provider === "claude") return meta.provider === "claude"
+        return meta.provider === provider
+    }
+
+    function filterDiscoveredProfiles(discovered) {
+        if (!isLegacySingleInstance()) return discovered
+        var out = []
+        for (var i = 0; i < discovered.length; i++) {
+            if (legacyProfileMatches(discovered[i])) out.push(discovered[i])
+        }
+        return out
+    }
+
     function profileDisplayName(meta) {
-        var names = parseJsonConfig(plasmoid.configuration.profileDisplayNamesJson, {})
+        if (isLegacySingleInstance()) {
+            var legacyName = cfgValue("displayName", "")
+            if (legacyName) return legacyName
+        }
+        var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
         if (names[meta.id]) return names[meta.id]
         return QC.defaultProfileLabel(meta.provider, meta.profileKey)
     }
 
     function isProfileEnabled(meta) {
-        var enabled = parseJsonConfig(plasmoid.configuration.enabledProfilesJson, [])
+        var enabled = parseJsonConfig(cfgValue("enabledProfilesJson", "[]"), [])
         if (!enabled || enabled.length === 0) return true
         return enabled.indexOf(meta.id) >= 0
     }
 
     function visibleWindowIds() {
-        return parseJsonConfig(plasmoid.configuration.visibleWindowsJson, [])
+        return parseJsonConfig(cfgValue("visibleWindowsJson", "[]"), [])
     }
 
     function refreshIntervalMs(provider) {
         if (provider === "claude") {
-            var cm = plasmoid.configuration.claudeRefreshMinutes || 15
+            var cm = cfgValue("claudeRefreshMinutes", 15)
             if (cm < 10) cm = 10
             return cm * 60000
         }
-        return (plasmoid.configuration.refreshInterval || 5) * 60000
+        return cfgValue("refreshInterval", 5) * 60000
     }
 
     function discoverProfiles() {
         discovering = true
-        discoverSource.connectSource(discoverScript)
+        discoverSource.connectSource("bash " + shellQuote(discoverScript))
     }
 
     function mergeDiscovered(discovered) {
-        var custom = parseJsonConfig(plasmoid.configuration.customProfilesJson, [])
-        var merged = discovered.slice()
+        var custom = parseJsonConfig(cfgValue("customProfilesJson", "[]"), [])
+        var merged = filterDiscoveredProfiles(discovered.slice())
+        if (merged.length === 0 && isLegacySingleInstance()) {
+            var legacyCred = cfgValue("credentialsPath", "")
+            if (legacyCred) {
+                merged.push({
+                    id: "legacy-" + cfgValue("provider", "claude"),
+                    provider: cfgValue("provider", "claude"),
+                    profileKey: "legacy",
+                    configDir: "",
+                    credPath: legacyCred,
+                    credInode: "legacy",
+                    isFlatFile: false
+                })
+            }
+        }
         for (var c = 0; c < custom.length; c++) {
             var entry = custom[c]
             if (!entry || !entry.path || !entry.provider) continue

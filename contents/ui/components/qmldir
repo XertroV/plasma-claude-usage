@@ -1,0 +1,6 @@
+module components
+ProviderRow 1.0 ProviderRow.qml
+QuotaSlot 1.0 QuotaSlot.qml
+QuotaChip 1.0 QuotaChip.qml
+PanelView 1.0 PanelView.qml
+ExpandedView 1.0 ExpandedView.qml
