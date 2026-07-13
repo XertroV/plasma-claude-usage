@@ -23,6 +23,13 @@ KCM.SimpleKCM {
     property string cfg_weeklyColorMode
     property string cfg_opencodeSubProvider
     property int cfg_opencodeAccountIndex
+    property int cfg_claudeRefreshMinutes
+    property bool cfg_showBankedBadge
+    property bool cfg_discoverOnLoad
+    property string cfg_profileDisplayNamesJson
+    property string cfg_enabledProfilesJson
+    property string cfg_visibleWindowsJson
+    property string cfg_customProfilesJson
 
     readonly property var providerValues: ["claude", "codex", "grok", "zai", "opencode"]
     readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Grok (xAI)", "Z.ai (GLM)", "OpenCode"]
@@ -225,6 +232,61 @@ KCM.SimpleKCM {
             onActivated: index => {
                 cfg_weeklyColorMode = colorModeValues[index]
             }
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: tr("Claude refresh:")
+
+            QQC2.SpinBox {
+                from: 10
+                to: 120
+                value: Math.max(10, cfg_claudeRefreshMinutes || 15)
+                onValueChanged: cfg_claudeRefreshMinutes = value
+            }
+
+            QQC2.Label { text: tr("minutes (10 min floor)") }
+        }
+
+        QQC2.CheckBox {
+            Kirigami.FormData.label: tr("Codex banked badge:")
+            text: tr("Show ↻N banked resets on Codex rows")
+            checked: cfg_showBankedBadge !== false
+            onCheckedChanged: cfg_showBankedBadge = checked
+        }
+
+        QQC2.CheckBox {
+            Kirigami.FormData.label: tr("Discovery:")
+            text: tr("Discover profiles on load")
+            checked: cfg_discoverOnLoad !== false
+            onCheckedChanged: cfg_discoverOnLoad = checked
+        }
+
+        QQC2.TextArea {
+            Kirigami.FormData.label: tr("Profile names (JSON):")
+            placeholderText: '{"claude-w":"Work","codex-default":"Codex"}'
+            text: cfg_profileDisplayNamesJson || "{}"
+            onTextChanged: cfg_profileDisplayNamesJson = text
+        }
+
+        QQC2.TextArea {
+            Kirigami.FormData.label: tr("Enabled profiles (JSON):")
+            placeholderText: '[] = all discovered'
+            text: cfg_enabledProfilesJson || "[]"
+            onTextChanged: cfg_enabledProfilesJson = text
+        }
+
+        QQC2.TextArea {
+            Kirigami.FormData.label: tr("Visible windows (JSON):")
+            placeholderText: '["5h","weekly","weekly_fable"] empty = defaults'
+            text: cfg_visibleWindowsJson || "[]"
+            onTextChanged: cfg_visibleWindowsJson = text
+        }
+
+        QQC2.TextArea {
+            Kirigami.FormData.label: tr("Custom profiles (JSON):")
+            placeholderText: '[{"provider":"claude","path":"/home/me/.claude-custom","displayName":"Custom"}]'
+            text: cfg_customProfilesJson || "[]"
+            onTextChanged: cfg_customProfilesJson = text
         }
     }
 }

@@ -50,5 +50,33 @@
             <label>Weekly bar color mode</label>
             <default>efficiency</default>
         </entry>
+        <entry name="claudeRefreshMinutes" type="Int">
+            <label>Claude refresh interval in minutes (min 10)</label>
+            <default>15</default>
+        </entry>
+        <entry name="showBankedBadge" type="Bool">
+            <label>Show Codex banked reset badge</label>
+            <default>true</default>
+        </entry>
+        <entry name="discoverOnLoad" type="Bool">
+            <label>Discover profiles on widget load</label>
+            <default>true</default>
+        </entry>
+        <entry name="profileDisplayNamesJson" type="String">
+            <label>Custom profile display names JSON map</label>
+            <default>{}</default>
+        </entry>
+        <entry name="enabledProfilesJson" type="String">
+            <label>Enabled profile ids JSON array (empty = all)</label>
+            <default>[]</default>
+        </entry>
+        <entry name="visibleWindowsJson" type="String">
+            <label>Visible window ids JSON array (empty = defaults)</label>
+            <default>[]</default>
+        </entry>
+        <entry name="customProfilesJson" type="String">
+            <label>Custom profile paths JSON array</label>
+            <default>[]</default>
+        </entry>
     </group>
 </kcfg>
