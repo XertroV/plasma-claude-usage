@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "../js/QuotaCommon.js" as QC
+import "js/QuotaCommon.js" as QC
 
 RowLayout {
     id: slotRoot

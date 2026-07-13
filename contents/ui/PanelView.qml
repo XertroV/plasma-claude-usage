@@ -11,7 +11,7 @@ ColumnLayout {
     property string weeklyColorMode: "efficiency"
     property bool showBankedBadge: true
 
-    spacing: 2
+    spacing: Kirigami.Units.smallSpacing
 
     Repeater {
         model: controller ? controller.profiles : []
@@ -27,7 +27,7 @@ ColumnLayout {
     }
 
     PlasmaComponents.Label {
-        visible: controller && controller.discovering
+        visible: controller && controller.discovering && controller.profiles.length === 0
         text: "…"
         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
         color: Kirigami.Theme.disabledTextColor

@@ -3,7 +3,6 @@ import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "components" as Comp
 import "js/QuotaCommon.js" as QC
 
 PlasmoidItem {
@@ -16,35 +15,62 @@ PlasmoidItem {
 
     ProfileController {
         id: controller
+        visible: false
+        width: 0
+        height: 0
         plasmoid: Plasmoid
         i18n: i18n
         Component.onCompleted: {
-            if (Plasmoid.configuration.discoverOnLoad !== false)
+            bootstrapLegacyProfiles()
+            if (profiles.length === 0 && Plasmoid.configuration.discoverOnLoad !== false)
                 discoverProfiles()
         }
     }
 
+    readonly property string legacyPanelTitle: {
+        var dn = Plasmoid.configuration.displayName || ""
+        if (dn) return dn
+        if (controller.profiles.length === 1)
+            return controller.profiles[0].displayName || controller.profiles[0].id || ""
+        return ""
+    }
+
     compactRepresentation: Item {
-        Layout.minimumWidth: panelColumn.implicitWidth + Kirigami.Units.smallSpacing * 2
-        Layout.minimumHeight: panelColumn.implicitHeight
-        Layout.preferredWidth: panelColumn.implicitWidth + Kirigami.Units.smallSpacing * 2
-        Layout.preferredHeight: panelColumn.implicitHeight
+        Layout.minimumWidth: Math.max(usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2,
+            Kirigami.Units.gridUnit * 4)
+        Layout.minimumHeight: Kirigami.Units.iconSizes.medium
+        Layout.preferredWidth: usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2
+        Layout.preferredHeight: Math.max(Kirigami.Units.iconSizes.medium, usageRow.implicitHeight)
 
         MouseArea {
             anchors.fill: parent
             onClicked: root.expanded = !root.expanded
         }
 
-        ColumnLayout {
-            id: panelColumn
+        RowLayout {
+            id: usageRow
             anchors.centerIn: parent
-            spacing: 1
+            spacing: Kirigami.Units.smallSpacing
 
-            Comp.PanelView {
+            Kirigami.Icon {
+                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                source: Qt.resolvedUrl("../icons/claude.svg")
+            }
+
+            PanelView {
                 controller: controller
                 sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
                 weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
                 showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
+            }
+
+            PlasmaComponents.Label {
+                visible: usageRow.implicitWidth < Kirigami.Units.gridUnit * 3
+                    && (controller.discovering || legacyPanelTitle !== "")
+                text: controller.discovering ? "…" : legacyPanelTitle
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                color: Kirigami.Theme.textColor
             }
         }
     }
@@ -66,7 +92,7 @@ PlasmoidItem {
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
             }
 
-            Comp.ExpandedView {
+            ExpandedView {
                 Layout.fillWidth: true
                 controller: controller
                 i18n: i18n

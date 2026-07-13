@@ -116,6 +116,73 @@ Item {
         return cfgValue("refreshInterval", 5) * 60000
     }
 
+    function bootstrapLegacyProfiles() {
+        if (!isLegacySingleInstance() || profiles.length > 0) return
+
+        var credPath = cfgValue("credentialsPath", "")
+        var provider = cfgValue("provider", "claude")
+        var effectiveProvider = provider
+        var isFlat = false
+
+        if (credPath) {
+            if (credPath.indexOf("/.kimi-for-coding") >= 0 || credPath.indexOf("/.api-zai") >= 0
+                    || credPath.indexOf("/.minimax") >= 0) {
+                isFlat = true
+            }
+            if (provider === "opencode") {
+                var subCfg = cfgValue("opencodeSubProvider", "anthropic")
+                if (subCfg === "kimi") effectiveProvider = "kimi"
+                else if (subCfg === "zai") effectiveProvider = "zai"
+                else if (subCfg === "openai") effectiveProvider = "codex"
+                else if (subCfg === "anthropic") effectiveProvider = "claude"
+            }
+            mergeDiscovered([{
+                id: "legacy-config",
+                provider: effectiveProvider,
+                profileKey: "legacy",
+                configDir: "",
+                credPath: credPath,
+                credInode: "legacy-config",
+                isFlatFile: isFlat
+            }])
+            return
+        } else if (provider === "codex") {
+            credPath = "$HOME/.codex/auth.json"
+        } else if (provider === "zai") {
+            credPath = "$HOME/.api-zai"
+            isFlat = true
+            effectiveProvider = "zai"
+        } else if (provider === "opencode") {
+            var sub = cfgValue("opencodeSubProvider", "anthropic")
+            if (sub === "kimi") {
+                credPath = "$HOME/.kimi-for-coding"
+                isFlat = true
+                effectiveProvider = "kimi"
+            } else if (sub === "zai") {
+                credPath = "$HOME/.api-zai"
+                isFlat = true
+                effectiveProvider = "zai"
+            } else if (sub === "openai") {
+                credPath = "$HOME/.codex/auth.json"
+                effectiveProvider = "codex"
+            } else {
+                return
+            }
+        } else {
+            return
+        }
+
+        mergeDiscovered([{
+            id: "legacy-bootstrap",
+            provider: effectiveProvider,
+            profileKey: "legacy",
+            configDir: "",
+            credPath: credPath,
+            credInode: "legacy-bootstrap",
+            isFlatFile: isFlat
+        }])
+    }
+
     function discoverProfiles() {
         discovering = true
         discoverSource.connectSource("bash " + shellQuote(discoverScript))

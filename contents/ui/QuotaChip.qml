@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "../js/QuotaCommon.js" as QC
+import "js/QuotaCommon.js" as QC
 
 RowLayout {
     id: chipRoot
