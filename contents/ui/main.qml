@@ -29,8 +29,23 @@ PlasmoidItem {
     property bool isLoading: false
     property var sessionResetTime: null
     property var weeklyResetTime: null
+    property real sessionPeriodMs: 5 * 60 * 60 * 1000  // default 5 hours
     property real weeklyPeriodMs: 7 * 24 * 60 * 60 * 1000  // default 7 days
+    // Writable labels set by parsers (dynamic window durations for Codex / Grok)
+    property string sessionLabel: i18n.tr("Session (5hr)")
+    property string weeklyLabel: i18n.tr("Weekly (7day)")
+    property bool hasSessionWindow: false
+    property bool hasWeeklyWindow: false
+    property int bankedResets: 0
+    // Grok dual-fetch scratch (default monthly + format=credits weekly)
+    property var grokDefaultBody: null
+    property var grokCreditsBody: null
+    property int grokFetchPending: 0
+    property int grokFetchGen: 0
+    property int grokDefaultStatus: 0
     readonly property bool isKimi: provider === "opencode" && opencodeSubProvider === "kimi"
+    readonly property bool isGrok: provider === "grok"
+    readonly property bool hideModelSection: provider === "zai" || isKimi || isGrok
 
     readonly property string provider: Plasmoid.configuration.provider || "claude"
     readonly property string opencodeSubProvider: Plasmoid.configuration.opencodeSubProvider || "anthropic"
@@ -38,6 +53,7 @@ PlasmoidItem {
     readonly property string usageApiUrl: {
         if (provider === "codex") return "https://chatgpt.com/backend-api/wham/usage"
         if (provider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
+        if (provider === "grok") return "https://cli-chat-proxy.grok.com/v1/billing"
         if (provider === "opencode") {
             if (opencodeSubProvider === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
             if (opencodeSubProvider === "openai") return "https://chatgpt.com/backend-api/wham/usage"
@@ -49,14 +65,13 @@ PlasmoidItem {
     readonly property string displayName: Plasmoid.configuration.displayName || (function() {
         if (provider === "codex") return "Codex"
         if (provider === "zai") return "Z.ai"
+        if (provider === "grok") return "Grok"
         if (provider === "opencode") {
             var names = { "anthropic": "Claude", "openai": "Codex", "zai": "Z.ai", "kimi": "Kimi", "gemini": "Gemini" }
             return (names[opencodeSubProvider] || opencodeSubProvider) + " (OC)"
         }
         return "Claude"
     })()
-    readonly property string sessionLabel: provider === "zai" ? i18n.tr("Tokens (5hr)") : i18n.tr("Session (5hr)")
-    readonly property string weeklyLabel: provider === "zai" ? i18n.tr("Monthly (MCP)") : i18n.tr("Weekly (7day)")
     property string accountId: ""
     property real sessionTimePercent: 0
     property real weeklyTimePercent: 0
@@ -83,6 +98,8 @@ PlasmoidItem {
                         parseCodexCredentials(creds)
                     } else if (root.provider === "zai") {
                         parseZaiCredentials(creds)
+                    } else if (root.provider === "grok") {
+                        parseGrokCredentials(creds)
                     } else if (root.provider === "opencode") {
                         parseOpencodeCredentials(creds)
                     } else {
@@ -172,6 +189,61 @@ PlasmoidItem {
         }
     }
 
+    // Grok Build ~/.grok/auth.json: map of account keys → { key, expires_at, create_time, ... }
+    // Prefer newest non-expired entry; if all expired, still return newest so API can 401 cleanly.
+    function parseGrokCredentials(creds) {
+        var map = creds
+        if (creds.accounts && typeof creds.accounts === "object" && !Array.isArray(creds.accounts)) {
+            map = creds.accounts
+        }
+
+        var candidates = []
+        for (var k in map) {
+            if (!map.hasOwnProperty(k)) continue
+            var entry = map[k]
+            if (!entry || typeof entry !== "object") continue
+            var token = entry.key || entry.access_token || entry.token || ""
+            if (!token) continue
+            var expMs = entry.expires_at ? Date.parse(entry.expires_at) : NaN
+            var createMs = entry.create_time ? Date.parse(entry.create_time) : NaN
+            candidates.push({
+                key: token,
+                expiresAt: isNaN(expMs) ? null : expMs,
+                createTime: isNaN(createMs) ? null : createMs
+            })
+        }
+
+        if (candidates.length === 0) {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+            return
+        }
+
+        var now = Date.now()
+        candidates.sort(function(a, b) {
+            var aFresh = a.expiresAt === null || a.expiresAt > now
+            var bFresh = b.expiresAt === null || b.expiresAt > now
+            if (aFresh !== bFresh) return aFresh ? -1 : 1
+            var ac = a.createTime === null ? 0 : a.createTime
+            var bc = b.createTime === null ? 0 : b.createTime
+            if (ac !== bc) return bc - ac
+            var ae = a.expiresAt === null ? 0 : a.expiresAt
+            var be = b.expiresAt === null ? 0 : b.expiresAt
+            return be - ae
+        })
+
+        root.accessToken = candidates[0].key
+        root.planName = "Grok Build"
+        console.log("Claude Usage: Grok token found, length:", root.accessToken.length)
+
+        if (root.accessToken) {
+            fetchGrokUsage()
+        } else {
+            root.errorMsg = i18n.tr("Not logged in")
+            root.isLoading = false
+        }
+    }
+
     function parseOpencodeCredentials(creds) {
         var sub = root.opencodeSubProvider || "anthropic"
 
@@ -208,11 +280,13 @@ PlasmoidItem {
     function loadCredentials() {
         root.isLoading = true
         root.errorMsg = ""
+        root.bankedResets = 0
         var credPath = Plasmoid.configuration.credentialsPath || ""
         if (credPath === "") {
             var defaultPath
             if (root.provider === "codex") defaultPath = "$HOME/.codex/auth.json"
             else if (root.provider === "zai") defaultPath = "$HOME/.local/share/opencode/auth.json"
+            else if (root.provider === "grok") defaultPath = "$HOME/.grok/auth.json"
             else if (root.provider === "opencode") {
                 // Anthropic gets the multi-account file; all others use auth.json
                 if (root.opencodeSubProvider === "anthropic")
@@ -230,6 +304,12 @@ PlasmoidItem {
     }
 
     function fetchUsageFromApi() {
+        // Grok needs two billing endpoints; use dedicated dual-fetch.
+        if (root.provider === "grok") {
+            fetchGrokUsage()
+            return
+        }
+
         var xhr = new XMLHttpRequest()
         xhr.open("GET", usageApiUrl)
         xhr.setRequestHeader("Content-Type", "application/json")
@@ -292,14 +372,199 @@ PlasmoidItem {
         xhr.send()
     }
 
+    // Grok Build: default monthly $ allowance + ?format=credits weekly product %.
+    // Use a generation counter so overlapping refreshes ignore stale XHR callbacks.
+    function fetchGrokUsage() {
+        root.grokFetchGen += 1
+        var gen = root.grokFetchGen
+        root.grokDefaultBody = null
+        root.grokCreditsBody = null
+        root.grokFetchPending = 2
+        root.grokDefaultStatus = 0
+        root.errorMsg = ""
+        var base = "https://cli-chat-proxy.grok.com/v1/billing"
+        grokGet(base, gen, function(ok, body, status) {
+            if (gen !== root.grokFetchGen) return
+            root.grokDefaultStatus = status
+            if (ok) root.grokDefaultBody = body
+            else if (status === 401 || status === 403) root.errorMsg = i18n.tr("Token expired")
+            finishGrokFetch(gen)
+        })
+        grokGet(base + "?format=credits", gen, function(ok, body, status) {
+            if (gen !== root.grokFetchGen) return
+            if (ok) root.grokCreditsBody = body
+            finishGrokFetch(gen)
+        })
+    }
+
+    function grokGet(url, gen, callback) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", url)
+        xhr.timeout = 25000
+        xhr.setRequestHeader("Authorization", "Bearer " + root.accessToken)
+        xhr.setRequestHeader("Accept", "application/json")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.setRequestHeader("x-grok-client-version", "0.2.93")
+        xhr.setRequestHeader("x-grok-client-surface", "grok-build")
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            if (gen !== root.grokFetchGen) return
+            if (xhr.status === 200) {
+                try {
+                    callback(true, JSON.parse(xhr.responseText), xhr.status)
+                } catch (e) {
+                    console.log("Claude Usage: Grok JSON parse error:", e)
+                    callback(false, null, xhr.status)
+                }
+            } else {
+                console.log("Claude Usage: Grok API error:", url, xhr.status, xhr.statusText)
+                callback(false, null, xhr.status || 0)
+            }
+        }
+        xhr.ontimeout = function() {
+            if (gen !== root.grokFetchGen) return
+            console.log("Claude Usage: Grok API timeout:", url)
+            callback(false, null, 0)
+        }
+        xhr.send()
+    }
+
+    function finishGrokFetch(gen) {
+        if (gen !== root.grokFetchGen) return
+        root.grokFetchPending = Math.max(0, root.grokFetchPending - 1)
+        if (root.grokFetchPending > 0) return
+
+        root.isLoading = false
+        // Default monthly body is required; credits is best-effort.
+        if (!root.grokDefaultBody) {
+            if (root.errorMsg === "") {
+                var st = root.grokDefaultStatus
+                root.errorMsg = st ? (i18n.tr("API error") + " (" + st + ")") : (i18n.tr("API error") + " (timeout)")
+            }
+            return
+        }
+        // Reject error-only payloads (HTTP 200 with error, no config).
+        if (root.grokDefaultBody.error && !root.grokDefaultBody.config) {
+            var em = (root.grokDefaultBody.error && root.grokDefaultBody.error.message)
+                || root.grokDefaultBody.message || "billing error"
+            root.errorMsg = String(em)
+            return
+        }
+        try {
+            parseGrokUsage(root.grokDefaultBody, root.grokCreditsBody)
+            if (!root.hasSessionWindow && !root.hasWeeklyWindow && root.additionalLimits.length === 0) {
+                root.errorMsg = "No usage data"
+                return
+            }
+            root.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+            root.errorMsg = ""
+            console.log("Claude Usage: Grok success - session:", root.sessionUsagePercent, "weekly:", root.weeklyUsagePercent)
+        } catch (e) {
+            console.log("Claude Usage: Grok parse error:", e)
+            root.errorMsg = "Parse error"
+        }
+    }
+
+    // Prefer whole-day labels for exact day multiples (604800s → "7d" not "168h").
+    // Mirrors quotas format_window_duration (src/providers/codex.rs).
+    function formatWindowDuration(seconds) {
+        var s = Math.floor(Number(seconds) || 0)
+        if (s >= 86400 && s % 86400 === 0) return (s / 86400) + "d"
+        if (s >= 3600 && s % 3600 === 0) return (s / 3600) + "h"
+        if (s > 0) return s + "s"
+        return "0h"
+    }
+
+    // Match quotas: only emit a window when reset or usage is present.
+    // Do NOT treat bare limit_window_seconds as presence (zeroed secondary shells).
+    function codexWindowHasData(win) {
+        if (!win || typeof win !== "object") return false
+        return (Number(win.reset_at) > 0) || (Number(win.used_percent) > 0)
+    }
+
+    function shortCodexLabel(name) {
+        var raw = name || ""
+        var stripped = raw.replace(/^GPT-5\.3-/i, "").replace(/^gpt-5\.3-/i, "")
+        var parts = stripped.toLowerCase().split("-")
+        var last = parts.length ? parts[parts.length - 1] : stripped.toLowerCase()
+        var label = last.substring(0, 10)
+        return label === "spark" ? "spk" : label
+    }
+
+    function applyWindowSlot(slot, win, defaultPeriodSec) {
+        var pct = (win && win.used_percent != null) ? Number(win.used_percent) : 0
+        var secs = (win && win.limit_window_seconds) ? Number(win.limit_window_seconds) : defaultPeriodSec
+        var resetAt = (win && win.reset_at) ? new Date(Number(win.reset_at) * 1000) : null
+        var label = formatWindowDuration(secs)
+
+        if (slot === "session") {
+            root.hasSessionWindow = true
+            root.sessionUsagePercent = pct
+            root.sessionPeriodMs = secs * 1000
+            root.sessionLabel = label
+            if (resetAt) {
+                root.sessionResetTime = resetAt
+                root.sessionReset = secs >= 86400
+                    ? Qt.formatDateTime(resetAt, "MMM d, hh:mm")
+                    : Qt.formatTime(resetAt, "hh:mm")
+                updateSessionTimePercent()
+            } else {
+                root.sessionResetTime = null
+                root.sessionReset = ""
+                root.sessionTimePercent = 0
+            }
+        } else {
+            root.hasWeeklyWindow = true
+            root.weeklyUsagePercent = pct
+            root.weeklyPeriodMs = secs * 1000
+            root.weeklyLabel = label
+            if (resetAt) {
+                root.weeklyResetTime = resetAt
+                root.weeklyReset = Qt.formatDateTime(resetAt, "MMM d, hh:mm")
+                updateWeeklyTimePercent()
+            } else {
+                root.weeklyResetTime = null
+                root.weeklyReset = ""
+                root.weeklyTimePercent = 0
+            }
+        }
+    }
+
+    function clearSessionSlot() {
+        root.hasSessionWindow = false
+        root.sessionUsagePercent = 0
+        root.sessionResetTime = null
+        root.sessionReset = ""
+        root.sessionTimePercent = 0
+        root.sessionPeriodMs = 5 * 60 * 60 * 1000
+        root.sessionLabel = i18n.tr("Session (5hr)")
+    }
+
+    function clearWeeklySlot() {
+        root.hasWeeklyWindow = false
+        root.weeklyUsagePercent = 0
+        root.weeklyResetTime = null
+        root.weeklyReset = ""
+        root.weeklyTimePercent = 0
+        root.weeklyPeriodMs = 7 * 24 * 60 * 60 * 1000
+        root.weeklyLabel = i18n.tr("Weekly (7day)")
+    }
+
     function parseClaudeUsage(data) {
         var fiveHour = data.five_hour || {}
         var sevenDay = data.seven_day || {}
         var sevenDayOpus = data.seven_day_opus || {}
 
+        root.hasSessionWindow = true
+        root.hasWeeklyWindow = true
+        root.sessionLabel = i18n.tr("Session (5hr)")
+        root.weeklyLabel = i18n.tr("Weekly (7day)")
+        root.sessionPeriodMs = 5 * 60 * 60 * 1000
+        root.weeklyPeriodMs = 7 * 24 * 60 * 60 * 1000
         root.sessionUsagePercent = fiveHour.utilization || 0
         root.weeklyUsagePercent = sevenDay.utilization || 0
         root.additionalLimits = []
+        root.bankedResets = 0
 
         // Parse per-model weekly limits from limits[] array (weekly_scoped entries)
         var modelLimits = []
@@ -324,59 +589,257 @@ PlasmoidItem {
             root.sessionResetTime = new Date(fiveHour.resets_at)
             root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
             updateSessionTimePercent()
+        } else {
+            root.sessionResetTime = null
+            root.sessionReset = ""
+            root.sessionTimePercent = 0
         }
         if (sevenDay.resets_at) {
             root.weeklyResetTime = new Date(sevenDay.resets_at)
             root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
             updateWeeklyTimePercent()
+        } else {
+            root.weeklyResetTime = null
+            root.weeklyReset = ""
+            root.weeklyTimePercent = 0
         }
         updateRequiredPace()
     }
 
     function parseCodexUsage(data) {
         var rateLimit = data.rate_limit || {}
-        var primary = rateLimit.primary_window || {}
-        var secondary = rateLimit.secondary_window || {}
+        var primary = rateLimit.primary_window || null
+        var secondary = rateLimit.secondary_window || null
+        var primaryOk = codexWindowHasData(primary)
+        var secondaryOk = codexWindowHasData(secondary)
 
-        root.sessionUsagePercent = primary.used_percent || 0
-        root.weeklyUsagePercent = secondary.used_percent || 0
         root.weeklyModelLimits = []
+        root.bankedResets = 0
+        clearSessionSlot()
+        clearWeeklySlot()
 
-        if (primary.reset_at) {
-            root.sessionResetTime = new Date(primary.reset_at * 1000)
-            root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
-            updateSessionTimePercent()
+        // Classic Plus shape: primary ~5h + secondary ~7d.
+        // Pro (live 2026-07): single primary of 604800s with secondary=null —
+        // previously mis-labeled as "Session (5hr)" with weekly stuck at 0%
+        // and "168h" if duration was formatted as hours only.
+        if (primaryOk && secondaryOk) {
+            applyWindowSlot("session", primary, 18000)
+            applyWindowSlot("weekly", secondary, 604800)
+        } else if (primaryOk) {
+            var pSec = Number(primary.limit_window_seconds) || 18000
+            if (pSec >= 86400) {
+                applyWindowSlot("weekly", primary, 604800)
+            } else {
+                applyWindowSlot("session", primary, 18000)
+            }
+        } else if (secondaryOk) {
+            applyWindowSlot("weekly", secondary, 604800)
         }
-        if (secondary.reset_at) {
-            root.weeklyResetTime = new Date(secondary.reset_at * 1000)
-            root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
-            updateWeeklyTimePercent()
-        }
-        updateRequiredPace()
 
-        // Parse additional rate limits (e.g. Spark model)
+        // Additional rate limits (e.g. GPT-5.3-Codex-Spark) — emit each window
+        // with data (mirrors quotas push_rate_limit_windows per extra).
         var extras = data.additional_rate_limits || []
         var parsed = []
         for (var i = 0; i < extras.length; i++) {
             var entry = extras[i]
-            var name = entry.limit_name || entry.metered_feature || ("Limit " + i)
+            var rawName = entry.limit_name || entry.metered_feature || ("Limit " + i)
+            var short = shortCodexLabel(rawName)
             var rl = entry.rate_limit || {}
-            var sw = rl.secondary_window || rl.primary_window || {}
-            parsed.push({ name: name, percent: sw.used_percent || 0 })
+            var wins = []
+            if (codexWindowHasData(rl.primary_window)) wins.push(rl.primary_window)
+            if (codexWindowHasData(rl.secondary_window)) wins.push(rl.secondary_window)
+            if (wins.length === 0) continue
+            for (var j = 0; j < wins.length; j++) {
+                var win = wins[j]
+                var wSec = Number(win.limit_window_seconds) || 0
+                var label = wSec > 0 ? (short + "/" + formatWindowDuration(wSec)) : short
+                var pct = win.used_percent != null ? Number(win.used_percent) : 0
+                parsed.push({ name: label, percent: isNaN(pct) ? 0 : pct })
+            }
         }
         root.additionalLimits = parsed
 
-        // Update plan name from API response if not already set from JWT
-        if (data.plan_type && !root.planName) {
-            var plan = data.plan_type
-            root.planName = plan.charAt(0).toUpperCase() + plan.slice(1)
+        // Banked full-rate-limit resets (summary count from usage payload).
+        var banked = data.rate_limit_reset_credits || null
+        if (banked && banked.available_count != null) {
+            root.bankedResets = Number(banked.available_count) || 0
         }
+
+        // Credits balance as additional row when present and non-zero.
+        var credits = data.credits || {}
+        if (!credits.unlimited && credits.balance) {
+            var bal = parseFloat(credits.balance)
+            if (!isNaN(bal) && bal > 0) {
+                root.additionalLimits = root.additionalLimits.concat([
+                    { name: "credits $" + bal.toFixed(2), percent: 0 }
+                ])
+            }
+        }
+
+        // Plan name from API (prefer over JWT when present)
+        if (data.plan_type) {
+            var plan = data.plan_type
+            root.planName = "Codex / " + plan.charAt(0).toUpperCase() + plan.slice(1)
+        }
+        updateRequiredPace()
+    }
+
+    // xAI amounts are USD cents as {val: number|string}. Return whole dollars (float).
+    function grokCentsToDollars(v) {
+        if (v == null) return 0
+        var cents = 0
+        if (typeof v === "object") {
+            if (v.val != null) cents = Number(v.val)
+        } else {
+            cents = Number(v)
+        }
+        if (isNaN(cents)) return 0
+        return Math.abs(cents) / 100.0
+    }
+
+    function parseGrokUsage(defaultBody, creditsBody) {
+        var defaultCfg = (defaultBody && defaultBody.config) ? defaultBody.config : (defaultBody || {})
+        var creditsCfg = (creditsBody && creditsBody.config) ? creditsBody.config : (creditsBody || {})
+
+        clearSessionSlot()
+        clearWeeklySlot()
+        root.weeklyModelLimits = []
+        root.additionalLimits = []
+        root.bankedResets = 0
+
+        // Weekly product usage from ?format=credits → session slot (shorter window)
+        var period = creditsCfg.currentPeriod || creditsCfg.current_period || null
+        var periodType = (period && period.type) ? String(period.type) : "USAGE_PERIOD_TYPE_WEEKLY"
+        var periodLabel = "weekly"
+        var upper = periodType.toUpperCase()
+        if (upper.indexOf("WEEK") >= 0) periodLabel = "weekly"
+        else if (upper.indexOf("MONTH") >= 0) periodLabel = "monthly"
+        else if (upper.indexOf("DAY") >= 0) periodLabel = "daily"
+        else periodLabel = "period"
+
+        var periodStart = period && period.start ? new Date(period.start) : null
+        var periodEnd = period && period.end ? new Date(period.end) : null
+        if (!periodStart && creditsCfg.billingPeriodStart)
+            periodStart = new Date(creditsCfg.billingPeriodStart)
+        if (!periodEnd && creditsCfg.billingPeriodEnd)
+            periodEnd = new Date(creditsCfg.billingPeriodEnd)
+
+        var periodMs = 7 * 24 * 60 * 60 * 1000
+        if (periodStart && periodEnd && !isNaN(periodStart.getTime()) && !isNaN(periodEnd.getTime())) {
+            periodMs = Math.max(1000, periodEnd.getTime() - periodStart.getTime())
+        }
+
+        var weeklyPct = null
+        var productLabel = periodLabel
+        var products = creditsCfg.productUsage || creditsCfg.product_usage || []
+        if (products && products.length) {
+            for (var i = 0; i < products.length; i++) {
+                var prod = products[i]
+                var name = prod.product || "product"
+                var pct = prod.usagePercent != null ? Number(prod.usagePercent)
+                        : (prod.usage_percent != null ? Number(prod.usage_percent) : null)
+                if (pct == null || isNaN(pct)) continue
+                var short = name === "GrokBuild" ? "build" : name
+                if (weeklyPct === null) {
+                    weeklyPct = pct
+                    productLabel = periodLabel + "/" + short
+                } else {
+                    root.additionalLimits = root.additionalLimits.concat([
+                        { name: periodLabel + "/" + short, percent: pct }
+                    ])
+                }
+            }
+        }
+        if (weeklyPct === null) {
+            var overall = creditsCfg.creditUsagePercent != null ? Number(creditsCfg.creditUsagePercent)
+                        : (creditsCfg.credit_usage_percent != null ? Number(creditsCfg.credit_usage_percent) : null)
+            if (overall != null && !isNaN(overall)) {
+                weeklyPct = overall
+                productLabel = periodLabel
+            }
+        }
+
+        if (weeklyPct !== null) {
+            root.hasSessionWindow = true
+            root.sessionUsagePercent = weeklyPct
+            root.sessionPeriodMs = periodMs
+            root.sessionLabel = productLabel
+            if (periodEnd && !isNaN(periodEnd.getTime())) {
+                root.sessionResetTime = periodEnd
+                root.sessionReset = Qt.formatDateTime(periodEnd, "MMM d, hh:mm")
+                updateSessionTimePercent()
+            }
+        }
+
+        // Monthly $ allowance from default billing → weekly slot (as %)
+        var monthStart = defaultCfg.billingPeriodStart ? new Date(defaultCfg.billingPeriodStart) : null
+        var monthEnd = defaultCfg.billingPeriodEnd ? new Date(defaultCfg.billingPeriodEnd) : null
+        var monthMs = 30 * 24 * 60 * 60 * 1000
+        if (monthStart && monthEnd && !isNaN(monthStart.getTime()) && !isNaN(monthEnd.getTime())) {
+            monthMs = Math.max(1000, monthEnd.getTime() - monthStart.getTime())
+        }
+
+        var limitDollars = grokCentsToDollars(defaultCfg.monthlyLimit || defaultCfg.monthly_limit)
+        var usedDollars = grokCentsToDollars(defaultCfg.used)
+        if (limitDollars > 0 || usedDollars > 0) {
+            var monthPct = limitDollars > 0 ? (usedDollars / limitDollars) * 100 : 0
+            root.hasWeeklyWindow = true
+            root.weeklyUsagePercent = Math.min(100, monthPct)
+            root.weeklyPeriodMs = monthMs
+            root.weeklyLabel = "monthly $" + formatDollars(usedDollars) + "/$" + formatDollars(limitDollars)
+            if (monthEnd && !isNaN(monthEnd.getTime())) {
+                root.weeklyResetTime = monthEnd
+                root.weeklyReset = Qt.formatDateTime(monthEnd, "MMM d, hh:mm")
+                updateWeeklyTimePercent()
+            }
+        }
+
+        // On-demand cap if set
+        var odCap = grokCentsToDollars(creditsCfg.onDemandCap || creditsCfg.on_demand_cap
+                    || defaultCfg.onDemandCap || defaultCfg.on_demand_cap)
+        var odUsed = grokCentsToDollars(creditsCfg.onDemandUsed || creditsCfg.on_demand_used
+                    || defaultCfg.onDemandUsed || defaultCfg.on_demand_used)
+        if (odCap > 0) {
+            root.additionalLimits = root.additionalLimits.concat([
+                { name: "on-demand $" + formatDollars(odUsed) + "/$" + formatDollars(odCap),
+                  percent: Math.min(100, (odUsed / odCap) * 100) }
+            ])
+        }
+
+        var prepaid = grokCentsToDollars(creditsCfg.prepaidBalance || creditsCfg.prepaid_balance)
+        if (prepaid > 0) {
+            root.additionalLimits = root.additionalLimits.concat([
+                { name: "balance $" + formatDollars(prepaid), percent: 0 }
+            ])
+        }
+
+        // Only overwrite plan from credits when credits body is present.
+        if (creditsBody) {
+            var unified = creditsCfg.isUnifiedBillingUser || creditsCfg.is_unified_billing_user
+            root.planName = unified ? "Grok Build" : "Grok"
+        } else if (!root.planName) {
+            root.planName = "Grok Build"
+        }
+        updateRequiredPace()
+    }
+
+    function formatDollars(n) {
+        var v = Number(n) || 0
+        // Whole dollars when clean; otherwise two decimals (e.g. $29.31).
+        if (Math.abs(v - Math.round(v)) < 0.005) return String(Math.round(v))
+        return v.toFixed(2)
     }
 
     function parseZaiUsage(data) {
         // Response: { data: { limits: [...], planName: "..." } } or { limits: [...] }
         var container = data.data || data
         var limits = container.limits || []
+
+        clearSessionSlot()
+        clearWeeklySlot()
+        root.sessionLabel = i18n.tr("Tokens (5hr)")
+        root.weeklyLabel = i18n.tr("Monthly (MCP)")
+        root.bankedResets = 0
 
         // Find limit entries by type
         var tokenLimit = null
@@ -388,7 +851,9 @@ PlasmoidItem {
 
         // TOKENS_LIMIT = 5hr rolling token usage → session slot
         if (tokenLimit) {
+            root.hasSessionWindow = true
             root.sessionUsagePercent = tokenLimit.percentage || 0
+            root.sessionPeriodMs = 5 * 60 * 60 * 1000
             if (tokenLimit.nextResetTime) {
                 root.sessionResetTime = new Date(tokenLimit.nextResetTime)
                 root.sessionReset = Qt.formatTime(root.sessionResetTime, "hh:mm")
@@ -398,6 +863,7 @@ PlasmoidItem {
 
         // TIME_LIMIT = monthly MCP tool usage → weekly slot (repurposed)
         if (timeLimit) {
+            root.hasWeeklyWindow = true
             root.weeklyUsagePercent = timeLimit.percentage || 0
             root.weeklyPeriodMs = 30 * 24 * 60 * 60 * 1000  // monthly
             if (timeLimit.nextResetTime) {
@@ -405,8 +871,6 @@ PlasmoidItem {
                 root.weeklyReset = Qt.formatDateTime(root.weeklyResetTime, "MMM d, hh:mm")
                 updateWeeklyTimePercent()
             }
-        } else {
-            root.weeklyUsagePercent = 0
         }
 
         // No per-model breakdown for Z.ai
@@ -423,6 +887,14 @@ PlasmoidItem {
     }
 
     function parseKimiUsage(data) {
+        root.hasSessionWindow = true
+        root.hasWeeklyWindow = true
+        root.sessionLabel = i18n.tr("Session (5hr)")
+        root.weeklyLabel = i18n.tr("Weekly (7day)")
+        root.sessionPeriodMs = 5 * 60 * 60 * 1000
+        root.weeklyPeriodMs = 7 * 24 * 60 * 60 * 1000
+        root.bankedResets = 0
+
         // Primary usage object → weekly slot
         var usage = data.usage || {}
         if (usage.limit > 0) {
@@ -517,9 +989,9 @@ PlasmoidItem {
                 color: Kirigami.Theme.negativeTextColor
             }
 
-            // Normal state
+            // Normal state — hide slots that have no window (e.g. Codex Pro 7d-only)
             Rectangle {
-                visible: root.errorMsg === ""
+                visible: root.errorMsg === "" && root.hasSessionWindow
                 Layout.preferredWidth: 10
                 Layout.preferredHeight: 10
                 radius: 5
@@ -527,21 +999,21 @@ PlasmoidItem {
             }
 
             PlasmaComponents.Label {
-                visible: root.errorMsg === ""
+                visible: root.errorMsg === "" && root.hasSessionWindow
                 text: Math.round(root.sessionUsagePercent) + "%"
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                 font.bold: true
             }
 
             PlasmaComponents.Label {
-                visible: root.errorMsg === ""
+                visible: root.errorMsg === "" && root.hasSessionWindow && root.hasWeeklyWindow
                 text: "|"
                 opacity: 0.5
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
             }
 
             Rectangle {
-                visible: root.errorMsg === ""
+                visible: root.errorMsg === "" && root.hasWeeklyWindow
                 Layout.preferredWidth: 10
                 Layout.preferredHeight: 10
                 radius: 5
@@ -549,7 +1021,7 @@ PlasmoidItem {
             }
 
             PlasmaComponents.Label {
-                visible: root.errorMsg === ""
+                visible: root.errorMsg === "" && root.hasWeeklyWindow
                 text: Math.round(root.weeklyUsagePercent) + "%"
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                 font.bold: true
@@ -620,7 +1092,10 @@ PlasmoidItem {
                         font.bold: true
                     }
                     PlasmaComponents.Label {
-                        text: i18n.tr("Run 'claude' to log in")
+                        text: root.provider === "codex" ? "Run 'codex login' to log in"
+                            : root.provider === "grok" ? "Run 'grok login' to log in"
+                            : root.provider === "zai" ? "Configure Z.ai credentials"
+                            : i18n.tr("Run 'claude' to log in")
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                         color: Kirigami.Theme.negativeTextColor
                     }
@@ -635,9 +1110,18 @@ PlasmoidItem {
                 opacity: 0.3
             }
 
+            // Banked Codex rate-limit resets (from rate_limit_reset_credits)
+            PlasmaComponents.Label {
+                visible: root.bankedResets > 0
+                text: "Banked resets: " + root.bankedResets
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                color: Kirigami.Theme.neutralTextColor
+            }
+
             // Session Usage
             ColumnLayout {
                 Layout.fillWidth: true
+                visible: root.hasSessionWindow
                 spacing: Kirigami.Units.smallSpacing
 
                 RowLayout {
@@ -709,6 +1193,7 @@ PlasmoidItem {
             // Weekly Usage
             ColumnLayout {
                 Layout.fillWidth: true
+                visible: root.hasWeeklyWindow
                 spacing: Kirigami.Units.smallSpacing
 
                 RowLayout {
@@ -780,7 +1265,10 @@ PlasmoidItem {
                     }
                     Item { Layout.fillWidth: true }
                     PlasmaComponents.Label {
+                        // Pace assumes Claude-like session/weekly coupling; hide for Grok
+                        // and single-window Codex Pro (no session budget).
                         visible: root.weeklyResetTime !== null && root.weeklyUsagePercent < 100
+                                 && root.hasSessionWindow && !root.isGrok
                         text: i18n.tr("Pace:") + " " + formatPaceShort()
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                         color: getPaceRequiredColor(root.requiredPace)
@@ -789,19 +1277,19 @@ PlasmoidItem {
 
             }
 
-            // Separator (hidden for z.ai and kimi which have no model breakdown)
+            // Separator (hidden for providers with no model breakdown, unless extras exist)
             Rectangle {
-                visible: root.provider !== "zai" && !root.isKimi
+                visible: !root.hideModelSection || root.additionalLimits.length > 0
                 Layout.fillWidth: true
                 height: 1
                 color: Kirigami.Theme.disabledTextColor
                 opacity: 0.3
             }
 
-            // Model breakdown (collapsible) - hidden for z.ai and kimi
+            // Model breakdown (collapsible) - hidden for z.ai / kimi / grok unless extras
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.provider !== "zai" && !root.isKimi
+                visible: !root.hideModelSection || root.additionalLimits.length > 0
 
                 MouseArea {
                     Layout.fillWidth: true
@@ -813,7 +1301,10 @@ PlasmoidItem {
                         anchors.fill: parent
                         PlasmaComponents.Label {
                             id: modelHeaderLabel
-                            text: (root.modelSectionExpanded ? "▾ " : "▸ ") + i18n.tr("By Model (Weekly)")
+                            text: (root.modelSectionExpanded ? "▾ " : "▸ ")
+                                + (root.additionalLimits.length > 0 && root.weeklyModelLimits.length === 0
+                                    ? "Extra limits"
+                                    : i18n.tr("By Model (Weekly)"))
                             font.bold: true
                             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                         }
@@ -824,7 +1315,7 @@ PlasmoidItem {
 
             // Per-model weekly limits (Claude weekly_scoped entries)
             Repeater {
-                model: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi ? root.weeklyModelLimits : []
+                model: root.modelSectionExpanded && !root.hideModelSection ? root.weeklyModelLimits : []
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -890,7 +1381,7 @@ PlasmoidItem {
 
             // No model data message
             PlasmaComponents.Label {
-                visible: root.modelSectionExpanded && root.provider !== "zai" && !root.isKimi && root.weeklyModelLimits.length === 0 && root.additionalLimits.length === 0
+                visible: root.modelSectionExpanded && !root.hideModelSection && root.weeklyModelLimits.length === 0 && root.additionalLimits.length === 0
                 text: i18n.tr("No model breakdown available")
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                 color: Kirigami.Theme.disabledTextColor
@@ -946,7 +1437,7 @@ PlasmoidItem {
         if (!root.sessionResetTime) return
         var now = new Date()
         var resetMs = root.sessionResetTime.getTime()
-        var periodMs = 5 * 60 * 60 * 1000
+        var periodMs = root.sessionPeriodMs > 0 ? root.sessionPeriodMs : (5 * 60 * 60 * 1000)
         var startMs = resetMs - periodMs
         var elapsed = now.getTime() - startMs
         root.sessionTimePercent = Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
@@ -1113,5 +1604,15 @@ PlasmoidItem {
 
     Plasmoid.icon: "claude-usage"
     toolTipMainText: root.displayName + " " + i18n.tr("Usage")
-    toolTipSubText: root.sessionLabel + ": " + Math.round(root.sessionUsagePercent) + "% | " + root.weeklyLabel + ": " + Math.round(root.weeklyUsagePercent) + "%"
+    toolTipSubText: {
+        if (root.errorMsg !== "") return root.errorMsg
+        var parts = []
+        if (root.hasSessionWindow)
+            parts.push(root.sessionLabel + ": " + Math.round(root.sessionUsagePercent) + "%")
+        if (root.hasWeeklyWindow)
+            parts.push(root.weeklyLabel + ": " + Math.round(root.weeklyUsagePercent) + "%")
+        if (root.bankedResets > 0)
+            parts.push("resets×" + root.bankedResets)
+        return parts.length ? parts.join(" | ") : i18n.tr("Loading...")
+    }
 }

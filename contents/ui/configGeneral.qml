@@ -24,8 +24,8 @@ KCM.SimpleKCM {
     property string cfg_opencodeSubProvider
     property int cfg_opencodeAccountIndex
 
-    readonly property var providerValues: ["claude", "codex", "zai", "opencode"]
-    readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Z.ai (GLM)", "OpenCode"]
+    readonly property var providerValues: ["claude", "codex", "grok", "zai", "opencode"]
+    readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Grok (xAI)", "Z.ai (GLM)", "OpenCode"]
 
     // Translation helper
     Translations {
@@ -95,7 +95,10 @@ KCM.SimpleKCM {
         QQC2.TextField {
             id: displayNameField
             Kirigami.FormData.label: tr("Display name:")
-            placeholderText: cfg_provider === "codex" ? "Codex" : cfg_provider === "zai" ? "Z.ai" : "Claude"
+            placeholderText: cfg_provider === "codex" ? "Codex"
+                           : cfg_provider === "grok" ? "Grok"
+                           : cfg_provider === "zai" ? "Z.ai"
+                           : "Claude"
             text: cfg_displayName
 
             onTextChanged: {
@@ -106,7 +109,10 @@ KCM.SimpleKCM {
         QQC2.TextField {
             id: credentialsPathField
             Kirigami.FormData.label: tr("Credentials file path:")
-            placeholderText: cfg_provider === "codex" ? "~/.codex/auth.json" : cfg_provider === "zai" ? "~/.local/share/opencode/auth.json" : "~/.claude/.credentials.json"
+            placeholderText: cfg_provider === "codex" ? "~/.codex/auth.json"
+                           : cfg_provider === "grok" ? "~/.grok/auth.json"
+                           : cfg_provider === "zai" ? "~/.local/share/opencode/auth.json"
+                           : "~/.claude/.credentials.json"
             text: cfg_credentialsPath
 
             onTextChanged: {

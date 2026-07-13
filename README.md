@@ -1,27 +1,28 @@
 # Claude Usage Widget
 
-A KDE Plasma 6 widget that displays your Claude Code usage statistics in the taskbar.
+A KDE Plasma 6 widget that displays AI coding usage quotas in the taskbar (Claude, Codex, Grok, Z.ai, OpenCode).
 
 ![Popup](screenshots/popup.png)
 
 ## Features
 
+- **Multi-provider**: Claude, Codex (OpenAI), Grok (xAI), Z.ai, and OpenCode sub-providers (configure in widget settings)
 - **Compact Panel Display**: Shows session and weekly usage percentages right in your taskbar
   ![Panel](screenshots/panel.png)
-- **Color-coded Indicators**: Green (<50%), Yellow (<80%), Red (≥80%)
+- **Color-coded Indicators**: Green / yellow / red by capacity or efficiency pace
 - **Detailed Popup**: Click to see full statistics
-  - Session and weekly usage with progress bars
-  - Reset times for both limits
-  - Per-model breakdown (Sonnet/Opus)
-  - Your subscription plan badge
-- **Auto-refresh**: Updates every minute automatically
+  - Dynamic window labels (e.g. Codex `5h` / `7d`, Grok weekly + monthly $)
+  - Reset times and time-elapsed bars
+  - Per-model / extra limits (Claude weekly_scoped, Codex Spark, banked resets)
+  - Subscription plan badge
+- **Auto-refresh**: Configurable interval
 - **Error Handling**: Clear messages when not logged in or token expired
 - **No Dependencies**: Pure QML, no Python or external tools required
 
 ## Requirements
 
 - KDE Plasma 6.0 or later
-- Claude Code CLI installed and logged in
+- Credentials for the provider you select (e.g. `claude` / `codex login` / `grok login`)
 
 ## Installation
 
