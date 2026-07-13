@@ -27,20 +27,25 @@ PlasmoidItem {
         }
     }
 
-    readonly property string legacyPanelTitle: {
-        var dn = Plasmoid.configuration.displayName || ""
-        if (dn) return dn
-        if (controller.profiles.length === 1)
-            return controller.profiles[0].displayName || controller.profiles[0].id || ""
-        return ""
+    function profilePrimaryWindows(profile) {
+        var out = []
+        if (!profile || !profile.windows) return out
+        for (var i = 0; i < profile.windows.length; i++) {
+            var w = profile.windows[i]
+            if (w.visible && w.role === "primary") out.push(w)
+        }
+        return out
+    }
+
+    function windowColor(win, colorMode) {
+        return QC.windowPaceColor(win, colorMode, Kirigami.Theme)
     }
 
     compactRepresentation: Item {
-        Layout.minimumWidth: Math.max(usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2,
-            Kirigami.Units.gridUnit * 4)
+        Layout.minimumWidth: panelColumn.implicitWidth + Kirigami.Units.largeSpacing * 2
         Layout.minimumHeight: Kirigami.Units.iconSizes.medium
-        Layout.preferredWidth: usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2
-        Layout.preferredHeight: Math.max(Kirigami.Units.iconSizes.medium, usageRow.implicitHeight)
+        Layout.preferredWidth: panelColumn.implicitWidth + Kirigami.Units.largeSpacing * 2
+        Layout.preferredHeight: Math.max(Kirigami.Units.iconSizes.medium, panelColumn.implicitHeight)
 
         MouseArea {
             anchors.fill: parent
@@ -48,7 +53,6 @@ PlasmoidItem {
         }
 
         RowLayout {
-            id: usageRow
             anchors.centerIn: parent
             spacing: Kirigami.Units.smallSpacing
 
@@ -56,21 +60,110 @@ PlasmoidItem {
                 Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
                 Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
                 source: Qt.resolvedUrl("../icons/claude.svg")
+                Layout.rightMargin: Kirigami.Units.smallSpacing
             }
 
-            PanelView {
-                controller: controller
-                sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
-                weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
-                showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
-            }
+            ColumnLayout {
+                id: panelColumn
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 5
+                spacing: 1
 
-            PlasmaComponents.Label {
-                visible: usageRow.implicitWidth < Kirigami.Units.gridUnit * 3
-                    && (controller.discovering || legacyPanelTitle !== "")
-                text: controller.discovering ? "…" : legacyPanelTitle
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: Kirigami.Theme.textColor
+                Repeater {
+                    model: controller.profiles
+
+                    RowLayout {
+                        required property var modelData
+                        readonly property var profile: modelData
+                        readonly property var primaryWins: root.profilePrimaryWindows(profile)
+                        spacing: Kirigami.Units.smallSpacing
+                        visible: modelData.enabled !== false
+
+                        PlasmaComponents.Label {
+                            text: profile.error ? "⚠" : (profile.displayName || profile.id || "?")
+                            font.bold: true
+                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                            color: profile.error ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+                            Layout.preferredWidth: 72
+                            elide: Text.ElideRight
+                        }
+
+                        Repeater {
+                            model: primaryWins
+
+                            RowLayout {
+                                required property var modelData
+                                required property int index
+                                readonly property var win: modelData
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Rectangle {
+                                    Layout.preferredWidth: 36
+                                    Layout.preferredHeight: 5
+                                    radius: 2
+                                    color: Kirigami.Theme.backgroundColor
+                                    border.color: Kirigami.Theme.disabledTextColor
+                                    border.width: 1
+                                    Rectangle {
+                                        width: parent.width * Math.min((win.usagePercent || 0) / 100, 1)
+                                        height: parent.height
+                                        radius: 2
+                                        color: root.windowColor(win,
+                                            index === 0 ? (Plasmoid.configuration.sessionColorMode || "capacity")
+                                                        : (Plasmoid.configuration.weeklyColorMode || "efficiency"))
+                                    }
+                                }
+
+                                PlasmaComponents.Label {
+                                    text: Math.round(win.usagePercent || 0) + "%"
+                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                    font.bold: true
+                                    color: root.windowColor(win,
+                                        index === 0 ? (Plasmoid.configuration.sessionColorMode || "capacity")
+                                                    : (Plasmoid.configuration.weeklyColorMode || "efficiency"))
+                                }
+
+                                PlasmaComponents.Label {
+                                    visible: win.resetAtMs > 0
+                                    text: QC.formatCountdown(win.resetAtMs, controller.nowMs)
+                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                    color: Kirigami.Theme.disabledTextColor
+                                }
+
+                                PlasmaComponents.Label {
+                                    visible: index < primaryWins.length - 1
+                                    text: "|"
+                                    opacity: 0.4
+                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                }
+                            }
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: profile.bankedResets > 0
+                                    && Plasmoid.configuration.showBankedBadge !== false
+                            text: "↻" + profile.bankedResets
+                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                            color: Kirigami.Theme.highlightColor
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: profile.error !== ""
+                            text: profile.error
+                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                            color: Kirigami.Theme.negativeTextColor
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    visible: controller.profiles.length === 0 || panelColumn.implicitWidth < 8
+                    text: controller.discovering ? "…"
+                        : (Plasmoid.configuration.displayName || i18n.tr("Loading..."))
+                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                    font.bold: true
+                    color: Kirigami.Theme.textColor
+                }
             }
         }
     }

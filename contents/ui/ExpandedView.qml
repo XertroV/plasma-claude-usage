@@ -144,7 +144,8 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: !!controller
         PlasmaComponents.Label {
-            text: controller.lastGlobalUpdate !== "" ? tr("Updated:") + " " + controller.lastGlobalUpdate : tr("Loading...")
+            text: controller && controller.lastGlobalUpdate !== ""
+                ? tr("Updated:") + " " + controller.lastGlobalUpdate : tr("Loading...")
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
             color: Kirigami.Theme.disabledTextColor
         }

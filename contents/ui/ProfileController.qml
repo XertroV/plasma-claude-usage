@@ -168,6 +168,9 @@ Item {
             } else {
                 return
             }
+        } else if (provider === "grok") {
+            credPath = "$HOME/.grok-1/auth.json"
+            effectiveProvider = "grok"
         } else {
             return
         }
@@ -255,6 +258,7 @@ Item {
         }
         profiles = rows
         discovering = false
+        console.log("Claude Usage: merged", rows.length, "profile(s)")
         staggerRefreshAll()
     }
 
