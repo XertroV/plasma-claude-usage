@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
 
@@ -106,10 +107,38 @@ Item {
         }
 
         PlasmaComponents.Label {
+            // Idle empty: none discovered, or all Hidden (B032)
             visible: cardsRoot.cards.length === 0 && !cardsRoot.isLoading
-            text: cardsRoot.tr("No profiles")
+            text: {
+                var all = cardsRoot.profiles || []
+                if (all.length > 0)
+                    return cardsRoot.tr("All accounts hidden")
+                return cardsRoot.tr("No profiles")
+            }
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
             color: Kirigami.Theme.disabledTextColor
+            Accessible.name: text
+            Accessible.role: Accessible.Button
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: -Kirigami.Units.smallSpacing
+                enabled: (cardsRoot.profiles || []).length > 0
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                    var list = cardsRoot.profiles || []
+                    for (var i = 0; i < list.length; i++) {
+                        if (list[i] && list[i].id) {
+                            cardsRoot.detailRequested(list[i])
+                            return
+                        }
+                    }
+                }
+            }
+            HoverHandler { id: emptyHover }
+            QQC2.ToolTip {
+                visible: emptyHover.hovered && (cardsRoot.profiles || []).length > 0
+                text: cardsRoot.tr("Open details to unhide")
+            }
         }
         // Loading count lives in the host chrome (header), not as a stray Flow item.
     }

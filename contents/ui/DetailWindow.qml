@@ -16,10 +16,14 @@ Window {
     property string sessionColorMode: "capacity"
     property string weeklyColorMode: "efficiency"
     property var i18n: null
+    // Local mirror so the checkbox stays interactive after hide (panel filters enabled)
+    property bool hiddenChecked: false
 
     signal refreshRequested()
     signal configureRequested()
     signal profileSelected(var profile)
+    // B032: hide this account/provider from the panel (persists as enabledProfilesJson)
+    signal hiddenToggled(string profileId, bool hidden)
 
     function tr(t) { return i18n ? i18n.tr(t) : t }
 
@@ -35,9 +39,14 @@ Window {
 
     function showFor(p) {
         profile = p
+        hiddenChecked = !!(p && p.enabled === false)
         visible = true
         raise()
         requestActivate()
+    }
+
+    function syncHiddenFromProfile() {
+        hiddenChecked = !!(profile && profile.enabled === false)
     }
 
     ColumnLayout {
@@ -56,37 +65,32 @@ Window {
             QQC2.ComboBox {
                 id: accountCombo
                 Layout.fillWidth: true
+                // Include hidden profiles so they remain selectable for un-hide (B032)
                 model: {
                     var names = []
                     var list = profiles || []
                     for (var i = 0; i < list.length; i++) {
-                        if (list[i] && list[i].enabled !== false)
-                            names.push(list[i].displayName || list[i].id || ("#" + i))
+                        if (!list[i]) continue
+                        var label = list[i].displayName || list[i].id || ("#" + i)
+                        if (list[i].enabled === false)
+                            label = label + " (" + tr("Hidden") + ")"
+                        names.push(label)
                     }
                     return names
                 }
                 onActivated: function(index) {
                     var list = profiles || []
-                    var enabled = []
-                    for (var i = 0; i < list.length; i++) {
-                        if (list[i] && list[i].enabled !== false)
-                            enabled.push(list[i])
-                    }
-                    if (index >= 0 && index < enabled.length) {
-                        detailWin.profile = enabled[index]
-                        detailWin.profileSelected(enabled[index])
+                    if (index >= 0 && index < list.length && list[index]) {
+                        detailWin.profile = list[index]
+                        detailWin.syncHiddenFromProfile()
+                        detailWin.profileSelected(list[index])
                     }
                 }
                 Component.onCompleted: syncIndex()
                 function syncIndex() {
                     if (!profile || !profiles) return
-                    var enabled = []
-                    for (var i = 0; i < profiles.length; i++) {
-                        if (profiles[i] && profiles[i].enabled !== false)
-                            enabled.push(profiles[i])
-                    }
-                    for (var j = 0; j < enabled.length; j++) {
-                        if (enabled[j].id === profile.id) {
+                    for (var j = 0; j < profiles.length; j++) {
+                        if (profiles[j] && profiles[j].id === profile.id) {
                             currentIndex = j
                             return
                         }
@@ -99,19 +103,53 @@ Window {
             }
         }
 
-        PlasmaComponents.Label {
+        RowLayout {
             Layout.fillWidth: true
-            text: {
-                var p = profile
-                if (!p) return ""
-                var line = (p.displayName || p.id || "")
-                if (p.planName) line += " · " + p.planName
-                if (p.provider) line += " · " + p.provider
-                return line
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: {
+                    var p = profile
+                    if (!p) return ""
+                    var line = (p.displayName || p.id || "")
+                    if (p.planName) line += " · " + p.planName
+                    if (p.provider) line += " · " + p.provider
+                    return line
+                }
+                font.bold: true
+                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
+                wrapMode: Text.WordWrap
             }
-            font.bold: true
-            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
-            wrapMode: Text.WordWrap
+
+            // B032: hide this acct/provider from the panel without opening Configure
+            QQC2.CheckBox {
+                id: hiddenCheck
+                text: tr("Hidden")
+                enabled: !!(profile && profile.id)
+                Accessible.name: tr("Hidden")
+                Accessible.description: tr("Hide this account from the panel")
+                // Avoid two-way binding break: push from hiddenChecked, pull on toggle
+                Component.onCompleted: checked = detailWin.hiddenChecked
+                Connections {
+                    target: detailWin
+                    function onHiddenCheckedChanged() {
+                        if (hiddenCheck.checked !== detailWin.hiddenChecked)
+                            hiddenCheck.checked = detailWin.hiddenChecked
+                    }
+                }
+                onToggled: {
+                    if (checked === detailWin.hiddenChecked)
+                        return
+                    detailWin.hiddenChecked = checked
+                    if (profile && profile.id)
+                        detailWin.hiddenToggled(profile.id, checked)
+                }
+                QQC2.ToolTip {
+                    text: tr("Hide this account from the panel")
+                    delay: 400
+                }
+            }
         }
 
         // Paths

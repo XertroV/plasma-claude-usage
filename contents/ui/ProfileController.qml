@@ -136,9 +136,78 @@ Item {
     }
 
     function isProfileEnabled(meta) {
+        var id = meta && typeof meta === "object" ? meta.id : meta
+        if (!id) return true
         var enabled = parseJsonConfig(cfgValue("enabledProfilesJson", "[]"), [])
         if (!enabled || enabled.length === 0) return true
-        return enabled.indexOf(meta.id) >= 0
+        return enabled.indexOf(id) >= 0
+    }
+
+    /**
+     * Hide/show a profile on the panel (B032). Persists via enabledProfilesJson
+     * (same allowlist as KCM "On" checkboxes). Empty JSON = all visible.
+     * Immediate in-memory patch for snappy UI; config watch re-merges membership.
+     */
+    function setProfileHidden(profileId, hidden) {
+        if (!profileId || !plasmoid || !plasmoid.configuration) return
+
+        var enabledList = parseJsonConfig(cfgValue("enabledProfilesJson", "[]"), [])
+        if (!Array.isArray(enabledList)) enabledList = []
+
+        var allIds = []
+        var seen = {}
+        for (var i = 0; i < profiles.length; i++) {
+            var pid = profiles[i] && profiles[i].id
+            if (!pid || seen[pid]) continue
+            seen[pid] = true
+            allIds.push(pid)
+        }
+        // Preserve allowlist entries not currently loaded (e.g. mid-discover)
+        for (var e = 0; e < enabledList.length; e++) {
+            var eid = enabledList[e]
+            if (!eid || eid === "__none__" || seen[eid]) continue
+            seen[eid] = true
+            allIds.push(eid)
+        }
+        if (!seen[profileId]) {
+            allIds.push(profileId)
+            seen[profileId] = true
+        }
+
+        var currentlyAllOn = enabledList.length === 0
+        var wantOn = {}
+        for (var a = 0; a < allIds.length; a++) {
+            var id = allIds[a]
+            wantOn[id] = currentlyAllOn ? true : (enabledList.indexOf(id) >= 0)
+        }
+        wantOn[profileId] = !hidden
+
+        var next = []
+        var anyOff = false
+        for (var k = 0; k < allIds.length; k++) {
+            var kid = allIds[k]
+            if (wantOn[kid])
+                next.push(kid)
+            else
+                anyOff = true
+        }
+
+        // Empty allowlist means "all on" — if every profile is hidden, use a
+        // sentinel so isProfileEnabled stays false until something is re-enabled.
+        var json
+        if (!anyOff)
+            json = "[]"
+        else if (next.length === 0)
+            json = JSON.stringify(["__none__"])
+        else
+            json = JSON.stringify(next)
+
+        var idx = findProfileIndex(profileId)
+        if (idx >= 0)
+            updateProfile(idx, { enabled: !hidden })
+
+        if (String(plasmoid.configuration.enabledProfilesJson || "") !== json)
+            plasmoid.configuration.enabledProfilesJson = json
     }
 
     function visibleWindowIds() {
@@ -331,8 +400,10 @@ Item {
         var rows = []
         for (var i = 0; i < merged.length; i++) {
             var meta = merged[i]
-            if (!isProfileEnabled(meta)) continue
+            // Keep hidden (disabled) profiles in the list with enabled:false so the
+            // details page can unhide them without a full rediscover (B032).
             var row = blankProfileRow(meta, visIds)
+            row.enabled = isProfileEnabled(meta)
             if (meta.displayNameHint && row.displayName === QC.defaultProfileLabel(meta.provider, meta.profileKey))
                 row.displayName = meta.displayNameHint
             var prev = prevById[meta.id]
@@ -365,9 +436,10 @@ Item {
         discovering = false
         dataEpoch++
         console.log("Claude Usage: merged", rows.length, "profile(s)")
-        // Only kick fetches for rows that still need data
+        // Only kick fetches for enabled rows that still need data
         var needFetch = false
         for (var ri = 0; ri < rows.length; ri++) {
+            if (rows[ri].enabled === false) continue
             if (!rows[ri].windows || rows[ri].windows.length === 0) {
                 needFetch = true
                 break
@@ -378,6 +450,7 @@ Item {
         else {
             // Ensure empty new rows still load
             for (var rj = 0; rj < rows.length; rj++) {
+                if (rows[rj].enabled === false) continue
                 if (!rows[rj].windows || rows[rj].windows.length === 0)
                     queueProfileRefresh(rows[rj].id, true)
             }
@@ -386,15 +459,15 @@ Item {
     }
 
     /**
-     * Re-apply config after KCM Apply (B003).
-     * - rediscover/membership: full discoverProfiles (merge preserves fetch state)
+     * Re-apply config after KCM Apply (B003) or details Hidden toggle (B032).
+     * - rediscover: full discoverProfiles (merge preserves fetch state)
+     * - membership: re-read enabled flags on current rows; rediscover only if empty
      * - soft: names + window visibility only on current rows
      */
     function reapplyConfig(opts) {
         opts = opts || {}
-        if (opts.rediscover || opts.forceFull || opts.membership) {
-            console.log("Claude Usage: reapplyConfig → rediscover",
-                        opts.membership ? "(membership)" : "")
+        if (opts.rediscover || opts.forceFull) {
+            console.log("Claude Usage: reapplyConfig → rediscover")
             if (isLegacySingleInstance() && profiles.length === 0)
                 bootstrapLegacyProfiles()
             discoverProfiles()
@@ -409,10 +482,14 @@ Item {
             return
         }
 
-        // Soft: patch names + visibility; do not change membership here
+        // Soft (+ optional membership): names, window visibility, and enabled flags.
+        // Membership is in-place so Hidden can toggle without a full rediscover (B032).
+        // Always apply soft fields so multi-key Apply (On + rename) does not drop names.
         var visIds = visibleWindowIds()
         var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
+        var patchMembership = !!opts.membership
         var rows = []
+        var becameEnabled = []
         for (var j = 0; j < profiles.length; j++) {
             var p = profiles[j]
             if (!p || !p.id) continue
@@ -430,12 +507,28 @@ Item {
                 for (var wi = 0; wi < copy.windows.length; wi++)
                     QC.updateTimePercent(copy.windows[wi], nowMs)
             }
+            if (patchMembership) {
+                var wasOn = p.enabled !== false
+                var nowOn = isProfileEnabled(p.id)
+                copy.enabled = nowOn
+                if (!wasOn && nowOn
+                        && (!copy.windows || copy.windows.length === 0)
+                        && !copy.loading)
+                    becameEnabled.push(copy.id)
+            }
             rows.push(copy)
         }
 
         profiles = rows
         dataEpoch++
-        console.log("Claude Usage: reapplyConfig soft-patched", rows.length, "profile(s)")
+        console.log("Claude Usage: reapplyConfig",
+                    patchMembership ? "membership+soft" : "soft",
+                    "patched", rows.length, "profile(s)")
+        if (patchMembership && becameEnabled.length) {
+            for (var bi = 0; bi < becameEnabled.length; bi++)
+                queueProfileRefresh(becameEnabled[bi], true)
+            kickRefreshQueue()
+        }
     }
 
     function findProfileIndex(id) {
@@ -568,7 +661,9 @@ Item {
         refreshQueue = []
         if (profiles.length === 0) return
         // Manual full refresh: clear per-profile auto holds so user can force retry (B029)
+        // Skip hidden profiles (enabled:false) — they stay off the panel (B032).
         for (var i = 0; i < profiles.length; i++) {
+            if (!profiles[i] || profiles[i].enabled === false) continue
             queueProfileRefresh(profiles[i].id, true)
         }
         kickRefreshQueue()
