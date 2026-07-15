@@ -17,6 +17,7 @@ Rectangle {
     property int minWidth: Kirigami.Units.gridUnit * 11
 
     signal detailRequested(var profile)
+    signal refreshRequested(var profile)
 
     readonly property var primaries: QC.primaryWindows(profile)
     // Any in-flight fetch (refresh or first load)
@@ -47,7 +48,7 @@ Rectangle {
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
 
-        // Header: name · spinner · banked · detail  (spinner replaces the old "…" body line)
+        // Header: name · refresh/spinner · banked · detail
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
@@ -73,15 +74,48 @@ Rectangle {
                 }
             }
 
-            // Always-allocated spinner slot so refresh never reflows the card
-            PlasmaComponents.BusyIndicator {
+            // Always-allocated slot: refresh control idle, spinner while this profile loads
+            Item {
+                id: refreshSlot
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 Layout.alignment: Qt.AlignVCenter
-                opacity: cardRoot.refreshing ? 1 : 0
-                running: cardRoot.refreshing
-                Accessible.name: "Refreshing"
-                Accessible.ignored: !cardRoot.refreshing
+
+                PlasmaComponents.BusyIndicator {
+                    anchors.fill: parent
+                    visible: cardRoot.refreshing
+                    running: cardRoot.refreshing
+                    Accessible.name: "Refreshing"
+                    Accessible.ignored: !cardRoot.refreshing
+                }
+
+                Kirigami.Icon {
+                    anchors.fill: parent
+                    source: "view-refresh"
+                    opacity: refreshMouse.containsMouse ? 1 : 0.55
+                    visible: !cardRoot.refreshing
+                    color: Kirigami.Theme.textColor
+                    Accessible.name: "Refresh"
+                    Accessible.role: Accessible.Button
+                    Accessible.ignored: cardRoot.refreshing
+                }
+
+                MouseArea {
+                    id: refreshMouse
+                    anchors.fill: parent
+                    anchors.margins: -Kirigami.Units.smallSpacing / 2
+                    enabled: !cardRoot.refreshing && !!cardRoot.profile
+                    hoverEnabled: true
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: {
+                        if (cardRoot.profile)
+                            cardRoot.refreshRequested(cardRoot.profile)
+                    }
+                }
+                QQC2.ToolTip {
+                    visible: refreshMouse.containsMouse && !cardRoot.refreshing
+                    text: "Refresh"
+                }
             }
 
             PlasmaComponents.Label {

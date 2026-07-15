@@ -425,6 +425,10 @@ PlasmoidItem {
             fillWidth: true
             i18n: root.i18nObj
             onDetailRequested: function(p) { root.openDetailFor(p) }
+            onRefreshRequested: function(p) {
+                if (root.usageController && p && p.id)
+                    root.usageController.refreshProfile(p.id)
+            }
         }
     }
 
@@ -505,6 +509,10 @@ PlasmoidItem {
                     fillWidth: true
                     i18n: root.i18nObj
                     onDetailRequested: function(p) { root.openDetailFor(p) }
+                    onRefreshRequested: function(p) {
+                        if (root.usageController && p && p.id)
+                            root.usageController.refreshProfile(p.id)
+                    }
                 }
             }
 
