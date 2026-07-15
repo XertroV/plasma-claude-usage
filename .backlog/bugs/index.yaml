@@ -23,3 +23,4 @@ bugs:
     - file: B022-quotachip-mousearea-on-rowlayo.todo
     - file: B023-response-cache-puts-full-envel.todo
     - file: B024-cache-write-queue-can-stall-if.todo
+    - file: B025-http-status-0-always-labeled-a.todo
