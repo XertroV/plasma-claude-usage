@@ -305,7 +305,8 @@ KCM.SimpleKCM {
 
     function addCustomProfile() {
         customFormError = ""
-        var provider = customProviderCombo.currentValue || providerValues[customProviderCombo.currentIndex] || "claude"
+        var provider = customProviderCombo.selectedProvider
+            || providerValues[customProviderCombo.currentIndex] || "claude"
         var path = (customPathField.text || "").trim()
         var displayName = (customNameField.text || "").trim()
         var credPath = (customCredField.text || "").trim()
@@ -629,8 +630,8 @@ KCM.SimpleKCM {
                     id: customProviderCombo
                     Layout.fillWidth: true
                     model: providerNames
-                    // map index → providerValues
-                    readonly property string currentValue: providerValues[currentIndex] || "claude"
+                    // Do NOT name this currentValue — QQC2.ComboBox already has FINAL currentValue (Qt 6)
+                    readonly property string selectedProvider: providerValues[currentIndex] || "claude"
                 }
 
                 QQC2.Label { text: tr("Config path") }

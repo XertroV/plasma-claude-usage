@@ -20,6 +20,9 @@ Item {
     property var refreshQueue: []
     // Monotonic fetch generation — never reset on merge, so stale XHR cannot collide (B008)
     property int nextFetchGen: 1
+    // Resolved $HOME for safe path expansion (B006) — never trust user path in shell
+    property string homeDir: ""
+    property bool homeReady: false
 
     // Auth cool-down between auto retries after OAuth/401 failures (B029)
     readonly property int authRetryHoldMs: 5 * 60 * 1000
@@ -27,11 +30,18 @@ Item {
     readonly property int maxBackoffIntervalMs: 60 * 60 * 1000
     // Auto auth failures before suspending usage API until token change or manual (B029)
     readonly property int maxAuthAutoAttempts: 2
+    // Max concurrent credential cat processes (B001: parallel OK when keyed by sourceName)
+    readonly property int maxCredInflight: 3
 
     function allocFetchGen() {
         var g = nextFetchGen
         nextFetchGen = g + 1
         return g
+    }
+
+    Component.onCompleted: {
+        // Fixed command — no user input (B006)
+        homeProbe.connectSource("printf %s \"$HOME\"")
     }
 
     readonly property string discoverScript: {
@@ -626,10 +636,15 @@ Item {
     function responseCacheRoot() {
         var override = String(cfgValue("responseCachePath", "") || "").trim()
         if (override) {
+            var abs = QC.expandToAbsolute(override, homeDir)
+            if (abs) return abs
+            // home not ready: keep $HOME token for cache-response.sh resolve_path
             if (override.indexOf("~/") === 0)
                 return "$HOME/" + override.substring(2)
             return override
         }
+        if (homeDir)
+            return homeDir.replace(/\/+$/, "") + "/.cache/plasma-claude-usage"
         return "$HOME/.cache/plasma-claude-usage"
     }
 
@@ -742,40 +757,61 @@ Item {
         }
     }
 
-    // Expand ~/ and $HOME safely, then always shell-quote the absolute-or-token path.
-    // Uses shell only for HOME expansion via printf %s (no user-controlled metachar eval).
-    function catCommand(path) {
-        var p = String(path || "").trim()
-        if (!p) return "cat /dev/null 2>/dev/null"
-        if (p.indexOf("~/") === 0)
-            p = "$HOME/" + p.substring(2)
-        else if (p === "~")
-            p = "$HOME"
-        else if (p.indexOf("${HOME}") === 0)
-            p = "$HOME" + p.substring(7)
-        // $HOME-relative: expand via parameter expansion in a quoted assignment, then cat quoted
-        if (p.indexOf("$HOME") === 0) {
-            var rest = p.substring(5) // may start with /
-            // rest is appended inside double quotes after expanded HOME — strip dangerous chars
-            rest = rest.replace(/["\\`$]/g, "")
-            return "HOME=\"${HOME:-/}\"; cat \"$HOME" + rest + "\" 2>/dev/null"
+    /**
+     * Build a unique executable source that always shell-quotes the path (B006)
+     * and embeds the profile id so onNewData cannot mis-attribute (B001).
+     * Format:  : 'cu-id=<profileId>'; cat '<absolute-path>' 2>/dev/null
+     */
+    function catCommand(path, profileId) {
+        var abs = QC.expandToAbsolute(path, homeDir)
+        if (!abs) {
+            // Home not resolved yet for a home-relative path
+            return ""
         }
-        return "cat " + shellQuote(p) + " 2>/dev/null"
+        // Always quote — path may contain spaces, ;, $, etc. (literal filename only)
+        var cat = "cat " + shellQuote(abs) + " 2>/dev/null"
+        if (profileId) {
+            // Unique sourceName per profile; shell no-op with fully quoted tag
+            return ": " + shellQuote("cu-id=" + String(profileId)) + "; " + cat
+        }
+        return cat
+    }
+
+    function pendingCredCount() {
+        var n = 0
+        var m = credReader._pendingBySource
+        if (!m) return 0
+        for (var k in m) {
+            if (m.hasOwnProperty(k) && m[k]) n++
+        }
+        return n
     }
 
     // Returns true if a credential read was started (or skipped as held).
-    // Returns false if caller should re-queue (busy reader / already loading).
+    // Returns false if caller should re-queue (busy / home not ready / already loading).
     function loadCredentials(idx, opts) {
         opts = opts || {}
         var manual = !!opts.manual
         if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
         if (!p) return true
-        // Avoid stacking concurrent loads for the same row (pairs with B001; helps B002/B026)
+        // Avoid stacking concurrent loads for the same row (B001/B002)
         if (p.loading) return false
         if (!manual && isAutoRefreshHeld(p, Date.now())) return true
-        // Serialize credential reads — single in-flight (index would race on reapply)
-        if (credReader._pendingId)
+        // Cap concurrent cats; map-by-sourceName is safe, but keep load gentle
+        if (pendingCredCount() >= maxCredInflight)
+            return false
+        // Wait for HOME probe before expanding ~/ or $HOME paths (B006)
+        var needsHome = false
+        var rawPath = String(p.credPath || "")
+        if (rawPath.indexOf("~/") === 0 || rawPath === "~"
+                || rawPath.indexOf("$HOME") === 0 || rawPath.indexOf("${HOME}") === 0)
+            needsHome = true
+        if (needsHome && !homeReady)
+            return false
+
+        var cmd = catCommand(p.credPath, p.id)
+        if (!cmd)
             return false
 
         var patch = { loading: true, error: "" }
@@ -786,9 +822,18 @@ Item {
         }
         updateProfile(idx, patch)
         p = profiles[idx]
-        var cmd = catCommand(p.credPath)
         console.log("Claude Usage: loadCredentials", p.id, p.provider, "manual=", manual, "cmd=", cmd)
-        credReader._pendingId = p.id
+
+        // B001: key pending work by full sourceName → profile id (not array index)
+        var map = {}
+        var prev = credReader._pendingBySource
+        if (prev) {
+            for (var k in prev) {
+                if (prev.hasOwnProperty(k)) map[k] = prev[k]
+            }
+        }
+        map[cmd] = p.id
+        credReader._pendingBySource = map
         credReader.connectSource(cmd)
         return true
     }
@@ -1279,21 +1324,60 @@ Item {
         }
     }
 
+    // Resolve $HOME once with a fixed command (B006) — never interpolate user strings here
+    Plasma5Support.DataSource {
+        id: homeProbe
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            var stdout = (data["stdout"] || "").trim()
+            disconnectSource(sourceName)
+            if (stdout && stdout.charAt(0) === "/") {
+                controller.homeDir = stdout
+                controller.homeReady = true
+                console.log("Claude Usage: homeDir=", controller.homeDir)
+                // Resume any queued credential loads waiting on HOME
+                controller.kickRefreshQueue()
+            } else {
+                console.log("Claude Usage: home probe failed, stdout=", stdout)
+                // Best-effort fallback so absolute paths still work
+                controller.homeReady = true
+            }
+        }
+    }
+
     Plasma5Support.DataSource {
         id: credReader
         engine: "executable"
         connectedSources: []
-        property string _pendingId: ""
+        // B001: sourceName → profileId (never array index)
+        property var _pendingBySource: ({})
 
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
             var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
-            var pendingId = credReader._pendingId
-            credReader._pendingId = ""
+
+            var map = credReader._pendingBySource || {}
+            var pendingId = map[sourceName] || ""
+            // Remove this source from the pending map
+            var nextMap = {}
+            for (var k in map) {
+                if (map.hasOwnProperty(k) && k !== sourceName)
+                    nextMap[k] = map[k]
+            }
+            credReader._pendingBySource = nextMap
+
+            // Fallback: parse cu-id from tagged command if map missed (should not happen)
+            if (!pendingId && sourceName.indexOf("cu-id=") >= 0) {
+                var m = sourceName.match(/cu-id=([^']+)/)
+                if (m) pendingId = m[1]
+            }
+
             var idx = findProfileIndex(pendingId)
             if (idx < 0 || idx >= profiles.length) {
-                // Re-kick queue if merge dropped the row mid-read
+                // Stale after rediscover/merge — drop, do not apply to wrong row
+                console.log("Claude Usage: drop stale cred reply for", pendingId || sourceName)
                 kickRefreshQueue()
                 return
             }
