@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T05:49:06Z"
 claimed_by: cli-user
-completed_at: null
+completed_at: "2026-07-15T05:57:19Z"
 complexity: medium
 created_at: "2026-07-15T04:40:25Z"
 depends_on: []
+duration_minutes: 8.217412774133333
 estimate_hours: 2
 id: B003
 priority: high
 started_at: "2026-07-15T05:49:06Z"
-status: in_progress
+status: done
 tags: []
 title: Config Apply does not rediscover or reapply multi-profile settings
-updated_at: "2026-07-15T05:49:06Z"
+updated_at: "2026-07-15T05:57:19Z"
 ---
 ## Problem
 Expanded “Refresh” only calls `refreshAll()`; there is no reload path when KCM config changes (`enabledProfilesJson`, `customProfilesJson`, `profileDisplayNamesJson`, `visibleWindowsJson`, `credentialsPath`, `provider`, etc.). Values are only read at `mergeDiscovered` / bootstrap time (except refresh intervals, which are read live). After Configure → Apply, the panel keeps the old profile set/names/visibility until Rediscover or plasmashell restart.
