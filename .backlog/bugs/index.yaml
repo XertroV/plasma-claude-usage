@@ -36,3 +36,4 @@ bugs:
     - file: B035-remove-ai-usage-move-refresh-b.todo
     - file: B036-font-size-is-a-little-small-fo.todo
     - file: B037-card-has-a-bit-of-dead-space-o.todo
+    - file: B038-card-shows-errors-like-rate-li.todo
