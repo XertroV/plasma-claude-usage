@@ -1,0 +1,27 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:43:52Z"
+depends_on: []
+estimate_hours: 1.5
+id: B023
+priority: medium
+status: pending
+tags:
+    - cache
+    - security
+    - ProfileController
+title: Response cache puts full envelope on process argv (ARG_MAX + process-list leak)
+updated_at: "2026-07-15T04:43:52Z"
+---
+## Problem
+`cacheResponse` passes the full JSON envelope as a shell-quoted argv to `cache-response.sh` via Plasma `executable` DataSource. Large error HTML (truncated only after 200k) or multi-profile bursts can hit ARG_MAX; response bodies can briefly appear in `ps` listings.
+
+## Location
+`contents/ui/ProfileController.qml` (`cacheResponse` / `enqueueCacheWrite`)
+`contents/scripts/cache-response.sh` (`$3` payload)
+
+## Suggested fix
+Write payload via a temp file or stdin (e.g. script reads from a path arg, or base64 file under `/tmp` created by a short write helper), not command-line argv. Keep truncation as a backstop.
+
+## Source
+Post-merge test of feat/response-cache (PIRFL residual major)
