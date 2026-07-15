@@ -30,3 +30,4 @@ bugs:
     - file: B029-should-not-re-request-failing.todo
     - file: B030-when-a-card-is-refreshing-it-a.todo
     - file: B031-settings-are-still-well-outdat.todo
+    - file: B032-add-hidden-toggle-visible-on-d.todo
