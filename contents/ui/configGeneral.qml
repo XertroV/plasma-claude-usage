@@ -179,6 +179,9 @@ KCM.SimpleKCM {
         var totalSlots = discoveredProfiles.length + customProfiles.length
         if (mapKeyCount(enabledMap) === 0 || (allOn && list.length >= totalSlots))
             cfg_enabledProfilesJson = "[]"
+        else if (list.length === 0)
+            // Same all-off sentinel as ProfileController.setProfileHidden (B032)
+            cfg_enabledProfilesJson = JSON.stringify(["__none__"])
         else
             cfg_enabledProfilesJson = JSON.stringify(list)
     }

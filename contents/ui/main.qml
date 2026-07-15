@@ -56,8 +56,14 @@ PlasmoidItem {
             // Defer watching until after initial config property binds settle
             Qt.callLater(function() { root.configWatchReady = true })
         }
-        onProfilesChanged: root.syncCompactFromController()
-        onDataEpochChanged: root.syncCompactFromController()
+        onProfilesChanged: {
+            root.syncCompactFromController()
+            root.syncDetailProfileFromList()
+        }
+        onDataEpochChanged: {
+            root.syncCompactFromController()
+            root.syncDetailProfileFromList()
+        }
         onNowMsChanged: root.syncCompactFromController()
         onDiscoveringChanged: root.syncCompactFromController()
         onLastGlobalUpdateChanged: root.syncCompactFromController()
@@ -173,9 +179,11 @@ PlasmoidItem {
         }
 
         if (!p) {
+            // All hidden (list non-empty, zero enabled) is an idle empty state, not loading (B032).
+            var hasRows = list.length > 0
             compactName = Plasmoid.configuration.displayName
                 || defaultProviderLabel()
-                || i18n.tr("Loading...")
+                || (hasRows ? i18n.tr("Hidden") : i18n.tr("Loading..."))
             errorMsg = ""
             sessionUsagePercent = 0
             weeklyUsagePercent = 0
@@ -184,10 +192,10 @@ PlasmoidItem {
             hasSessionWindow = false
             hasWeeklyWindow = false
             bankedResets = 0
-            isLoading = !!controller.discovering || profilesTotal === 0
+            isLoading = !!controller.discovering || (!hasRows && profilesTotal === 0)
             loadingCountText = controller.discovering
                 ? (profilesTotal > 0 ? (profilesDone + "/" + profilesTotal) : "…")
-                : (profilesTotal > 0 ? (profilesDone + "/" + profilesTotal) : "")
+                : ""
             return
         }
 
@@ -322,10 +330,19 @@ PlasmoidItem {
     function openDetailFor(profile) {
         if (!profile) {
             var list = root.profileList || []
+            // Prefer a visible account; fall back to any (incl. hidden) so unhide works (B032)
             for (var i = 0; i < list.length; i++) {
                 if (list[i] && list[i].enabled !== false) {
                     profile = list[i]
                     break
+                }
+            }
+            if (!profile) {
+                for (var j = 0; j < list.length; j++) {
+                    if (list[j] && list[j].id) {
+                        profile = list[j]
+                        break
+                    }
                 }
             }
         }
@@ -336,6 +353,21 @@ PlasmoidItem {
         detailWindow.weeklyColorMode = Plasmoid.configuration.weeklyColorMode || "efficiency"
         detailWindow.i18n = root.i18nObj
         detailWindow.showFor(profile)
+    }
+
+    /** Re-bind open detail window to the live profile row after membership changes (B032). */
+    function syncDetailProfileFromList() {
+        if (!detailWindow.visible || !detailWindow.profile || !detailWindow.profile.id)
+            return
+        var id = detailWindow.profile.id
+        var list = root.profileList || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].id === id) {
+                detailWindow.profile = list[i]
+                detailWindow.syncHiddenFromProfile()
+                return
+            }
+        }
     }
 
     function enabledProfiles() {
@@ -356,7 +388,12 @@ PlasmoidItem {
         weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
         i18n: root.i18nObj
         onRefreshRequested: {
-            if (root.usageController) root.usageController.refreshAll()
+            // Manual refresh of the open account (works even when Hidden) (B032)
+            if (!root.usageController) return
+            if (detailWindow.profile && detailWindow.profile.id)
+                root.usageController.refreshProfile(detailWindow.profile.id)
+            else
+                root.usageController.refreshAll()
         }
         onConfigureRequested: {
             try {
@@ -364,6 +401,10 @@ PlasmoidItem {
             } catch (e) {
                 console.log("Claude Usage: configure action failed", e)
             }
+        }
+        onHiddenToggled: function(profileId, hidden) {
+            if (root.usageController)
+                root.usageController.setProfileHidden(profileId, hidden)
         }
     }
 
