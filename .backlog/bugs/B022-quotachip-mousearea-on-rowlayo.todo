@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T06:42:33Z"
 claimed_by: grok-bl-fix-many
-completed_at: null
+completed_at: "2026-07-15T06:55:58Z"
 complexity: low
 created_at: "2026-07-15T04:40:48Z"
 depends_on: []
+duration_minutes: 13.42155364655
 estimate_hours: 0.5
 id: B022
 priority: low
 started_at: "2026-07-15T06:42:33Z"
-status: in_progress
+status: done
 tags: []
 title: QuotaChip MouseArea on RowLayout may get zero size; tooltips fail
-updated_at: "2026-07-15T06:42:33Z"
+updated_at: "2026-07-15T06:55:58Z"
 ---
 ## Problem
 `MouseArea { anchors.fill: parent }` on a `RowLayout` root often gets zero size unless the layout has an explicit width/height; tooltips on chips may never show.

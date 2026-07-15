@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T06:42:33Z"
 claimed_by: grok-bl-fix-many
-completed_at: null
+completed_at: "2026-07-15T06:55:58Z"
 complexity: medium
 created_at: "2026-07-15T04:43:52Z"
 depends_on: []
+duration_minutes: 13.421564063133333
 estimate_hours: 1.5
 id: B023
 priority: medium
 started_at: "2026-07-15T06:42:33Z"
-status: in_progress
+status: done
 tags: []
 title: Response cache puts full envelope on process argv (ARG_MAX + process-list leak)
-updated_at: "2026-07-15T06:42:33Z"
+updated_at: "2026-07-15T06:55:58Z"
 ---
 ## Problem
 `cacheResponse` passes the full JSON envelope as a shell-quoted argv to `cache-response.sh` via Plasma `executable` DataSource. Large error HTML (truncated only after 200k) or multi-profile bursts can hit ARG_MAX; response bodies can briefly appear in `ps` listings.

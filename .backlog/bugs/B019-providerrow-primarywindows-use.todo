@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T06:42:33Z"
 claimed_by: grok-bl-fix-many
-completed_at: null
+completed_at: "2026-07-15T06:55:58Z"
 complexity: low
 created_at: "2026-07-15T04:40:48Z"
 depends_on: []
+duration_minutes: 13.42153580675
 estimate_hours: 0.25
 id: B019
 priority: low
 started_at: "2026-07-15T06:42:33Z"
-status: in_progress
+status: done
 tags: []
 title: ProviderRow primaryWindows uses truthy visible; ExpandedView uses !== false
-updated_at: "2026-07-15T06:42:33Z"
+updated_at: "2026-07-15T06:55:58Z"
 ---
 ## Problem
 `primaryWindows` requires `w.visible && w.role === "primary"` (truthy `visible`). ExpandedView uses `w.visible !== false`, which is more defensive if `visible` is missing. Inconsistent filtering could hide windows in ProviderRow if a parser forgets `visible`.
