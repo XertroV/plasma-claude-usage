@@ -16,6 +16,8 @@ Item {
     property bool showBankedBadge: true
     property bool isLoading: false
     property string loadingText: ""
+    // Discovery failure from ProfileController (B017); shown in empty state
+    property string discoveryError: ""
     property int maxCards: 12
     property int cardMinWidth: Kirigami.Units.gridUnit * 11
     /** When true, cards expand to fill available width in the flow. */
@@ -109,10 +111,14 @@ Item {
         }
 
         // B022: hover/click on a sized Item, not a bare layout MouseArea.
+        // B017: surface discoveryError in empty state (and still allow unhide click).
         Item {
             id: emptyState
             visible: cardsRoot.cards.length === 0 && !cardsRoot.isLoading
-            implicitWidth: emptyLabel.implicitWidth + Kirigami.Units.smallSpacing * 2
+            implicitWidth: Math.max(
+                emptyLabel.implicitWidth + Kirigami.Units.smallSpacing * 2,
+                Math.min(cardsRoot.cardMinWidth,
+                         cardFlow.width > 0 ? cardFlow.width : cardsRoot.width))
             implicitHeight: emptyLabel.implicitHeight + Kirigami.Units.smallSpacing * 2
             width: implicitWidth
             height: implicitHeight
@@ -121,6 +127,8 @@ Item {
             Accessible.onPressAction: emptyState.openFirstDetail()
 
             readonly property bool canUnhide: (cardsRoot.profiles || []).length > 0
+            readonly property bool hasDiscoveryError:
+                cardsRoot.discoveryError && cardsRoot.discoveryError !== ""
 
             function openFirstDetail() {
                 if (!canUnhide)
@@ -137,18 +145,26 @@ Item {
             PlasmaComponents.Label {
                 id: emptyLabel
                 anchors.centerIn: parent
+                width: Math.max(1, emptyState.width - Kirigami.Units.smallSpacing * 2)
+                wrapMode: Text.WordWrap
+                maximumLineCount: 4
+                elide: Text.ElideRight
                 text: {
+                    if (emptyState.hasDiscoveryError)
+                        return cardsRoot.discoveryError
                     if (emptyState.canUnhide)
                         return cardsRoot.tr("All accounts hidden")
                     return cardsRoot.tr("No profiles")
                 }
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: Kirigami.Theme.disabledTextColor
+                color: emptyState.hasDiscoveryError
+                       ? Kirigami.Theme.negativeTextColor
+                       : Kirigami.Theme.disabledTextColor
             }
 
             HoverHandler {
                 id: emptyHover
-                enabled: emptyState.canUnhide
+                enabled: emptyState.canUnhide || emptyState.hasDiscoveryError
             }
             TapHandler {
                 enabled: emptyState.canUnhide
@@ -156,8 +172,15 @@ Item {
                 onTapped: emptyState.openFirstDetail()
             }
             QQC2.ToolTip {
-                visible: emptyHover.hovered && emptyState.canUnhide
-                text: cardsRoot.tr("Open details to unhide")
+                visible: emptyHover.hovered && (emptyState.canUnhide || emptyState.hasDiscoveryError)
+                text: {
+                    var parts = []
+                    if (emptyState.hasDiscoveryError)
+                        parts.push(cardsRoot.discoveryError)
+                    if (emptyState.canUnhide)
+                        parts.push(cardsRoot.tr("Open details to unhide"))
+                    return parts.join("\n")
+                }
             }
         }
         // Loading count lives in the host chrome (header), not as a stray Flow item.

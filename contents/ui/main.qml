@@ -36,6 +36,8 @@ PlasmoidItem {
     property int dataEpoch: 0
     property double nowMs: Date.now()
     property string lastGlobalUpdate: ""
+    // Discovery failure surfaced on panel empty state (B017)
+    property string discoveryError: ""
     property alias usageController: controller
     property alias i18nObj: i18n
     // Ignore config signals during bootstrap so we don't double-discover (B003)
@@ -68,6 +70,7 @@ PlasmoidItem {
         // Countdown / pace UI binds to root.nowMs directly.
         onNowMsChanged: root.nowMs = controller.nowMs
         onDiscoveringChanged: root.syncCompactFromController()
+        onDiscoveryErrorChanged: root.syncCompactFromController()
         onLastGlobalUpdateChanged: root.syncCompactFromController()
     }
 
@@ -141,6 +144,7 @@ PlasmoidItem {
         dataEpoch = controller.dataEpoch
         nowMs = controller.nowMs
         lastGlobalUpdate = controller.lastGlobalUpdate || ""
+        discoveryError = controller.discoveryError || ""
 
         var stats = controller.loadingStats ? controller.loadingStats()
             : { total: list.length, done: 0, loading: 0 }
@@ -158,11 +162,15 @@ PlasmoidItem {
 
         if (!p) {
             // All hidden (list non-empty, zero enabled) is an idle empty state, not loading (B032).
+            // Empty discovery success or discovery failure: also idle (B017) — not perpetual skeleton.
             var hasRows = list.length > 0
+            var discErr = controller.discoveryError || ""
             compactName = Plasmoid.configuration.displayName
                 || defaultProviderLabel()
-                || (hasRows ? i18n.tr("Hidden") : i18n.tr("Loading..."))
-            errorMsg = ""
+                || (hasRows ? i18n.tr("Hidden")
+                    : (discErr ? i18n.tr("Discovery failed")
+                        : (controller.discovering ? i18n.tr("Loading...") : i18n.tr("No profiles"))))
+            errorMsg = discErr
             sessionUsagePercent = 0
             weeklyUsagePercent = 0
             sessionTimePercent = 0
@@ -170,7 +178,7 @@ PlasmoidItem {
             hasSessionWindow = false
             hasWeeklyWindow = false
             bankedResets = 0
-            isLoading = !!controller.discovering || (!hasRows && profilesTotal === 0)
+            isLoading = !!controller.discovering
             loadingCountText = controller.discovering
                 ? (profilesTotal > 0 ? (profilesDone + "/" + profilesTotal) : "…")
                 : ""
@@ -398,6 +406,7 @@ PlasmoidItem {
             showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
             isLoading: root.isLoading
             loadingText: root.loadingCountText
+            discoveryError: root.discoveryError
             maxCards: 8
             cardMinWidth: Kirigami.Units.gridUnit * 10
             fillWidth: true
@@ -482,6 +491,7 @@ PlasmoidItem {
                     showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
                     isLoading: root.isLoading
                     loadingText: ""
+                    discoveryError: root.discoveryError
                     maxCards: 12
                     cardMinWidth: Kirigami.Units.gridUnit * 11
                     fillWidth: true
@@ -500,6 +510,8 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                     text: {
+                        if (root.discoveryError && root.discoveryError !== "")
+                            return root.discoveryError
                         if (root.lastGlobalUpdate && root.lastGlobalUpdate !== "")
                             return (root.i18nObj ? root.i18nObj.tr("Updated:") : "Updated:") + " " + root.lastGlobalUpdate
                         if (root.isLoading)
@@ -507,7 +519,9 @@ PlasmoidItem {
                         return ""
                     }
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.disabledTextColor
+                    color: (root.discoveryError && root.discoveryError !== "")
+                           ? Kirigami.Theme.negativeTextColor
+                           : Kirigami.Theme.disabledTextColor
                 }
                 PlasmaComponents.Button {
                     icon.name: "configure"

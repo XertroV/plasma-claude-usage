@@ -390,12 +390,31 @@ KCM.SimpleKCM {
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
             var stderr = data["stderr"] || ""
+            var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
+            var trimmed = String(stdout).replace(/^\s+|\s+$/g, "")
             try {
-                var list = JSON.parse(stdout)
+                if (!trimmed) {
+                    if (exitCode && exitCode !== 0) {
+                        var snip = String(stderr || "").replace(/\s+/g, " ").trim()
+                        discoverStatus = tr("Discovery failed")
+                            + (snip ? (": " + snip.substring(0, 120))
+                                : (exitCode ? (" (exit " + exitCode + ")") : ""))
+                        return
+                    }
+                    applyDiscovered([])
+                    return
+                }
+                var list = JSON.parse(trimmed)
+                if (!Array.isArray(list)) {
+                    discoverStatus = tr("Discovery failed") + ": invalid data"
+                    return
+                }
                 applyDiscovered(list)
             } catch (e) {
-                discoverStatus = tr("Discovery failed") + (stderr ? (": " + stderr.substring(0, 120)) : "")
+                var errSnip = String(stderr || "").replace(/\s+/g, " ").trim()
+                discoverStatus = tr("Discovery failed")
+                    + (errSnip ? (": " + errSnip.substring(0, 120)) : "")
                 console.log("configGeneral discovery error", e, stderr)
             }
         }

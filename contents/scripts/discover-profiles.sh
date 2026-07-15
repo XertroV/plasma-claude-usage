@@ -238,26 +238,47 @@ for row in "${RESULTS[@]}"; do
     FINAL+=("$id|$provider|$profile_key|$config_dir|$cred_path|$inode|$is_flat")
 done
 
+# --- emit JSON (pure bash; no external JSON tools) ---------------------------
+
+json_escape() {
+    # Escape a string for inclusion inside a JSON double-quoted value.
+    local s="$1"
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\b'/\\b}
+    s=${s//$'\f'/\\f}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    printf '%s' "$s"
+}
+
+if ((${#FINAL[@]} == 0)); then
+    printf '%s\n' '[]'
+    exit 0
+fi
+
 IFS=$'\n' SORTED=($(printf '%s\n' "${FINAL[@]}" | sort -t'|' -k2,2 -k1,1))
 
-# --- emit JSON ---------------------------------------------------------------
-
-python3 - <<'PY' "${SORTED[@]}"
-import json
-import sys
-
-rows = []
-for line in sys.argv[1:]:
-    id_, provider, profile_key, config_dir, cred_path, cred_inode, is_flat = line.split("|", 6)
-    rows.append({
-        "id": id_,
-        "provider": provider,
-        "profileKey": profile_key,
-        "configDir": config_dir,
-        "credPath": cred_path,
-        "credInode": cred_inode,
-        "isFlatFile": is_flat == "true",
-    })
-
-print(json.dumps(rows, indent=2))
-PY
+printf '[\n'
+first=1
+for row in "${SORTED[@]}"; do
+    [[ -n "$row" ]] || continue
+    IFS='|' read -r id provider profile_key config_dir cred_path inode is_flat <<<"$row"
+    flat_json=false
+    [[ "$is_flat" == "true" ]] && flat_json=true
+    if ((first)); then
+        first=0
+    else
+        printf ',\n'
+    fi
+    printf '  {"id":"%s","provider":"%s","profileKey":"%s","configDir":"%s","credPath":"%s","credInode":"%s","isFlatFile":%s}' \
+        "$(json_escape "$id")" \
+        "$(json_escape "$provider")" \
+        "$(json_escape "$profile_key")" \
+        "$(json_escape "$config_dir")" \
+        "$(json_escape "$cred_path")" \
+        "$(json_escape "$inode")" \
+        "$flat_json"
+done
+printf '\n]\n'
