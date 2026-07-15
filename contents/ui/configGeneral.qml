@@ -43,20 +43,68 @@ KCM.SimpleKCM {
         "OpenCode", "MiniMax", "Kimi"
     ]
 
-    // Common / known window ids for global visibility toggles (B005)
-    // Ids must match parser window ids (QuotaParsers.js), not display labels only
-    readonly property var knownWindowOptions: [
-        { id: "5h", label: "5h (Claude/MiniMax)" },
-        { id: "session", label: "session (Grok/Codex/Kimi)" },
-        { id: "weekly", label: "weekly (Claude/Codex/Grok)" },
-        { id: "weekly_fable", label: "Fable (weekly)" },
-        { id: "weekly_oracle", label: "Oracle (weekly)" },
-        { id: "credits", label: "credits $" },
-        { id: "on_demand", label: "on-demand" },
-        { id: "total_quota", label: "total quota (Kimi)" },
-        { id: "spk/7d", label: "Spark / 7d" },
-        { id: "wk/general", label: "wk/general (MiniMax)" },
-        { id: "5h/general", label: "5h/general (MiniMax)" }
+    // Per-provider window ids for column visibility (B034).
+    // Ids must match parser window ids (QuotaParsers.js), not display labels only.
+    // defaultVisible mirrors makeWindow(..., defaultVisible) / parser defaults.
+    readonly property var providerWindowCatalog: [
+        {
+            provider: "claude",
+            title: "Claude",
+            windows: [
+                { id: "5h", label: "5h", defaultVisible: true },
+                { id: "weekly", label: "7d", defaultVisible: true },
+                { id: "weekly_fable", label: "Fable", defaultVisible: false },
+                { id: "weekly_oracle", label: "Oracle", defaultVisible: false },
+                { id: "weekly_opus", label: "Opus", defaultVisible: false },
+                { id: "weekly_sonnet", label: "Sonnet", defaultVisible: false },
+                { id: "weekly_oauth_apps", label: "OAuth apps", defaultVisible: false }
+            ]
+        },
+        {
+            provider: "codex",
+            title: "Codex",
+            windows: [
+                { id: "session", label: "session", defaultVisible: true },
+                { id: "weekly", label: "weekly", defaultVisible: true },
+                { id: "credits", label: "credits $", defaultVisible: false },
+                // Codex Spark additional limit id from parser: extra_spk_7d (not "spk/7d")
+                { id: "extra_spk_7d", label: "Spark / 7d", defaultVisible: false }
+            ]
+        },
+        {
+            provider: "grok",
+            title: "Grok",
+            windows: [
+                { id: "session", label: "session (product %)", defaultVisible: true },
+                { id: "weekly", label: "mo ($ allowance)", defaultVisible: true },
+                { id: "on_demand", label: "on-demand", defaultVisible: false }
+            ]
+        },
+        {
+            provider: "zai",
+            title: "Z.ai",
+            windows: [
+                { id: "session", label: "5h", defaultVisible: true },
+                { id: "weekly", label: "mo", defaultVisible: true }
+            ]
+        },
+        {
+            provider: "minimax",
+            title: "MiniMax",
+            windows: [
+                { id: "5h/general", label: "5h/general", defaultVisible: true },
+                { id: "wk/general", label: "7d/general", defaultVisible: true }
+            ]
+        },
+        {
+            provider: "kimi",
+            title: "Kimi",
+            windows: [
+                { id: "session", label: "5h", defaultVisible: true },
+                { id: "weekly", label: "7d", defaultVisible: true },
+                { id: "total_quota", label: "total quota", defaultVisible: false }
+            ]
+        }
     ]
 
     Translations {
@@ -86,8 +134,10 @@ KCM.SimpleKCM {
     property string discoverStatus: ""
     property var enabledMap: ({})       // id → bool (true if enabled)
     property var nameMap: ({})          // id → display name override
-    property var visibleWindowMap: ({}) // id → bool (checked = force visible)
-    property bool useWindowAllowlist: false // false = empty JSON (provider defaults)
+    // B034: per-provider window visibility overrides
+    // shape: { claude: { "5h": true, "weekly": false }, grok: { ... }, ... }
+    // empty / missing provider → that provider uses parser defaultVisible
+    property var visibleByProvider: ({})
     property var customProfiles: []
     property bool _hydrating: true
     property string customFormError: ""
@@ -121,17 +171,97 @@ KCM.SimpleKCM {
         }
         enabledMap = em
 
-        var vis = parseJsonSafe(cfg_visibleWindowsJson, [])
-        var vm = {}
-        useWindowAllowlist = !!(vis && vis.length)
-        if (useWindowAllowlist) {
-            for (var j = 0; j < vis.length; j++)
-                vm[vis[j]] = true
-        }
-        visibleWindowMap = vm
+        visibleByProvider = hydrateVisibleByProvider(cfg_visibleWindowsJson)
 
         customProfiles = parseJsonSafe(cfg_customProfilesJson, []) || []
         _hydrating = false
+    }
+
+    /**
+     * Load cfg into per-provider maps. Migrates legacy array allowlist into
+     * per-provider bool maps so each provider only gets ids it actually uses.
+     */
+    function hydrateVisibleByProvider(raw) {
+        var cfg = QC.parseVisibleWindowsConfig(raw)
+        var out = {}
+        if (cfg.mode === "defaults")
+            return out
+
+        if (cfg.mode === "globalAllowlist") {
+            // Legacy: ["5h","weekly"] → apply only ids known for each provider
+            var list = cfg.globalAllowlist || []
+            for (var pi = 0; pi < providerWindowCatalog.length; pi++) {
+                var cat = providerWindowCatalog[pi]
+                var pm = {}
+                var any = false
+                for (var wi = 0; wi < cat.windows.length; wi++) {
+                    var wid = cat.windows[wi].id
+                    var on = list.indexOf(wid) >= 0
+                    pm[wid] = on
+                    if (on) any = true
+                }
+                // Only store if at least one listed id matched this provider
+                // (otherwise leave defaults — avoid blanking every provider)
+                if (any)
+                    out[cat.provider] = pm
+            }
+            return out
+        }
+
+        if (cfg.mode === "globalMap") {
+            var gm = cfg.globalMap || {}
+            for (var gi = 0; gi < providerWindowCatalog.length; gi++) {
+                var gcat = providerWindowCatalog[gi]
+                var gpm = {}
+                var gany = false
+                for (var gwi = 0; gwi < gcat.windows.length; gwi++) {
+                    var gid = gcat.windows[gwi].id
+                    if (gm.hasOwnProperty(gid)) {
+                        gpm[gid] = !!gm[gid]
+                        gany = true
+                    }
+                }
+                if (gany)
+                    out[gcat.provider] = gpm
+            }
+            return out
+        }
+
+        // perProvider
+        var bp = cfg.byProvider || {}
+        for (var prov in bp) {
+            if (!bp.hasOwnProperty(prov)) continue
+            var entry = bp[prov]
+            if (!entry || typeof entry !== "object") continue
+            var m = {}
+            for (var k in entry) {
+                if (!entry.hasOwnProperty(k) || k === "__allowlist") continue
+                m[k] = !!entry[k]
+            }
+            // Strict allowlist arrays were expanded with only trues — materialize
+            // full catalog so unchecked defaults (hidden extras) stay explicit.
+            if (entry.__allowlist) {
+                var cat2 = catalogForProvider(prov)
+                if (cat2) {
+                    for (var ci = 0; ci < cat2.windows.length; ci++) {
+                        var cid = cat2.windows[ci].id
+                        if (!m.hasOwnProperty(cid))
+                            m[cid] = false
+                    }
+                }
+            }
+            if (mapKeyCount(m) > 0)
+                out[prov] = m
+        }
+        return out
+    }
+
+    function catalogForProvider(provider) {
+        for (var i = 0; i < providerWindowCatalog.length; i++) {
+            if (providerWindowCatalog[i].provider === provider)
+                return providerWindowCatalog[i]
+        }
+        return null
     }
 
     function reloadEnabledMapFromCfg() {
@@ -198,16 +328,27 @@ KCM.SimpleKCM {
 
     function pushVisibleJson() {
         if (_hydrating) return
-        if (!useWindowAllowlist) {
-            cfg_visibleWindowsJson = "[]"
-            return
+        // Serialize only providers that have overrides; empty object → "[]" (defaults)
+        var out = {}
+        var anyProv = false
+        for (var prov in visibleByProvider) {
+            if (!visibleByProvider.hasOwnProperty(prov)) continue
+            var m = visibleByProvider[prov]
+            if (!m || typeof m !== "object") continue
+            var pm = {}
+            var anyKey = false
+            for (var k in m) {
+                if (!m.hasOwnProperty(k)) continue
+                pm[k] = !!m[k]
+                anyKey = true
+            }
+            if (anyKey) {
+                out[prov] = pm
+                anyProv = true
+            }
         }
-        var list = []
-        for (var k in visibleWindowMap) {
-            if (visibleWindowMap.hasOwnProperty(k) && visibleWindowMap[k])
-                list.push(k)
-        }
-        cfg_visibleWindowsJson = JSON.stringify(list)
+        // Keep "[]" for fully-default so older readers stay happy; also "{}" is fine
+        cfg_visibleWindowsJson = anyProv ? JSON.stringify(out) : "[]"
     }
 
     function pushCustomJson() {
@@ -266,17 +407,73 @@ KCM.SimpleKCM {
         pushNamesJson()
     }
 
-    function setWindowVisible(wid, on) {
-        useWindowAllowlist = true
-        var m = cloneMap(visibleWindowMap)
+    /**
+     * Effective checkbox state for a provider window:
+     * override if present, else catalog defaultVisible.
+     */
+    function isWindowChecked(provider, wid, defaultVisible) {
+        var m = visibleByProvider[provider]
+        if (m && m.hasOwnProperty(wid))
+            return !!m[wid]
+        return defaultVisible !== false
+    }
+
+    /**
+     * Toggle one window for one provider. Materializes a full override map for
+     * that provider (defaults + change) so other columns keep their defaults.
+     */
+    function setWindowVisible(provider, wid, on) {
+        var root = cloneMap(visibleByProvider)
+        var cat = catalogForProvider(provider)
+        var m = root[provider] ? cloneMap(root[provider]) : {}
+        // First edit: seed all catalog defaults so unchecking one doesn't rely on
+        // sparse override semantics alone (and advanced JSON is self-describing).
+        if (mapKeyCount(m) === 0 && cat) {
+            for (var i = 0; i < cat.windows.length; i++) {
+                var w = cat.windows[i]
+                m[w.id] = w.defaultVisible !== false
+            }
+        }
         m[wid] = !!on
-        visibleWindowMap = m
+        // If every value matches catalog defaults, drop the provider key (back to defaults)
+        if (cat && providerMapMatchesDefaults(m, cat))
+            delete root[provider]
+        else
+            root[provider] = m
+        visibleByProvider = root
         pushVisibleJson()
     }
 
+    function providerMapMatchesDefaults(m, cat) {
+        if (!cat || !m) return true
+        for (var i = 0; i < cat.windows.length; i++) {
+            var w = cat.windows[i]
+            var def = w.defaultVisible !== false
+            if (m.hasOwnProperty(w.id)) {
+                if (!!m[w.id] !== def) return false
+            }
+        }
+        // Extra keys not in catalog count as customization
+        for (var k in m) {
+            if (!m.hasOwnProperty(k)) continue
+            var known = false
+            for (var j = 0; j < cat.windows.length; j++) {
+                if (cat.windows[j].id === k) { known = true; break }
+            }
+            if (!known) return false
+        }
+        return true
+    }
+
     function resetWindowDefaults() {
-        useWindowAllowlist = false
-        visibleWindowMap = {}
+        visibleByProvider = {}
+        pushVisibleJson()
+    }
+
+    function resetProviderWindowDefaults(provider) {
+        var root = cloneMap(visibleByProvider)
+        delete root[provider]
+        visibleByProvider = root
         pushVisibleJson()
     }
 
@@ -545,44 +742,59 @@ KCM.SimpleKCM {
 
             Kirigami.Heading {
                 level: 3
-                text: tr("Visible quotas")
+                text: tr("Visible quotas (per provider)")
             }
 
             QQC2.Label {
-                text: tr("Empty selection uses each provider’s defaults (session + weekly). Checking any box switches to an allowlist.")
+                text: tr("Toggle columns independently for each provider. Unchanged providers use defaults (primaries on, extras off). OpenCode rows follow the underlying slot (Claude/Codex/…).")
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
                 opacity: 0.8
                 font: Kirigami.Theme.smallFont
             }
 
-            Flow {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-                Repeater {
-                    model: configPage.knownWindowOptions
-                    delegate: QQC2.CheckBox {
-                        required property var modelData
-                        text: modelData.label
-                        checked: configPage.useWindowAllowlist && !!configPage.visibleWindowMap[modelData.id]
-                        onToggled: {
-                            if (checked) {
-                                configPage.setWindowVisible(modelData.id, true)
-                            } else {
-                                var m = configPage.cloneMap(configPage.visibleWindowMap)
-                                delete m[modelData.id]
-                                configPage.visibleWindowMap = m
-                                // If none left, back to defaults
-                                var any = false
-                                for (var k in m) {
-                                    if (m.hasOwnProperty(k) && m[k]) { any = true; break }
+            Repeater {
+                model: configPage.providerWindowCatalog
+                delegate: ColumnLayout {
+                    id: provBlock
+                    required property var modelData
+                    readonly property string providerId: modelData.provider
+                    readonly property var windowList: modelData.windows
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Kirigami.Heading {
+                            level: 4
+                            text: modelData.title
+                            Layout.fillWidth: true
+                        }
+                        QQC2.Button {
+                            text: tr("Defaults")
+                            flat: true
+                            font: Kirigami.Theme.smallFont
+                            enabled: !!configPage.visibleByProvider[provBlock.providerId]
+                            onClicked: configPage.resetProviderWindowDefaults(provBlock.providerId)
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+                        Repeater {
+                            model: provBlock.windowList
+                            delegate: QQC2.CheckBox {
+                                required property var modelData
+                                text: modelData.label
+                                // Reference visibleByProvider so the binding re-evaluates on edit
+                                checked: {
+                                    var _ = configPage.visibleByProvider
+                                    return configPage.isWindowChecked(
+                                        provBlock.providerId, modelData.id, modelData.defaultVisible)
                                 }
-                                if (!any)
-                                    configPage.resetWindowDefaults()
-                                else {
-                                    configPage.useWindowAllowlist = true
-                                    configPage.pushVisibleJson()
-                                }
+                                onToggled: configPage.setWindowVisible(
+                                    provBlock.providerId, modelData.id, checked)
                             }
                         }
                     }
@@ -590,7 +802,7 @@ KCM.SimpleKCM {
             }
 
             QQC2.Button {
-                text: tr("Reset to provider defaults")
+                text: tr("Reset all providers to defaults")
                 flat: true
                 onClicked: resetWindowDefaults()
             }
@@ -913,9 +1125,13 @@ KCM.SimpleKCM {
 
             QQC2.TextArea {
                 Kirigami.FormData.label: tr("Visible windows (JSON):")
-                placeholderText: '["5h","weekly","weekly_fable"] empty = defaults'
+                placeholderText: '{"claude":{"5h":true,"weekly":false},"grok":{"session":true}}  [] = defaults'
                 text: cfg_visibleWindowsJson || "[]"
-                onTextChanged: cfg_visibleWindowsJson = text
+                onTextChanged: {
+                    cfg_visibleWindowsJson = text
+                    if (!_hydrating)
+                        visibleByProvider = hydrateVisibleByProvider(text)
+                }
             }
 
             QQC2.TextArea {

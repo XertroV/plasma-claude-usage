@@ -222,8 +222,31 @@ Item {
             plasmoid.configuration.enabledProfilesJson = json
     }
 
+    /**
+     * Parse visibleWindowsJson (B034). Supports:
+     *  - [] / {} → provider defaults
+     *  - ["5h","weekly"] → legacy global allowlist
+     *  - {"claude":{"5h":true,"weekly":false}, ...} → per-provider overrides
+     */
+    function visibleWindowsConfig() {
+        return QC.parseVisibleWindowsConfig(cfgValue("visibleWindowsJson", "[]"))
+    }
+
+    /** @deprecated Prefer visibilitySpecForProfile — kept for any residual callers */
     function visibleWindowIds() {
-        return parseJsonConfig(cfgValue("visibleWindowsJson", "[]"), [])
+        var cfg = visibleWindowsConfig()
+        if (cfg.mode === "globalAllowlist") return cfg.globalAllowlist || []
+        return []
+    }
+
+    function visibilityKeyForProfile(profile) {
+        if (!profile) return ""
+        return QC.visibilityProviderKey(profile.provider, profile.opencodeSlot, profile.profileKey)
+    }
+
+    /** Live per-provider visibility spec (null = defaults). Always re-read from config. */
+    function visibilitySpecForProfile(profile) {
+        return QC.visibilitySpecForProvider(visibleWindowsConfig(), visibilityKeyForProfile(profile))
     }
 
     function refreshIntervalMs(provider) {
@@ -343,7 +366,7 @@ Item {
         return QC.defaultCredPathForProvider(entry.provider, entry.path)
     }
 
-    function blankProfileRow(meta, visIds) {
+    function blankProfileRow(meta, visSpec) {
         return {
             id: meta.id,
             provider: meta.provider,
@@ -383,7 +406,7 @@ Item {
             autoRefreshHoldUntilMs: 0,
             lastFailedToken: "",
             credLoadManual: false,
-            visibleWindowIds: visIds
+            visibleWindowSpec: visSpec === undefined ? null : visSpec
         }
     }
 
@@ -427,7 +450,7 @@ Item {
             }
         }
 
-        var visIds = visibleWindowIds()
+        var visCfg = visibleWindowsConfig()
         // Preserve fetch/auth state across rediscover / config reapply (B003)
         var prevById = {}
         for (var pi = 0; pi < profiles.length; pi++) {
@@ -440,7 +463,9 @@ Item {
             var meta = merged[i]
             // Keep hidden (disabled) profiles in the list with enabled:false so the
             // details page can unhide them without a full rediscover (B032).
-            var row = blankProfileRow(meta, visIds)
+            var rowVis = QC.visibilitySpecForProvider(
+                visCfg, QC.visibilityProviderKey(meta.provider, meta.opencodeSlot || "", meta.profileKey || ""))
+            var row = blankProfileRow(meta, rowVis)
             row.enabled = isProfileEnabled(meta)
             if (meta.displayNameHint && row.displayName === QC.defaultProfileLabel(meta.provider, meta.profileKey))
                 row.displayName = meta.displayNameHint
@@ -464,9 +489,11 @@ Item {
                     if (prev[k] !== undefined)
                         row[k] = Array.isArray(prev[k]) ? prev[k].slice() : prev[k]
                 }
-                // Re-apply window visibility from new config
+                // Re-apply window visibility from per-provider config (B034)
+                row.visibleWindowSpec = QC.visibilitySpecForProvider(
+                    visCfg, visibilityKeyForProfile(row))
                 if (row.windows && row.windows.length) {
-                    row.windows = QC.applyVisibility(row.windows, visIds.length ? visIds : null)
+                    row.windows = QC.applyVisibility(row.windows, row.visibleWindowSpec)
                     for (var wi = 0; wi < row.windows.length; wi++)
                         QC.updateTimePercent(row.windows[wi], nowMs)
                 }
@@ -527,7 +554,7 @@ Item {
         // Soft (+ optional membership): names, window visibility, and enabled flags.
         // Membership is in-place so Hidden can toggle without a full rediscover (B032).
         // Always apply soft fields so multi-key Apply (On + rename) does not drop names.
-        var visIds = visibleWindowIds()
+        var visCfg = visibleWindowsConfig()
         var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
         var patchMembership = !!opts.membership
         var rows = []
@@ -543,9 +570,11 @@ Item {
                 copy.displayName = names[p.id]
             }
             // else keep existing displayName (custom displayNameHint / prior label)
-            copy.visibleWindowIds = visIds
+            // B034: per-provider visibility from live config (not a stale global list)
+            copy.visibleWindowSpec = QC.visibilitySpecForProvider(
+                visCfg, visibilityKeyForProfile(copy))
             if (copy.windows && copy.windows.length) {
-                copy.windows = QC.applyVisibility(copy.windows, visIds.length ? visIds : null)
+                copy.windows = QC.applyVisibility(copy.windows, copy.visibleWindowSpec)
                 for (var wi = 0; wi < copy.windows.length; wi++)
                     QC.updateTimePercent(copy.windows[wi], nowMs)
             }
@@ -1324,8 +1353,9 @@ Item {
 
     function applyUsageResult(idx, result) {
         var p = profiles[idx]
-        var vis = p.visibleWindowIds && p.visibleWindowIds.length ? p.visibleWindowIds : visibleWindowIds()
-        var windows = QC.applyVisibility(result.windows, vis.length ? vis : null)
+        // Always re-read config so Apply/toggles take effect on next fetch (B034)
+        var vis = visibilitySpecForProfile(p)
+        var windows = QC.applyVisibility(result.windows, vis)
         for (var i = 0; i < windows.length; i++) {
             QC.updateTimePercent(windows[i], nowMs)
         }
@@ -1336,6 +1366,7 @@ Item {
             planName: result.planName || p.planName,
             bankedResets: result.bankedResets || 0,
             windows: windows,
+            visibleWindowSpec: vis,
             lastUpdate: Qt.formatTime(new Date(), "hh:mm:ss"),
             lastFetchMs: Date.now(),
             backoffMultiplier: clear.backoffMultiplier,

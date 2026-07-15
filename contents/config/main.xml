@@ -75,7 +75,7 @@
             <default>[]</default>
         </entry>
         <entry name="visibleWindowsJson" type="String">
-            <label>Visible window ids JSON array (empty = defaults)</label>
+            <label>Per-provider window visibility JSON (object map or legacy array; empty = defaults)</label>
             <default>[]</default>
         </entry>
         <entry name="customProfilesJson" type="String">
