@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 1
+id: B017
+priority: medium
+status: pending
+tags:
+    - discovery
+    - UX
+    - errors
+title: Discovery parse failure has no user-visible error on panel
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+Discovery parse failure only logs and sets `discovering = false`. No user-visible error on the panel (“No profiles” if empty). Missing `python3`, non-executable script, or install path issues look like “no accounts.”
+
+## Location
+contents/ui/ProfileController.qml:664-674
+
+## Suggested fix
+Surface `error` / empty-state message with stderr snippet; depend on pure bash JSON emit or ship a fallback without python3.
+
+## Source
+Review ff0a2eec Issue 17 (suggestion)

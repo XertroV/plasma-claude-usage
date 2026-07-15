@@ -1,0 +1,26 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:31Z"
+depends_on: []
+estimate_hours: 1
+id: B009
+priority: medium
+status: pending
+tags:
+    - custom-profiles
+    - discovery
+    - UX
+title: Custom profiles default credPath to directory; forever Not logged in
+updated_at: "2026-07-15T04:40:31Z"
+---
+## Problem
+Custom profiles require `entry.path` and `entry.provider`, but `credPath` defaults to `entry.path`. Placeholder examples use a config directory path (`/home/me/.claude-custom`) without `credPath` or provider-specific auth filename, so `cat` runs on a directory and the profile forever shows “Not logged in.”
+
+## Location
+contents/ui/ProfileController.qml:219-230
+
+## Suggested fix
+Resolve auth file from provider when `credPath` omitted (e.g. claude → `path/.credentials.json`, codex/grok → `path/auth.json`, minimax → `path/config.json`). Document and validate in KCM.
+
+## Source
+Review ff0a2eec Issue 9

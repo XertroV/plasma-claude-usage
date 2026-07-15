@@ -1,0 +1,25 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 2
+id: B016
+priority: medium
+status: pending
+tags:
+    - discovery
+    - multi-account
+title: Discovery only probes fixed suffixes; misses arbitrary multi-account dirs
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+Discovery only probes fixed suffixes `""`, `-p`, `-w`, `-1`, `-2`. Arbitrary dirs like `.claude-work` / `.grok-3` are missed (design table is the same, but real multi-account layouts often use other suffixes). Custom profiles JSON is the only escape hatch and is poorly UX’d.
+
+## Location
+contents/scripts/discover-profiles.sh:146-154
+
+## Suggested fix
+Glob `.$base*` (with careful filtering) or document supported suffixes prominently in KCM.
+
+## Source
+Review ff0a2eec Issue 16 (suggestion)

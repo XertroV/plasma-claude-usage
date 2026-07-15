@@ -1,0 +1,12 @@
+critical_path: []
+description: KDE Plasma 6 multi-provider AI coding usage widget
+next_available: null
+phases: []
+project: plasma-claude-usage
+stats:
+    blocked: 0
+    done: 0
+    in_progress: 0
+    pending: 0
+    total_tasks: 0
+timeline_weeks: 4

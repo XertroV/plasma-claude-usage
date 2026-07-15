@@ -1,0 +1,26 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:31Z"
+depends_on: []
+estimate_hours: 1
+id: B007
+priority: high
+status: pending
+tags:
+    - opencode
+    - multi-account
+    - config
+title: OpenCode account index ignored; always uses accounts[0]
+updated_at: "2026-07-15T04:40:31Z"
+---
+## Problem
+OpenCode anthropic multi-account always uses `creds.accounts[0]`. Config still exposes `cfg_opencodeAccountIndex` (`configGeneral.qml:89-99`, `main.xml:17-19`) but nothing in the controller reads it. Multi-account OpenCode Anthropic selection is broken for any account other than the first.
+
+## Location
+contents/ui/ProfileController.qml:436-441
+
+## Suggested fix
+Pass account index from config into `extractOpencodeAuth` (and ideally model each OpenCode account as its own discovered profile).
+
+## Source
+Review ff0a2eec Issue 7

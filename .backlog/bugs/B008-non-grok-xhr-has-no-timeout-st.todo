@@ -1,0 +1,26 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:31Z"
+depends_on: []
+estimate_hours: 1.5
+id: B008
+priority: high
+status: pending
+tags:
+    - reload
+    - ProfileController
+    - xhr
+title: Non-Grok XHR has no timeout; stale responses after rediscover
+updated_at: "2026-07-15T04:40:31Z"
+---
+## Problem
+Non-Grok `XMLHttpRequest` paths have no `timeout` and no generation/token to ignore stale responses after rediscover or profile list replacement. A slow XHR from a previous refresh can call `applyUsageResult(idx, …)` against a different profile that now occupies that index after `mergeDiscovered` rebuilds `profiles`.
+
+## Location
+contents/ui/ProfileController.qml:532-561
+
+## Suggested fix
+Store `profile.id` + fetch generation on each request; ignore callbacks when gen/id mismatch; set `xhr.timeout` like Grok (25s) and clear `loading` on timeout.
+
+## Source
+Review ff0a2eec Issue 8

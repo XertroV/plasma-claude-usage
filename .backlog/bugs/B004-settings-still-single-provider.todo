@@ -1,0 +1,28 @@
+---
+complexity: high
+created_at: "2026-07-15T04:40:25Z"
+depends_on: []
+estimate_hours: 3
+id: B004
+priority: high
+status: pending
+tags:
+    - settings
+    - configGeneral
+    - legacy
+    - multi-profile
+title: Settings still single-provider; legacy fields trap multi-mode off
+updated_at: "2026-07-15T04:40:25Z"
+---
+## Problem
+Settings still lead with single-provider controls (`provider`, OpenCode sub-provider, account index, display name, credentials path). In `ProfileController.isLegacySingleInstance()`, any non-empty `credentialsPath`, non-empty `displayName`, or `provider !== "claude"` forces legacy filtering. Existing widgets (or casual Configure edits) therefore never get the multi-provider multi-account dashboard even when discovery would find many profiles.
+
+## Location
+contents/ui/configGeneral.qml:61-128
+ProfileController isLegacySingleInstance()
+
+## Suggested fix
+Split UI into “Multi-profile (default)” vs “Legacy single profile.” In multi mode, hide/ignore `provider`/`credentialsPath` as primary controls; clear or stop writing fields that force legacy mode. Document that multi-profile requires empty `credentialsPath`/`displayName` and default `provider=claude` until migration is explicit.
+
+## Source
+Review ff0a2eec Issue 4 — settings page doesn’t work well for multi-provider multi-account

@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 0.5
+id: B015
+priority: low
+status: pending
+tags:
+    - settings
+    - dead-code
+    - KCM
+title: 'Dead KCM knobs: sessionWeeklyRatio and paceFormat unused after refactor'
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+`sessionWeeklyRatio` and `paceFormat` remain in KCM and `main.xml` but are unused after the multi-profile refactor (no references in `main.qml` / parsers / controller). Dead settings confuse users.
+
+## Location
+contents/ui/configGeneral.qml:162-198
+
+## Suggested fix
+Re-hook pace format into tooltips/labels, or remove/hide until reimplemented.
+
+## Source
+Review ff0a2eec Issue 15 (suggestion)

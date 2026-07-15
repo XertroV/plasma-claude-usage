@@ -1,0 +1,26 @@
+---
+complexity: high
+created_at: "2026-07-15T04:40:25Z"
+depends_on: []
+estimate_hours: 2
+id: B001
+priority: critical
+status: pending
+tags:
+    - reload
+    - ProfileController
+    - race
+title: Shared credReader + _pendingIdx race breaks multi-profile reload
+updated_at: "2026-07-15T04:40:25Z"
+---
+## Problem
+`loadCredentials` uses a single shared `credReader` with one `_pendingIdx`. Concurrent loads (stagger timer, Refresh, `autoRefresh` firing multiple due profiles, or rediscover mid-flight) overwrite `_pendingIdx` and/or interleave `onNewData` callbacks. A response for profile A can be applied to profile B; the original profile can stay `loading: true` forever.
+
+## Location
+contents/ui/ProfileController.qml:360-367
+
+## Suggested fix
+Key pending work by the full command/sourceName (or a request id encoded in the source), map `onNewData(sourceName)` → profile id, and reject stale replies after rediscover/profile list replacement. Prefer a per-request queue: only one `connectSource` outstanding, or encode `idx`/`id` into a unique source string and parse it back.
+
+## Source
+Review ff0a2eec Issue 1 — primary root cause of “reloading doesn’t work properly”

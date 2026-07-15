@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:40:48Z"
+depends_on: []
+estimate_hours: 0.25
+id: B019
+priority: low
+status: pending
+tags:
+    - nit
+    - UI
+    - consistency
+title: ProviderRow primaryWindows uses truthy visible; ExpandedView uses !== false
+updated_at: "2026-07-15T04:40:48Z"
+---
+## Problem
+`primaryWindows` requires `w.visible && w.role === "primary"` (truthy `visible`). ExpandedView uses `w.visible !== false`, which is more defensive if `visible` is missing. Inconsistent filtering could hide windows in ProviderRow if a parser forgets `visible`.
+
+## Location
+contents/ui/ProviderRow.qml (primaryWindows)
+
+## Suggested fix
+Align with `visible !== false` and the primary-role fallback used in ExpandedView/main compact.
+
+## Source
+Review ff0a2eec Issue 19 (nit)

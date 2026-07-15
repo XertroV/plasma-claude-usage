@@ -1,0 +1,27 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 2
+id: B011
+priority: medium
+status: pending
+tags:
+    - UI
+    - panel
+    - countdown
+    - dead-code
+title: Compact multi-profile UI omits live countdowns; ProviderRow/PanelView orphaned
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+Compact multi-profile UI was inlined and omits live countdowns (design: bar + % + countdown per primary). `ProviderRow.qml` / `PanelView.qml` exist but are unused by `main.qml`, so panel rows drift from the component intended to own that layout.
+
+## Location
+contents/ui/main.qml:318-412
+
+## Suggested fix
+Either wire compact through `ProviderRow` (with a denser compact mode) or add countdown labels to the inlined rows; delete or clearly mark unused PanelView as dead to avoid dual maintenance.
+
+## Source
+Review ff0a2eec Issue 11 (suggestion)

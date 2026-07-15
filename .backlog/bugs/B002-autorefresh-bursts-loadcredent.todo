@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:40:25Z"
+depends_on: []
+estimate_hours: 0.5
+id: B002
+priority: high
+status: pending
+tags:
+    - reload
+    - ProfileController
+    - autoRefresh
+title: autoRefresh bursts loadCredentials without stagger
+updated_at: "2026-07-15T04:40:25Z"
+---
+## Problem
+`autoRefresh` calls `loadCredentials` for every due profile in a tight loop with no stagger. Combined with the shared credReader race this almost guarantees mis-attributed credential reads once 2+ profiles share a refresh window. Manual Refresh is staggered (~2s) but timer refresh is not.
+
+## Location
+contents/ui/ProfileController.qml:747-758
+
+## Suggested fix
+Route due-profile refreshes through the same stagger queue as `staggerRefreshAll`, and never start a second credential cat for a profile that is already loading.
+
+## Source
+Review ff0a2eec Issue 2

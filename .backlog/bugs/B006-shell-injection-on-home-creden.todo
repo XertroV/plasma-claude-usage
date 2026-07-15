@@ -1,0 +1,23 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:31Z"
+depends_on: []
+estimate_hours: 1
+id: B006
+priority: critical
+status: pending
+tags:
+    - security
+    - ProfileController
+    - credentials
+title: Shell injection on $HOME/~ credential paths via executable DataSource
+updated_at: "2026-07-15T04:40:31Z"
+---
+## Problem
+`catCommand` leaves any path starting with `$HOME` / `${HOME}` (and `~/…` after rewrite) unquoted so the shell expands `$HOME`. User-controlled `credentialsPath` or `customProfilesJson` values like `$HOME/foo; evil-command` or `~/x; evil` are executed by the executable DataSource. Absolute paths are correctly `shellQuote`d; home-relative ones are not.
+
+## Location
+contents/ui/ProfileController.qml:350-357
+
+## Suggested fix
+Always `shellQuote` the path segment after expanding `~`/`$HOME` in QML (e.g. resolve to an absolute path via a tiny helper script, or `cat "$HOME"/rest/with

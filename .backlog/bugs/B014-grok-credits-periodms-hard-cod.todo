@@ -1,0 +1,26 @@
+---
+complexity: medium
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 1
+id: B014
+priority: medium
+status: pending
+tags:
+    - grok
+    - pace
+    - parsers
+title: Grok credits periodMs hard-coded to 7d for non-weekly periods
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+Grok credits period type can be monthly/daily (`periodLabel`), but `periodMs` is hard-coded to `MS_7D`. Time-percent / pace for non-weekly credit periods will be wrong.
+
+## Location
+contents/ui/js/QuotaParsers.js:2059-2077
+
+## Suggested fix
+Derive `periodMs` from period type (or from start/end timestamps when present).
+
+## Source
+Review ff0a2eec Issue 14 (suggestion)

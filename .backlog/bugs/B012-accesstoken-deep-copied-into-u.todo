@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:40:40Z"
+depends_on: []
+estimate_hours: 1
+id: B012
+priority: medium
+status: pending
+tags:
+    - security
+    - tokens
+    - ProfileController
+title: accessToken deep-copied into UI-facing profileList
+updated_at: "2026-07-15T04:40:40Z"
+---
+## Problem
+`syncCompactFromController` / `profileList` deep-copy includes `accessToken` (and account ids) into UI-facing property trees used by ExpandedView/compact. Tokens sit in QML properties longer than necessary and could appear in tooling/debug dumps.
+
+## Location
+contents/ui/ProfileController.qml:71-78
+
+## Suggested fix
+Keep secrets only on the controller; strip `accessToken` when building `profileList` for the view.
+
+## Source
+Review ff0a2eec Issue 12 (suggestion)

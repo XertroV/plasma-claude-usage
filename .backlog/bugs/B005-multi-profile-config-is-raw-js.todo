@@ -1,0 +1,27 @@
+---
+complexity: high
+created_at: "2026-07-15T04:40:25Z"
+depends_on: []
+estimate_hours: 4
+id: B005
+priority: high
+status: pending
+tags:
+    - settings
+    - configGeneral
+    - UX
+    - multi-profile
+title: Multi-profile config is raw JSON textareas, not designed UI
+updated_at: "2026-07-15T04:40:25Z"
+---
+## Problem
+Multi-profile config is only raw JSON text areas (`profileDisplayNamesJson`, `enabledProfilesJson`, `visibleWindowsJson`, `customProfilesJson`). Invalid JSON silently falls back via `parseJsonConfig` to `[]`/`{}` (all enabled / no renames), with no validation feedback. Design spec required a discovered-profile table (enable checkbox, display name, path, rediscover) and window checkboxes — not free-form JSON.
+
+## Location
+contents/ui/configGeneral.qml:264-290
+
+## Suggested fix
+Implement the designed Profiles / Visible quotas sections; keep JSON only as advanced/export if needed. Validate on Apply and show parse errors.
+
+## Source
+Review ff0a2eec Issue 5
