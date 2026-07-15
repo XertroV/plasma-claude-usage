@@ -34,3 +34,4 @@ bugs:
     - file: B033-grok-2-failed-expired-token-bu.todo
     - file: B034-settings-for-globally-hiding-t.todo
     - file: B035-remove-ai-usage-move-refresh-b.todo
+    - file: B036-font-size-is-a-little-small-fo.todo
