@@ -18,13 +18,21 @@ Item {
 
     // Staggered refresh queue: [{ id, manual }, ...] — used by refresh-all and autoRefresh (B002)
     property var refreshQueue: []
+    // Monotonic fetch generation — never reset on merge, so stale XHR cannot collide (B008)
+    property int nextFetchGen: 1
 
     // Auth cool-down between auto retries after OAuth/401 failures (B029)
     readonly property int authRetryHoldMs: 5 * 60 * 1000
     // Absolute ceiling for 429-backed refresh interval (B013)
     readonly property int maxBackoffIntervalMs: 60 * 60 * 1000
-    // Auto auth failures before suspending auto-refresh until manual or token change (B029)
+    // Auto auth failures before suspending usage API until token change or manual (B029)
     readonly property int maxAuthAutoAttempts: 2
+
+    function allocFetchGen() {
+        var g = nextFetchGen
+        nextFetchGen = g + 1
+        return g
+    }
 
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
@@ -275,6 +283,7 @@ Item {
                 grokDefaultBody: null,
                 grokCreditsBody: null,
                 grokDefaultStatus: 0,
+                grokDefaultFromTimeout: false,
                 grokAuthFailed: false,
                 usageFetchGen: 0,
                 backoffMultiplier: 1,
@@ -350,7 +359,8 @@ Item {
 
     function isAutoRefreshHeld(p, now) {
         if (!p) return true
-        if (p.authSuspended) return true
+        // Hold only — authSuspended still allows credential re-read so a rotated
+        // token can resume without a manual click (B029). Usage API is gated later.
         if (p.autoRefreshHoldUntilMs && now < p.autoRefreshHoldUntilMs) return true
         return false
     }
@@ -654,7 +664,11 @@ Item {
         if (idx < 0 || idx >= profiles.length) return
         var cur = profiles[idx]
         var mult = (cur.backoffMultiplier || 1) * 2
-        var wait = Math.min(refreshIntervalMs(cur.provider) * mult, maxBackoffIntervalMs)
+        var base = refreshIntervalMs(cur.provider)
+        var wait = Math.min(base * mult, maxBackoffIntervalMs)
+        // Cap stored mult so base*mult does not keep growing past the ceiling
+        var maxMult = Math.max(1, Math.ceil(maxBackoffIntervalMs / Math.max(base, 1)))
+        if (mult > maxMult) mult = maxMult
         var now = Date.now()
         updateProfile(idx, {
             loading: false,
@@ -834,7 +848,7 @@ Item {
         var epSlug = endpointSlugForProvider(ep)
         // Snapshot identity for caching + stale-response guard (B008)
         var profileId = p.id
-        var gen = (p.usageFetchGen || 0) + 1
+        var gen = allocFetchGen()
         var tokenSnapshot = p.accessToken
         var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
         updateProfile(idx, { usageFetchGen: gen })
@@ -925,19 +939,20 @@ Item {
         var p = profiles[idx]
         var profileId = p.id
         var tokenSnapshot = p.accessToken
-        var gen = (p.grokFetchGen || 0) + 1
+        var gen = allocFetchGen()
         updateProfile(idx, {
             grokFetchGen: gen,
             grokPending: 2,
             grokDefaultBody: null,
             grokCreditsBody: null,
             grokDefaultStatus: 0,
+            grokDefaultFromTimeout: false,
             grokAuthFailed: false
         })
-        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing", function(ok, body, status) {
+        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing", function(ok, body, status, fromTimeout) {
             var curIdx = findProfileIndex(profileId)
             if (curIdx < 0) return
-            var patch = { grokDefaultStatus: status }
+            var patch = { grokDefaultStatus: status, grokDefaultFromTimeout: !!fromTimeout }
             if (ok) patch.grokDefaultBody = body
             else if (status === 401 || status === 403) patch.grokAuthFailed = true
             finishGrokPart(profileId, gen, patch, tokenSnapshot)
@@ -1012,7 +1027,11 @@ Item {
             return
         }
         if (!p.grokDefaultBody) {
-            var detail = p.grokDefaultStatus === 0 ? "network error" : String(p.grokDefaultStatus || "error")
+            var detail
+            if (p.grokDefaultStatus === 0)
+                detail = p.grokDefaultFromTimeout ? "timeout" : "network error"
+            else
+                detail = String(p.grokDefaultStatus || "error")
             updateProfile(idx, {
                 loading: false,
                 error: p.error || (tr("API error") + " (" + detail + ")"),
@@ -1055,9 +1074,14 @@ Item {
             var p = profiles[i]
             if (!p || p.enabled === false) continue
             if (p.loading) continue
-            // B026/B029: do not auto-refresh suspended / held profiles
+            // Hard cool-down (auth retry spacing or 429 hold)
             if (isAutoRefreshHeld(p, now)) continue
-            // B013: absolute 60min cap on backoff-scaled interval
+            // After first auth fail, next attempt is gated by hold only (~5m), not full provider interval
+            if ((p.authFailCount || 0) > 0 && !p.authSuspended) {
+                due.push(p.id)
+                continue
+            }
+            // authSuspended: still re-cat on normal interval to detect token rotation (no API if same)
             var interval = effectiveRefreshIntervalMs(p)
             if (!p.lastFetchMs || (now - p.lastFetchMs) >= interval)
                 due.push(p.id)
@@ -1147,6 +1171,17 @@ Item {
                 updateProfile(idx, authPatch)
                 if (!auth.token) {
                     noteAuthFailure(idx, tr("Not logged in"), "")
+                    return
+                }
+                // Suspended with unchanged token: re-probe creds only, skip usage API (B029)
+                prof = profiles[idx]
+                if (prof.authSuspended && auth.token === prof.lastFailedToken) {
+                    updateProfile(idx, {
+                        loading: false,
+                        lastFetchMs: Date.now(),
+                        error: prof.error || tr("Token expired")
+                    })
+                    console.log("Claude Usage: auth still suspended, skip API", prof.id)
                     return
                 }
                 fetchUsage(idx)
