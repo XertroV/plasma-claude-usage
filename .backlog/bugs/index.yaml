@@ -26,3 +26,4 @@ bugs:
     - file: B025-http-status-0-always-labeled-a.todo
     - file: B026-grok-2-profile-stuck-reloading.todo
     - file: B027-tooltips-reset-when-ui-updates.todo
+    - file: B028-should-be-able-to-refresh-indi.todo

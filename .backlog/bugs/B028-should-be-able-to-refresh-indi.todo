@@ -1,0 +1,14 @@
+---
+complexity: medium
+created_at: "2026-07-15T05:09:03Z"
+depends_on: []
+estimate_hours: 1
+id: B028
+priority: high
+status: pending
+tags: []
+title: Should be able to refresh individual accounts/providers
+updated_at: "2026-07-15T05:09:03Z"
+---
+
+Should be able to refresh individual accounts/providers
