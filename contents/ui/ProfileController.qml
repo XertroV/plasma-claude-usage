@@ -1535,24 +1535,21 @@ Item {
         }
     }
 
+    // B027: only advance the clock. Do NOT reassign `profiles` (or bump dataEpoch).
+    // Replacing the array every second forced CardsView/Repeaters to rebuild delegates,
+    // which destroyed ToolTips mid-hover. Countdown + pace bars bind to nowMs instead.
     function tickWindows() {
         nowMs = Date.now()
-        var copy = profiles.slice()
-        var changed = false
-        for (var i = 0; i < copy.length; i++) {
-            var wins = copy[i].windows
+        // Keep stored timePercent roughly current for any non-binding consumers, but
+        // mutate in place — never replace profiles/windows arrays on the tick path.
+        for (var i = 0; i < profiles.length; i++) {
+            var wins = profiles[i] && profiles[i].windows
             if (!wins || !wins.length) continue
-            var newWins = []
             for (var j = 0; j < wins.length; j++) {
-                var w = {}
-                for (var key in wins[j]) w[key] = wins[j][key]
-                QC.updateTimePercent(w, nowMs)
-                newWins.push(w)
+                if (wins[j])
+                    QC.updateTimePercent(wins[j], nowMs)
             }
-            copy[i].windows = newWins
-            changed = true
         }
-        if (changed) profiles = copy
     }
 
     function dueProfiles() {
