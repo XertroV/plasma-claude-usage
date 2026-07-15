@@ -27,3 +27,4 @@ bugs:
     - file: B026-grok-2-profile-stuck-reloading.todo
     - file: B027-tooltips-reset-when-ui-updates.todo
     - file: B028-should-be-able-to-refresh-indi.todo
+    - file: B029-should-not-re-request-failing.todo
