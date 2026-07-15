@@ -1,18 +1,18 @@
 ---
+claimed_at: "2026-07-15T05:49:06Z"
+claimed_by: cli-user
+completed_at: null
 complexity: high
 created_at: "2026-07-15T04:40:25Z"
 depends_on: []
 estimate_hours: 3
 id: B004
 priority: high
-status: pending
-tags:
-    - settings
-    - configGeneral
-    - legacy
-    - multi-profile
+started_at: "2026-07-15T05:49:06Z"
+status: in_progress
+tags: []
 title: Settings still single-provider; legacy fields trap multi-mode off
-updated_at: "2026-07-15T04:40:25Z"
+updated_at: "2026-07-15T05:49:06Z"
 ---
 ## Problem
 Settings still lead with single-provider controls (`provider`, OpenCode sub-provider, account index, display name, credentials path). In `ProfileController.isLegacySingleInstance()`, any non-empty `credentialsPath`, non-empty `displayName`, or `provider !== "claude"` forces legacy filtering. Existing widgets (or casual Configure edits) therefore never get the multi-provider multi-account dashboard even when discovery would find many profiles.
