@@ -261,298 +261,217 @@ PlasmoidItem {
     }
 
     function primaryWindowsFor(profile) {
-        var out = []
-        if (!profile || !profile.windows) return out
-        for (var i = 0; i < profile.windows.length; i++) {
-            var w = profile.windows[i]
-            if (!w || w.visible === false) continue
-            if (w.role === "primary" || !w.role)
-                out.push(w)
-        }
-        if (out.length === 0) {
-            for (var j = 0; j < profile.windows.length; j++) {
-                if (profile.windows[j] && profile.windows[j].visible !== false)
-                    out.push(profile.windows[j])
+        return QC.primaryWindows(profile)
+    }
+
+    function openDetailFor(profile) {
+        if (!profile) {
+            var list = root.profileList || []
+            for (var i = 0; i < list.length; i++) {
+                if (list[i] && list[i].enabled !== false) {
+                    profile = list[i]
+                    break
+                }
             }
+        }
+        if (!profile) return
+        detailWindow.profiles = root.profileList
+        detailWindow.nowMs = root.nowMs
+        detailWindow.sessionColorMode = Plasmoid.configuration.sessionColorMode || "capacity"
+        detailWindow.weeklyColorMode = Plasmoid.configuration.weeklyColorMode || "efficiency"
+        detailWindow.i18n = root.i18nObj
+        detailWindow.showFor(profile)
+    }
+
+    function enabledProfiles() {
+        var out = []
+        var list = root.profileList || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i].enabled !== false)
+                out.push(list[i])
         }
         return out
     }
 
-    function windowDotColor(win, index) {
-        if (!win) return Kirigami.Theme.textColor
-        var mode = index === 0
-            ? (Plasmoid.configuration.sessionColorMode || "capacity")
-            : (Plasmoid.configuration.weeklyColorMode || "efficiency")
-        return QC.windowPaceColor(win, mode, Kirigami.Theme)
+    DetailWindow {
+        id: detailWindow
+        profiles: root.profileList
+        nowMs: root.nowMs
+        sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
+        weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+        i18n: root.i18nObj
+        onRefreshRequested: {
+            if (root.usageController) root.usageController.refreshAll()
+        }
+        onConfigureRequested: {
+            try {
+                Plasmoid.internalAction("configure").trigger()
+            } catch (e) {
+                console.log("Claude Usage: configure action failed", e)
+            }
+        }
     }
 
-    // Prefer compact in the panel (same pattern as pre-refactor + other Plasma applets)
+    // Panel is the product — cards with primary quotas (no day-to-day popup)
     preferredRepresentation: compactRepresentation
-    switchWidth: Kirigami.Units.gridUnit * 16
-    switchHeight: Kirigami.Units.gridUnit * 12
+    switchWidth: Kirigami.Units.gridUnit * 20
+    switchHeight: Kirigami.Units.gridUnit * 8
 
     compactRepresentation: Item {
-        Layout.minimumWidth: usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2
-        Layout.minimumHeight: Math.max(Kirigami.Units.iconSizes.medium, usageRow.implicitHeight)
-        Layout.preferredWidth: usageRow.implicitWidth + Kirigami.Units.largeSpacing * 2
-        Layout.preferredHeight: Math.max(Kirigami.Units.iconSizes.medium, usageRow.implicitHeight)
+        id: compactRoot
 
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.expanded = !root.expanded
-        }
+        readonly property int cardMinW: Kirigami.Units.gridUnit * 11
+        readonly property int hPad: Kirigami.Units.smallSpacing
+        readonly property int vPad: Kirigami.Units.smallSpacing
+        readonly property var cards: root.enabledProfiles()
+        readonly property int maxCards: 8
+
+        // Implicit size drives Plasma panel allocation
+        implicitWidth: Math.max(Kirigami.Units.gridUnit * 12,
+                                cardFlow.implicitWidth + hPad * 2 + iconCol.implicitWidth + Kirigami.Units.smallSpacing)
+        implicitHeight: Math.max(Kirigami.Units.iconSizes.medium,
+                                 cardFlow.implicitHeight + vPad * 2)
+
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 10
+        Layout.minimumHeight: Kirigami.Units.iconSizes.medium
+        Layout.preferredWidth: implicitWidth
+        Layout.preferredHeight: implicitHeight
 
         RowLayout {
             id: usageRow
-            anchors.centerIn: parent
+            anchors.fill: parent
+            anchors.margins: 0
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.Icon {
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                Layout.alignment: Qt.AlignVCenter
-                source: Qt.resolvedUrl("../icons/claude.svg")
-                Layout.rightMargin: Kirigami.Units.smallSpacing
+            ColumnLayout {
+                id: iconCol
+                Layout.alignment: Qt.AlignTop
+                spacing: Kirigami.Units.smallSpacing / 2
+                Kirigami.Icon {
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                    source: Qt.resolvedUrl("../icons/claude.svg")
+                }
+                PlasmaComponents.Label {
+                    visible: root.isLoading
+                    text: root.loadingCountText || (root.profilesDone + "/" + Math.max(root.profilesTotal, 1))
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: Kirigami.Theme.disabledTextColor
+                }
             }
 
-            // Multi-profile: stacked lines (capped so compact never overflows the panel)
-            ColumnLayout {
-                id: multiColumn
-                spacing: 1
-                visible: root.profileList.length > 1
-                // Hard cap visual height in compact representation
-                readonly property int maxRows: 6
+            // Auto-flow account cards
+            Flow {
+                id: cardFlow
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignTop | Qt.AlignLeft
+                spacing: Kirigami.Units.smallSpacing
+                flow: Flow.LeftToRight
 
                 Repeater {
-                    model: root.profileList
-
-                    RowLayout {
+                    model: {
+                        var _ = root.dataEpoch
+                        return compactRoot.cards
+                    }
+                    AccountCard {
                         required property var modelData
                         required property int index
-                        spacing: 4
-                        visible: modelData && modelData.enabled !== false
-                                 && index < multiColumn.maxRows
-
-                        PlasmaComponents.Label {
-                            text: modelData.error ? "⚠" : (modelData.displayName || modelData.id || "?")
-                            font.bold: true
-                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                            color: modelData.error ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-                            elide: Text.ElideRight
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 5
+                        visible: index < compactRoot.maxCards
+                        profile: modelData
+                        nowMs: root.nowMs
+                        sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
+                        weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+                        showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
+                        minWidth: compactRoot.cardMinW
+                        // Fill width efficiently when only one card, or when row has room
+                        width: {
+                            var avail = cardFlow.width
+                            if (avail <= 0) return minWidth
+                            var cols = Math.max(1, Math.floor((avail + cardFlow.spacing) / (minWidth + cardFlow.spacing)))
+                            var n = Math.min(compactRoot.cards.length, compactRoot.maxCards)
+                            if (n <= 1) return Math.max(minWidth, avail)
+                            var w = Math.floor((avail - cardFlow.spacing * (cols - 1)) / cols)
+                            return Math.max(minWidth, w)
                         }
+                        onDetailRequested: function(p) { root.openDetailFor(p) }
+                    }
+                }
 
-                        Repeater {
-                            model: root.primaryWindowsFor(modelData)
-
-                            RowLayout {
-                                required property var modelData
-                                required property int index
-                                spacing: 3
-
-                                PlasmaComponents.Label {
-                                    visible: index > 0
-                                    text: "|"
-                                    opacity: 0.4
-                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                }
-                                PaceBar {
-                                    Layout.preferredWidth: 22
-                                    Layout.preferredHeight: 6
-                                    usagePercent: modelData.usagePercent || 0
-                                    timePercent: modelData.timePercent || 0
-                                    colorMode: index === 0
-                                        ? (Plasmoid.configuration.sessionColorMode || "capacity")
-                                        : (Plasmoid.configuration.weeklyColorMode || "efficiency")
-                                    compact: true
-                                    windowData: modelData
-                                }
-                                PlasmaComponents.Label {
-                                    text: Math.round(modelData.usagePercent || 0) + "%"
-                                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                    font.bold: true
-                                    color: root.windowDotColor(modelData, index)
-                                }
-                            }
-                        }
-
-                        PlasmaComponents.Label {
-                            visible: !!modelData.loading && !(modelData.windows && modelData.windows.length)
-                            text: "…"
-                            color: Kirigami.Theme.disabledTextColor
-                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        }
-
-                        PlasmaComponents.Label {
-                            visible: !!modelData.error
-                            text: modelData.error
-                            color: Kirigami.Theme.negativeTextColor
-                            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                            elide: Text.ElideRight
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 5
-                        }
+                // Ghost cards while discovering with no profiles yet
+                Repeater {
+                    model: (compactRoot.cards.length === 0 && root.isLoading) ? 2 : 0
+                    AccountCard {
+                        profile: ({ displayName: "…", loading: true, windows: [], error: "" })
+                        nowMs: root.nowMs
+                        minWidth: compactRoot.cardMinW
+                        width: Math.max(minWidth, Math.floor((cardFlow.width - cardFlow.spacing) / 2) || minWidth)
                     }
                 }
 
                 PlasmaComponents.Label {
-                    visible: root.profileList.length > multiColumn.maxRows
-                    text: "+" + (root.profileList.length - multiColumn.maxRows) + " more"
+                    visible: compactRoot.cards.length > compactRoot.maxCards
+                    text: "+" + (compactRoot.cards.length - compactRoot.maxCards) + " more"
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                     color: Kirigami.Theme.disabledTextColor
                 }
 
                 PlasmaComponents.Label {
-                    visible: root.isLoading
-                    text: root.profilesDone + "/" + Math.max(root.profilesTotal, 1)
+                    visible: compactRoot.cards.length === 0 && !root.isLoading
+                    text: root.i18nObj ? root.i18nObj.tr("No profiles") : "No profiles"
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    font.bold: true
-                    color: Kirigami.Theme.disabledTextColor
-                }
-            }
-
-            // Single-profile (legacy panel instances): classic strip
-            RowLayout {
-                spacing: Kirigami.Units.smallSpacing
-                visible: root.profileList.length <= 1
-
-                PlasmaComponents.Label {
-                    text: root.compactName
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.textColor
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 6
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.errorMsg !== ""
-                    text: "⚠"
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                    color: Kirigami.Theme.negativeTextColor
-                }
-
-                PaceBar {
-                    visible: root.errorMsg === "" && root.hasSessionWindow
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 8
-                    usagePercent: root.sessionUsagePercent
-                    timePercent: root.sessionTimePercent
-                    colorMode: Plasmoid.configuration.sessionColorMode || "capacity"
-                    compact: true
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.errorMsg === "" && root.hasSessionWindow
-                    text: Math.round(root.sessionUsagePercent) + "%"
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                    font.bold: true
-                    color: root.getSessionColor()
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.errorMsg === "" && root.hasSessionWindow && root.hasWeeklyWindow
-                    text: "|"
-                    opacity: 0.5
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                }
-
-                PaceBar {
-                    visible: root.errorMsg === "" && root.hasWeeklyWindow
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 8
-                    usagePercent: root.weeklyUsagePercent
-                    timePercent: root.weeklyTimePercent
-                    colorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
-                    compact: true
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.errorMsg === "" && root.hasWeeklyWindow
-                    text: Math.round(root.weeklyUsagePercent) + "%"
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                    font.bold: true
-                    color: root.getWeeklyColor()
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.bankedResets > 0 && Plasmoid.configuration.showBankedBadge !== false
-                    text: "↻" + root.bankedResets
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.highlightColor
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.errorMsg !== ""
-                    text: root.errorMsg
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.negativeTextColor
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 8
-                }
-
-                PlasmaComponents.Label {
-                    visible: root.isLoading && root.errorMsg === ""
-                             && !root.hasSessionWindow && !root.hasWeeklyWindow
-                    text: root.loadingCountText !== ""
-                          ? root.loadingCountText
-                          : (root.profilesTotal > 0
-                             ? (root.profilesDone + "/" + root.profilesTotal)
-                             : "…")
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                    font.bold: true
                     color: Kirigami.Theme.disabledTextColor
                 }
             }
         }
     }
 
+    // Popup deprioritized: short help + open detail / configure
     fullRepresentation: Item {
-        // Bounded size: do NOT grow preferredHeight with content (that overflows
-        // plasmoidviewer when many profiles load). Content scrolls inside ExpandedView.
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 16
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 12
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 22
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 24
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        clip: true
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 14
+        Layout.minimumHeight: Kirigami.Units.gridUnit * 8
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 10
 
         ColumnLayout {
-            id: expandedColumn
             anchors.fill: parent
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents.Label {
                 Layout.fillWidth: true
-                text: root.i18nObj ? root.i18nObj.tr("Usage quotas") : "Usage quotas"
+                text: root.i18nObj ? root.i18nObj.tr("AI Usage") : "AI Usage"
                 font.bold: true
-                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
-                elide: Text.ElideRight
             }
-
-            ExpandedView {
+            PlasmaComponents.Label {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                // Only root.* — bare `controller` / `i18n` are null in this representation
-                profiles: root.profileList
-                dataEpoch: root.dataEpoch
-                nowMs: root.nowMs
-                lastGlobalUpdate: root.lastGlobalUpdate
-                profilesDone: root.profilesDone
-                profilesTotal: root.profilesTotal
-                isLoading: root.isLoading
-                i18n: root.i18nObj
-                sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
-                weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
-                showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
-                onRefreshRequested: {
-                    if (root.usageController) root.usageController.refreshAll()
+                wrapMode: Text.WordWrap
+                text: root.i18nObj
+                      ? root.i18nObj.tr("Quotas are shown on the panel. Open details for paths and extra limits.")
+                      : "Quotas are shown on the panel. Open details for paths and extra limits."
+                color: Kirigami.Theme.disabledTextColor
+            }
+            RowLayout {
+                PlasmaComponents.Button {
+                    text: root.i18nObj ? root.i18nObj.tr("Details…") : "Details…"
+                    onClicked: root.openDetailFor(null)
                 }
-                onRediscoverRequested: {
-                    if (root.usageController) root.usageController.discoverProfiles()
+                PlasmaComponents.Button {
+                    text: root.i18nObj ? root.i18nObj.tr("Refresh") : "Refresh"
+                    icon.name: "view-refresh"
+                    onClicked: {
+                        if (root.usageController) root.usageController.refreshAll()
+                    }
+                }
+                PlasmaComponents.Button {
+                    text: root.i18nObj ? root.i18nObj.tr("Configure…") : "Configure…"
+                    icon.name: "configure"
+                    onClicked: {
+                        try { Plasmoid.internalAction("configure").trigger() } catch (e) {}
+                    }
                 }
             }
+            Item { Layout.fillHeight: true }
         }
     }
 
@@ -568,11 +487,10 @@ PlasmoidItem {
             var p = list[i]
             if (!p || p.enabled === false) continue
             var parts = []
-            var wins = p.windows || []
+            var wins = QC.primaryWindows(p)
             for (var j = 0; j < wins.length; j++) {
-                if (wins[j].visible === false) continue
                 var cd = QC.formatCountdown(wins[j].resetAtMs, root.nowMs)
-                parts.push(wins[j].label + " " + Math.round(wins[j].usagePercent) + "%"
+                parts.push(QC.displayWindowLabel(wins[j]) + " " + Math.round(wins[j].usagePercent) + "%"
                     + (cd ? " (" + cd + ")" : ""))
             }
             if (p.bankedResets > 0) parts.push("↻" + p.bankedResets)

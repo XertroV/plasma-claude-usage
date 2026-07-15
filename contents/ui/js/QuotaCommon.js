@@ -2,13 +2,183 @@
 
 var MS_HOUR = 3600000
 var MS_DAY = 86400000
+var MS_5H = 5 * MS_HOUR
+var MS_7D = 7 * MS_DAY
+var MS_12H = 12 * MS_HOUR
+var MS_10D = 10 * MS_DAY
+var MS_45D = 45 * MS_DAY
 
-function formatWindowDuration(seconds) {
+/** Canonical period label from duration seconds (604800 → "7d", never "168h"). */
+function formatPeriodLabel(seconds) {
     var s = Math.floor(Number(seconds) || 0)
-    if (s >= 86400 && s % 86400 === 0) return (s / 86400) + "d"
-    if (s >= 3600 && s % 3600 === 0) return (s / 3600) + "h"
+    if (s <= 0) return "0h"
+    // Prefer day units when exact
+    if (s >= 86400 && s % 86400 === 0) {
+        var days = s / 86400
+        if (days === 7) return "7d"
+        if (days === 30 || days === 31) return "mo"
+        return days + "d"
+    }
+    if (s >= 3600 && s % 3600 === 0) {
+        var hours = s / 3600
+        if (hours === 5) return "5h"
+        if (hours === 168) return "7d"
+        return hours + "h"
+    }
     if (s > 0) return s + "s"
     return "0h"
+}
+
+/** Alias — existing call sites use formatWindowDuration. */
+function formatWindowDuration(seconds) {
+    return formatPeriodLabel(seconds)
+}
+
+function normalizePeriodToken(raw) {
+    var s = String(raw || "").trim().toLowerCase()
+    if (!s) return ""
+    if (s === "168h" || s === "weekly" || s === "week" || s === "wk" || s === "7d")
+        return "7d"
+    if (s === "five_hour" || s === "five-hour" || s === "5hour" || s === "5h" || s === "300m")
+        return "5h"
+    if (s === "monthly" || s === "month" || s === "mo" || s === "30d" || s === "31d")
+        return "mo"
+    if (s.indexOf("weekly/") === 0) return "7d"
+    if (s.indexOf("wk/") === 0) return "7d"
+    if (s.indexOf("5h/") === 0) return "5h"
+    if (s.indexOf("7d/") === 0) return "7d"
+    if (s.indexOf("monthly") === 0) return "mo"
+    return s
+}
+
+/**
+ * Classify window into period column/class.
+ * Order: extra role → periodMs bands → token fallbacks.
+ * Never treat bare id "session" as 5h when period is weekly/monthly.
+ */
+function assignWindowColumn(window) {
+    if (!window) return "extra"
+    if (window.role === "extra") return "extra"
+
+    var periodMs = Number(window.periodMs) || 0
+    if (periodMs > 0) {
+        if (periodMs >= MS_HOUR && periodMs <= MS_12H) return "5h"
+        if (periodMs > MS_12H && periodMs <= MS_10D) return "7d"
+        if (periodMs > MS_10D && periodMs <= MS_45D) return "mo"
+        // Outside bands with a period → treat as extra (not a standard header period)
+        return "extra"
+    }
+
+    // periodMs missing/0: token/id fallbacks (credits/on-demand with no period stay extra)
+    var id = String(window.id || "").toLowerCase()
+    var label = String(window.label || "").toLowerCase()
+    var tok = normalizePeriodToken(id) || normalizePeriodToken(label)
+
+    if (tok === "5h" || id.indexOf("5h") === 0) return "5h"
+    if (tok === "7d" || id === "weekly" || id.indexOf("wk/") === 0
+            || id.indexOf("7d") === 0 || label.indexOf("weekly") === 0)
+        return "7d"
+    if (tok === "mo" || id.indexOf("monthly") === 0 || label.indexOf("monthly") === 0
+            || id === "month" || label.indexOf("mcp") >= 0 && id === "weekly")
+        return "mo"
+
+    // Bare "session" without periodMs: only 5h if label/tokens don't say weekly
+    if (id === "session") {
+        if (label.indexOf("week") >= 0 || label.indexOf("7d") >= 0 || label.indexOf("month") >= 0)
+            return label.indexOf("month") >= 0 ? "mo" : "7d"
+        return "5h"
+    }
+
+    return "extra"
+}
+
+function isSessionClass(window) { return assignWindowColumn(window) === "5h" }
+function isWeeklyClass(window) { return assignWindowColumn(window) === "7d" }
+function isMonthlyClass(window) { return assignWindowColumn(window) === "mo" }
+
+function colorModeForColumn(col, sessionMode, weeklyMode) {
+    if (col === "5h") return sessionMode || "capacity"
+    return weeklyMode || "efficiency"
+}
+
+function colorModeForWindow(window, sessionMode, weeklyMode) {
+    return colorModeForColumn(assignWindowColumn(window), sessionMode, weeklyMode)
+}
+
+/** Short UI label for a window (chips, rows, tooltips). */
+function displayWindowLabel(window) {
+    if (!window) return ""
+    var id = String(window.id || "")
+    var label = String(window.label || "")
+    var col = assignWindowColumn(window)
+
+    // MiniMax: id wk/foo → display 7d/foo
+    if (id.indexOf("wk/") === 0)
+        return "7d/" + id.substring(3)
+    if (label.indexOf("wk/") === 0)
+        return "7d/" + label.substring(3)
+
+    // Grok weekly/build → 7d/build
+    if (label.indexOf("weekly/") === 0)
+        return "7d/" + label.substring(7)
+    if (id.indexOf("weekly_") === 0) {
+        // extras like weekly_fable → short model name for extras; for primary use 7d
+        if (window.role === "extra") {
+            var rest = id.substring(7)
+            if (rest) return rest.charAt(0).toUpperCase() + rest.slice(1)
+        }
+        return "7d"
+    }
+
+    // Plain period primaries
+    if (col === "5h" && (label === "5h" || label === "5h tokens" || id === "session" || id === "5h"))
+        return "5h"
+    if (col === "7d" && (label === "7d" || label === "weekly" || id === "weekly" || id === "7d"))
+        return "7d"
+    if (col === "mo") {
+        if (label.indexOf("monthly $") === 0 || label.indexOf("$") >= 0) return "mo"
+        if (label.indexOf("monthly") === 0 || label === "monthly MCP" || label === "MCP") return "mo"
+        if (normalizePeriodToken(label) === "mo" || label === "mo") return "mo"
+        return "mo"
+    }
+
+    // Already canonical duration labels from formatPeriodLabel
+    var norm = normalizePeriodToken(label)
+    if (norm === "5h" || norm === "7d" || norm === "mo") return norm
+
+    // Prefer existing short label
+    if (label) return label
+    if (id) return id
+    return col !== "extra" ? col : ""
+}
+
+function primaryWindows(profile) {
+    var out = []
+    if (!profile || !profile.windows) return out
+    for (var i = 0; i < profile.windows.length; i++) {
+        var w = profile.windows[i]
+        if (!w || w.visible === false) continue
+        if (w.role === "primary" || w.role === "" || w.role === undefined)
+            out.push(w)
+    }
+    if (out.length === 0) {
+        for (var j = 0; j < profile.windows.length; j++) {
+            if (profile.windows[j] && profile.windows[j].visible !== false)
+                out.push(profile.windows[j])
+        }
+    }
+    return out
+}
+
+function extraWindows(profile) {
+    var out = []
+    if (!profile || !profile.windows) return out
+    for (var i = 0; i < profile.windows.length; i++) {
+        var w = profile.windows[i]
+        if (w && w.visible !== false && w.role === "extra")
+            out.push(w)
+    }
+    return out
 }
 
 function formatCountdown(resetAtMs, nowMs) {
@@ -93,7 +263,6 @@ function defaultProfileLabel(provider, profileKey) {
     if (!profileKey || profileKey === "") return base
     if (profileKey === "anthropic-accounts") return base + " Anthropic"
     if (profileKey === "local-share") return base
-    // Bootstrap / single-instance placeholders — do not show "Z.ai-legacy"
     if (profileKey === "legacy" || profileKey.indexOf("legacy") === 0) return base
     return base + "-" + profileKey
 }

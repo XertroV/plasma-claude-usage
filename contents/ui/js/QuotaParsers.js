@@ -200,14 +200,15 @@ function parseGrok(defaultBody, creditsBody) {
 
     var period = creditsCfg.currentPeriod || creditsCfg.current_period || null
     var periodType = (period && period.type) ? String(period.type) : "USAGE_PERIOD_TYPE_WEEKLY"
-    var periodLabel = "weekly"
+    var periodLabel = "7d"
     var upper = periodType.toUpperCase()
-    if (upper.indexOf("MONTH") >= 0) periodLabel = "monthly"
-    else if (upper.indexOf("DAY") >= 0) periodLabel = "daily"
+    if (upper.indexOf("MONTH") >= 0) periodLabel = "mo"
+    else if (upper.indexOf("DAY") >= 0 && upper.indexOf("WEEK") < 0) periodLabel = "1d"
 
     var periodEnd = period && period.end ? QC.parseResetMs(period.end) : 0
     if (!periodEnd && creditsCfg.billingPeriodEnd) periodEnd = QC.parseResetMs(creditsCfg.billingPeriodEnd)
     var periodMs = MS_7D
+    if (periodLabel === "mo") periodMs = MS_30D
 
     var weeklyPct = null
     var products = creditsCfg.productUsage || creditsCfg.product_usage || []
@@ -219,11 +220,12 @@ function parseGrok(defaultBody, creditsBody) {
                     : (prod.usage_percent != null ? Number(prod.usage_percent) : null)
             if (pct == null || isNaN(pct)) continue
             var short = name === "GrokBuild" ? "build" : name
+            var disp = periodLabel + "/" + short
             if (weeklyPct === null) {
                 weeklyPct = pct
-                r.windows.push(QC.makeWindow("session", periodLabel + "/" + short, pct, periodEnd, periodMs, "primary", true))
+                r.windows.push(QC.makeWindow("session", disp, pct, periodEnd, periodMs, "primary", true))
             } else {
-                r.windows.push(QC.makeWindow("extra_" + short, periodLabel + "/" + short, pct, periodEnd, periodMs, "extra", false))
+                r.windows.push(QC.makeWindow("extra_" + short, disp, pct, periodEnd, periodMs, "extra", false))
             }
         }
     }
@@ -241,8 +243,11 @@ function parseGrok(defaultBody, creditsBody) {
     var usedDollars = grokCentsToDollars(defaultCfg.used)
     if (limitDollars > 0 || usedDollars > 0) {
         var monthPct = limitDollars > 0 ? (usedDollars / limitDollars) * 100 : 0
-        r.windows.push(QC.makeWindow("weekly", "monthly $" + formatDollars(usedDollars) + "/$" + formatDollars(limitDollars),
+        // Label "mo"; $ detail via tooltip from raw used/limit if needed later
+        r.windows.push(QC.makeWindow("weekly", "mo",
             Math.min(100, monthPct), monthEnd, monthMs, "primary", true))
+        r.windows[r.windows.length - 1].tooltipExtra =
+            "$" + formatDollars(usedDollars) + "/$" + formatDollars(limitDollars)
     }
 
     var odCap = grokCentsToDollars(creditsCfg.onDemandCap || creditsCfg.on_demand_cap || defaultCfg.onDemandCap || defaultCfg.on_demand_cap)
@@ -307,10 +312,11 @@ function parseMinimax(data) {
             var wrem = Math.max(0, Math.min(wlimit, Number(m.current_weekly_usage_count)))
             var wused = wlimit - wrem
             var wpct = wlimit > 0 ? (wused / wlimit) * 100 : 0
-            r.windows.push(QC.makeWindow("wk/" + short, "wk/" + short, wpct, wkEndMs, MS_7D, isPrimaryModel ? "primary" : "extra", isPrimaryModel))
+            // id keeps wk/ for config stability; label is canonical 7d/
+            r.windows.push(QC.makeWindow("wk/" + short, "7d/" + short, wpct, wkEndMs, MS_7D, isPrimaryModel ? "primary" : "extra", isPrimaryModel))
         } else if (m.current_weekly_remaining_percent != null) {
             var wp = Math.min(100, Number(m.current_weekly_remaining_percent))
-            r.windows.push(QC.makeWindow("wk/" + short, "wk/" + short, 100 - wp, wkEndMs, MS_7D, isPrimaryModel ? "primary" : "extra", isPrimaryModel))
+            r.windows.push(QC.makeWindow("wk/" + short, "7d/" + short, 100 - wp, wkEndMs, MS_7D, isPrimaryModel ? "primary" : "extra", isPrimaryModel))
         }
     }
     return r
@@ -323,9 +329,9 @@ function parseZai(data) {
     for (var i = 0; i < limits.length; i++) {
         var entry = limits[i]
         if (entry.type === "TOKENS_LIMIT") {
-            r.windows.push(QC.makeWindow("session", "5h tokens", entry.percentage || 0, QC.parseResetMs(entry.nextResetTime), MS_5H, "primary", true))
+            r.windows.push(QC.makeWindow("session", "5h", entry.percentage || 0, QC.parseResetMs(entry.nextResetTime), MS_5H, "primary", true))
         } else if (entry.type === "TIME_LIMIT") {
-            r.windows.push(QC.makeWindow("weekly", "monthly MCP", entry.percentage || 0, QC.parseResetMs(entry.nextResetTime), MS_30D, "primary", true))
+            r.windows.push(QC.makeWindow("weekly", "mo", entry.percentage || 0, QC.parseResetMs(entry.nextResetTime), MS_30D, "primary", true))
         }
     }
     var planName = container.planName || container.packageName || ""
