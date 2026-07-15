@@ -24,9 +24,19 @@ Item {
     readonly property bool hasPace: timeP > 0.5
     readonly property real pace: hasPace ? (usage / Math.max(timeP, 1)) : 0
 
-    readonly property color paceColor: windowData
-        ? QC.windowPaceColor(windowData, colorMode, Kirigami.Theme)
-        : Kirigami.Theme.positiveTextColor
+    // Live timeP/usage props (fed from QuotaRow.nowMs), not stored window.timePercent,
+    // so color tracks the clock without a profile model rebuild (B027).
+    readonly property color paceColor: {
+        if (barRoot.timeP > 0.5) {
+            var pace = barRoot.usage / Math.max(1, barRoot.timeP)
+            return colorMode === "efficiency"
+                ? QC.efficiencyPaceColor(pace, barRoot.timeP, Kirigami.Theme)
+                : QC.capacityPaceColor(pace, Kirigami.Theme)
+        }
+        if (windowData || barRoot.usage > 0)
+            return QC.usageColor(barRoot.usage, Kirigami.Theme)
+        return Kirigami.Theme.positiveTextColor
+    }
 
     // Track
     Rectangle {

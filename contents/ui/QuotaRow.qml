@@ -21,10 +21,17 @@ RowLayout {
     readonly property bool isSkeleton: mode === "skeleton" || !windowData
     readonly property string periodLabel: isSkeleton ? "··" : QC.displayWindowLabel(windowData)
     readonly property real usagePct: windowData ? (windowData.usagePercent || 0) : 0
-    readonly property real timePct: windowData ? (windowData.timePercent || 0) : 0
-    readonly property color fillColor: isSkeleton
-        ? Kirigami.Theme.disabledTextColor
-        : QC.windowPaceColor(windowData, colorMode, Kirigami.Theme)
+    // B027: derive from nowMs so pace bars tick without rebuilding window/profile models
+    readonly property real timePct: {
+        var _ = nowMs
+        if (isSkeleton || !windowData) return 0
+        return QC.computeTimePercent(windowData, nowMs)
+    }
+    readonly property color fillColor: {
+        var _ = nowMs
+        if (isSkeleton) return Kirigami.Theme.disabledTextColor
+        return QC.windowPaceColor(windowData, colorMode, Kirigami.Theme, nowMs)
+    }
 
     PlasmaComponents.Label {
         text: rowRoot.periodLabel

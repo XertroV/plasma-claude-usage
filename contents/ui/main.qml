@@ -64,7 +64,9 @@ PlasmoidItem {
             root.syncCompactFromController()
             root.syncDetailProfileFromList()
         }
-        onNowMsChanged: root.syncCompactFromController()
+        // B027: clock tick must NOT rebuild profileList (Repeater model → tooltip flicker).
+        // Countdown / pace UI binds to root.nowMs directly.
+        onNowMsChanged: root.nowMs = controller.nowMs
         onDiscoveringChanged: root.syncCompactFromController()
         onLastGlobalUpdateChanged: root.syncCompactFromController()
     }

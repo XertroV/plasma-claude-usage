@@ -308,16 +308,21 @@ function formatCountdown(resetAtMs, nowMs) {
     return minutes + "m " + seconds + "s"
 }
 
-function updateTimePercent(window, nowMs) {
-    if (!window || !window.resetAtMs || !window.periodMs) {
-        if (window) window.timePercent = 0
+/** Pure elapsed fraction of the quota window (0–100). Does not mutate. */
+function computeTimePercent(window, nowMs) {
+    if (!window || !window.resetAtMs || !window.periodMs)
         return 0
-    }
     var resetMs = window.resetAtMs
     var periodMs = window.periodMs > 0 ? window.periodMs : MS_HOUR
     var startMs = resetMs - periodMs
     var elapsed = (nowMs || Date.now()) - startMs
-    var pct = Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
+    return Math.max(0, Math.min(100, (elapsed / periodMs) * 100))
+}
+
+/** Mutate window.timePercent from wall clock (used after fetch / explicit ticks). */
+function updateTimePercent(window, nowMs) {
+    if (!window) return 0
+    var pct = computeTimePercent(window, nowMs)
     window.timePercent = pct
     return pct
 }
@@ -345,15 +350,19 @@ function usageColor(percent, theme) {
     return theme.negativeTextColor
 }
 
-function windowPaceColor(window, colorMode, theme) {
-    var timeP = Math.max(1, window.timePercent || 0)
-    if (timeP > 0 && window.usagePercent >= 0) {
+/** Optional nowMs: live pace color without relying on a pre-mutated timePercent (B027). */
+function windowPaceColor(window, colorMode, theme, nowMs) {
+    var rawTime = (nowMs !== undefined && nowMs !== null && nowMs > 0)
+        ? computeTimePercent(window, nowMs)
+        : (window ? (window.timePercent || 0) : 0)
+    var timeP = Math.max(1, rawTime)
+    if (timeP > 0 && window && window.usagePercent >= 0) {
         var pace = window.usagePercent / timeP
         return colorMode === "efficiency"
             ? efficiencyPaceColor(pace, timeP, theme)
             : capacityPaceColor(pace, theme)
     }
-    return usageColor(window.usagePercent, theme)
+    return usageColor(window ? window.usagePercent : 0, theme)
 }
 
 function defaultProfileLabel(provider, profileKey) {
