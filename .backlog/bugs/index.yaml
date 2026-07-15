@@ -33,3 +33,4 @@ bugs:
     - file: B032-add-hidden-toggle-visible-on-d.todo
     - file: B033-grok-2-failed-expired-token-bu.todo
     - file: B034-settings-for-globally-hiding-t.todo
+    - file: B035-remove-ai-usage-move-refresh-b.todo
