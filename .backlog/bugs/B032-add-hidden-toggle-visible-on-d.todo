@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T06:03:48Z"
 claimed_by: cli-user
-completed_at: null
+completed_at: "2026-07-15T06:11:26Z"
 complexity: medium
 created_at: "2026-07-15T06:03:31Z"
 depends_on: []
+duration_minutes: 7.636389137916667
 estimate_hours: 1
 id: B032
 priority: high
 started_at: "2026-07-15T06:03:48Z"
-status: in_progress
+status: done
 tags: []
 title: Add 'hidden' toggle visible on details page for an acct/provider
-updated_at: "2026-07-15T06:03:48Z"
+updated_at: "2026-07-15T06:11:26Z"
 ---
 
 Add 'hidden' toggle visible on details page for an acct/provider
