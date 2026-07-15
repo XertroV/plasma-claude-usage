@@ -1,14 +1,18 @@
 ---
+claimed_at: "2026-07-15T06:42:33Z"
+claimed_by: grok-bl-fix-many
+completed_at: null
 complexity: medium
 created_at: "2026-07-15T06:18:55Z"
 depends_on: []
 estimate_hours: 1
 id: B033
 priority: high
-status: pending
+started_at: "2026-07-15T06:42:33Z"
+status: in_progress
 tags: []
 title: grok-2 failed (expired token), but then after i refreshed the token and clicked big refresh button, it only loaded the monthly row, not the 7d row.
-updated_at: "2026-07-15T06:18:55Z"
+updated_at: "2026-07-15T06:42:33Z"
 ---
 
 grok-2 failed (expired token), but then after i refreshed the token and clicked big refresh button, it only loaded the monthly row, not the 7d row.

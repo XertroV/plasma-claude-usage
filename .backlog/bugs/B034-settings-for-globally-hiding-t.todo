@@ -1,14 +1,18 @@
 ---
+claimed_at: "2026-07-15T06:42:33Z"
+claimed_by: grok-bl-fix-many
+completed_at: null
 complexity: medium
 created_at: "2026-07-15T06:24:57Z"
 depends_on: []
 estimate_hours: 1
 id: B034
 priority: high
-status: pending
+started_at: "2026-07-15T06:42:33Z"
+status: in_progress
 tags: []
 title: Settings for globally hiding/toggling columns don't seem to do anything sometimes. Also we should separate these (not group them) so they are controllable for each provider.
-updated_at: "2026-07-15T06:24:57Z"
+updated_at: "2026-07-15T06:42:33Z"
 ---
 
 Settings for globally hiding/toggling columns don't seem to do anything sometimes. Also we should separate these (not group them) so they are controllable for each provider.

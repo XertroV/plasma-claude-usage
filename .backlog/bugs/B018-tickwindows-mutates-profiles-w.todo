@@ -1,17 +1,18 @@
 ---
+claimed_at: "2026-07-15T06:42:33Z"
+claimed_by: grok-bl-fix-many
+completed_at: null
 complexity: low
 created_at: "2026-07-15T04:40:40Z"
 depends_on: []
 estimate_hours: 0.5
 id: B018
 priority: low
-status: pending
-tags:
-    - timers
-    - UI
-    - ProfileController
+started_at: "2026-07-15T06:42:33Z"
+status: in_progress
+tags: []
 title: tickWindows mutates profiles without bumping dataEpoch
-updated_at: "2026-07-15T04:40:40Z"
+updated_at: "2026-07-15T06:42:33Z"
 ---
 ## Problem
 `tickWindows` mutates profile objects via shallow `profiles.slice()` without bumping `dataEpoch`. Main listens to `onProfilesChanged`, which usually fires on array reassignment, but ExpandedView’s model expression also keys off `dataEpoch`. Relying on both paths is fragile if a future change mutates in place without reassigning `profiles`.

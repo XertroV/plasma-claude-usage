@@ -1,17 +1,18 @@
 ---
+claimed_at: "2026-07-15T06:42:33Z"
+claimed_by: grok-bl-fix-many
+completed_at: null
 complexity: low
 created_at: "2026-07-15T04:43:52Z"
 depends_on: []
 estimate_hours: 1
 id: B024
 priority: medium
-status: pending
-tags:
-    - cache
-    - ProfileController
-    - reliability
+started_at: "2026-07-15T06:42:33Z"
+status: in_progress
+tags: []
 title: Cache write queue can stall if cacheWriter onNewData never fires
-updated_at: "2026-07-15T04:43:52Z"
+updated_at: "2026-07-15T06:42:33Z"
 ---
 ## Problem
 `enqueueCacheWrite` sets `_cacheWriteBusy = true` then `cacheWriter.connectSource(...)`. The queue only drains in `cacheWriter.onNewData`. If the executable engine fails to emit `onNewData` (bad source, engine hang, process never started), `_cacheWriteBusy` stays true and all subsequent response caches are silently dropped for the session.
