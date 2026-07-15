@@ -16,6 +16,16 @@ Item {
     // Bumped on every profile mutation so UI can re-sync reliably
     property int dataEpoch: 0
 
+    // Staggered refresh queue: [{ id, manual }, ...] — used by refresh-all and autoRefresh (B002)
+    property var refreshQueue: []
+
+    // Auth cool-down between auto retries after OAuth/401 failures (B029)
+    readonly property int authRetryHoldMs: 5 * 60 * 1000
+    // Absolute ceiling for 429-backed refresh interval (B013)
+    readonly property int maxBackoffIntervalMs: 60 * 60 * 1000
+    // Auto auth failures before suspending auto-refresh until manual or token change (B029)
+    readonly property int maxAuthAutoAttempts: 2
+
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
         if (u.indexOf("file://") === 0) return u.substring(7)
@@ -265,8 +275,14 @@ Item {
                 grokDefaultBody: null,
                 grokCreditsBody: null,
                 grokDefaultStatus: 0,
+                grokAuthFailed: false,
+                usageFetchGen: 0,
                 backoffMultiplier: 1,
                 lastFetchMs: 0,
+                authFailCount: 0,
+                authSuspended: false,
+                autoRefreshHoldUntilMs: 0,
+                lastFailedToken: "",
                 visibleWindowIds: visIds
             })
         }
@@ -326,15 +342,84 @@ Item {
         return { total: total, done: done, loading: loading }
     }
 
-    function staggerRefreshAll() {
-        staggerIndex = 0
-        staggerRefresh.stop()
-        if (profiles.length === 0) return
-        // First profile immediately so panel shows data without a 2s blank wait
-        loadCredentials(0)
-        staggerIndex = 1
-        if (profiles.length > 1)
+    function effectiveRefreshIntervalMs(p) {
+        var base = refreshIntervalMs(p.provider)
+        var mult = p.backoffMultiplier || 1
+        return Math.min(base * mult, maxBackoffIntervalMs)
+    }
+
+    function isAutoRefreshHeld(p, now) {
+        if (!p) return true
+        if (p.authSuspended) return true
+        if (p.autoRefreshHoldUntilMs && now < p.autoRefreshHoldUntilMs) return true
+        return false
+    }
+
+    function queueProfileRefresh(profileId, manual) {
+        if (!profileId) return
+        var q = refreshQueue.slice()
+        for (var i = 0; i < q.length; i++) {
+            if (q[i].id === profileId) {
+                if (manual)
+                    q[i] = { id: profileId, manual: true }
+                refreshQueue = q
+                return
+            }
+        }
+        q.push({ id: profileId, manual: !!manual })
+        refreshQueue = q
+    }
+
+    function kickRefreshQueue() {
+        if (refreshQueue.length === 0) return
+        if (staggerRefresh.running) return
+        // First item immediately; remainder every stagger interval (B002)
+        if (drainOneRefresh() && refreshQueue.length > 0)
             staggerRefresh.start()
+    }
+
+    function drainOneRefresh() {
+        // One pass over current queue length so a loading head cannot starve others
+        var skippedLoading = 0
+        var maxLook = refreshQueue.length
+        while (refreshQueue.length > 0 && skippedLoading < maxLook) {
+            var item = refreshQueue[0]
+            var idx = findProfileIndex(item.id)
+            if (idx < 0 || !profiles[idx]) {
+                refreshQueue = refreshQueue.slice(1)
+                maxLook = refreshQueue.length
+                skippedLoading = 0
+                continue
+            }
+            var p = profiles[idx]
+            if (p.loading) {
+                refreshQueue = refreshQueue.slice(1).concat([item])
+                skippedLoading++
+                continue
+            }
+            if (!item.manual && isAutoRefreshHeld(p, Date.now())) {
+                refreshQueue = refreshQueue.slice(1)
+                maxLook = refreshQueue.length
+                skippedLoading = 0
+                continue
+            }
+            refreshQueue = refreshQueue.slice(1)
+            loadCredentials(idx, { manual: !!item.manual })
+            return true
+        }
+        // Still have loading items — keep timer alive so we retry after they settle
+        return refreshQueue.length > 0
+    }
+
+    function staggerRefreshAll() {
+        staggerRefresh.stop()
+        refreshQueue = []
+        if (profiles.length === 0) return
+        // Manual full refresh: clear per-profile auto holds so user can force retry (B029)
+        for (var i = 0; i < profiles.length; i++) {
+            queueProfileRefresh(profiles[i].id, true)
+        }
+        kickRefreshQueue()
     }
 
     function refreshAll() {
@@ -344,7 +429,8 @@ Item {
     function refreshProfile(profileId) {
         var idx = findProfileIndex(profileId)
         if (idx < 0) return
-        loadCredentials(idx)
+        // Manual single-profile refresh — bypass auto hold / suspension
+        loadCredentials(idx, { manual: true })
     }
 
     function shellQuote(path) {
@@ -515,13 +601,79 @@ Item {
         return "cat " + shellQuote(p) + " 2>/dev/null"
     }
 
-    function loadCredentials(idx) {
+    function loadCredentials(idx, opts) {
+        opts = opts || {}
+        var manual = !!opts.manual
+        if (idx < 0 || idx >= profiles.length) return
         var p = profiles[idx]
-        updateProfile(idx, { loading: true, error: "" })
+        if (!p) return
+        // Avoid stacking concurrent loads for the same row (pairs with B001; helps B002/B026)
+        if (p.loading) return
+        if (!manual && isAutoRefreshHeld(p, Date.now())) return
+
+        var patch = { loading: true, error: "" }
+        if (manual) {
+            // Manual refresh may retry after OAuth/billing fixes (B029)
+            patch.authSuspended = false
+            patch.autoRefreshHoldUntilMs = 0
+        }
+        updateProfile(idx, patch)
+        p = profiles[idx]
         var cmd = catCommand(p.credPath)
-        console.log("Claude Usage: loadCredentials", p.id, p.provider, "cmd=", cmd)
+        console.log("Claude Usage: loadCredentials", p.id, p.provider, "manual=", manual, "cmd=", cmd)
         credReader.connectSource(cmd)
         credReader._pendingIdx = idx
+    }
+
+    function noteAuthFailure(idx, errorText, tokenSnapshot) {
+        if (idx < 0 || idx >= profiles.length) return
+        var cur = profiles[idx]
+        var count = (cur.authFailCount || 0) + 1
+        var now = Date.now()
+        var patch = {
+            loading: false,
+            error: errorText || tr("Token expired"),
+            authFailCount: count,
+            lastFetchMs: now,
+            lastFailedToken: tokenSnapshot !== undefined ? tokenSnapshot : (cur.accessToken || "")
+        }
+        if (count >= maxAuthAutoAttempts) {
+            // Stop auto-refresh until manual refresh or credentials change (B026/B029)
+            patch.authSuspended = true
+            patch.autoRefreshHoldUntilMs = 0
+            console.log("Claude Usage: auth suspended after", count, "failures", cur.id)
+        } else {
+            patch.authSuspended = false
+            patch.autoRefreshHoldUntilMs = now + authRetryHoldMs
+            console.log("Claude Usage: auth hold", authRetryHoldMs, "ms after fail", count, cur.id)
+        }
+        updateProfile(idx, patch)
+    }
+
+    function noteRateLimited(idx) {
+        if (idx < 0 || idx >= profiles.length) return
+        var cur = profiles[idx]
+        var mult = (cur.backoffMultiplier || 1) * 2
+        var wait = Math.min(refreshIntervalMs(cur.provider) * mult, maxBackoffIntervalMs)
+        var now = Date.now()
+        updateProfile(idx, {
+            loading: false,
+            error: tr("Rate limited"),
+            backoffMultiplier: mult,
+            lastFetchMs: now,
+            autoRefreshHoldUntilMs: now + wait
+        })
+        console.log("Claude Usage: 429 backoff wait=", wait, "ms mult=", mult, cur.id)
+    }
+
+    function clearFailureStatePatch() {
+        return {
+            authFailCount: 0,
+            authSuspended: false,
+            autoRefreshHoldUntilMs: 0,
+            lastFailedToken: "",
+            backoffMultiplier: 1
+        }
     }
 
     function extractAuth(provider, creds, profile) {
@@ -642,6 +794,7 @@ Item {
         for (var i = 0; i < windows.length; i++) {
             QC.updateTimePercent(windows[i], nowMs)
         }
+        var clear = clearFailureStatePatch()
         updateProfile(idx, {
             loading: false,
             error: "",
@@ -650,7 +803,11 @@ Item {
             windows: windows,
             lastUpdate: Qt.formatTime(new Date(), "hh:mm:ss"),
             lastFetchMs: Date.now(),
-            backoffMultiplier: 1
+            backoffMultiplier: clear.backoffMultiplier,
+            authFailCount: clear.authFailCount,
+            authSuspended: clear.authSuspended,
+            autoRefreshHoldUntilMs: clear.autoRefreshHoldUntilMs,
+            lastFailedToken: clear.lastFailedToken
         })
         lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
         var primaryCount = 0
@@ -663,8 +820,8 @@ Item {
 
     function fetchUsage(idx) {
         var p = profiles[idx]
-        if (!p.accessToken) {
-            updateProfile(idx, { loading: false, error: tr("Not logged in") })
+        if (!p || !p.accessToken) {
+            noteAuthFailure(idx, tr("Not logged in"), "")
             return
         }
         var ep = effectiveProvider(p)
@@ -675,8 +832,13 @@ Item {
 
         var url = usageUrl(p)
         var epSlug = endpointSlugForProvider(ep)
-        // Snapshot identity for caching even if the profile row is removed mid-flight
+        // Snapshot identity for caching + stale-response guard (B008)
+        var profileId = p.id
+        var gen = (p.usageFetchGen || 0) + 1
+        var tokenSnapshot = p.accessToken
         var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
+        updateProfile(idx, { usageFetchGen: gen })
+
         var settled = false
         var xhr = new XMLHttpRequest()
         xhr.open("GET", url)
@@ -693,12 +855,21 @@ Item {
             if (p.accountId) xhr.setRequestHeader("ChatGPT-Account-Id", p.accountId)
         }
 
-        function settleUsage(status, responseText) {
+        function resolveIdx() {
+            var curIdx = findProfileIndex(profileId)
+            if (curIdx < 0) return -1
+            var cur = profiles[curIdx]
+            if (!cur || cur.usageFetchGen !== gen) return -1
+            return curIdx
+        }
+
+        function settleUsage(status, responseText, fromTimeout) {
             if (settled) return
             settled = true
             cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
-            var cur = profiles[idx]
-            if (!cur) return
+            var curIdx = resolveIdx()
+            if (curIdx < 0) return
+            var cur = profiles[curIdx]
             if (status === 200) {
                 try {
                     var data = JSON.parse(responseText || "")
@@ -710,29 +881,38 @@ Item {
                     else if (ep === "kimi") result = QP.parseKimi(data)
                     if (!result.planName && cur.planName) result.planName = cur.planName
                     console.log("Claude Usage: API ok", ep, "windows=", (result.windows || []).length)
-                    applyUsageResult(idx, result)
+                    applyUsageResult(curIdx, result)
                 } catch (e) {
                     console.log("Claude Usage: parse error", e)
-                    updateProfile(idx, { loading: false, error: "Parse error" })
+                    updateProfile(curIdx, { loading: false, error: "Parse error", lastFetchMs: Date.now() })
                 }
             } else if (status === 429) {
-                var mult = (cur.backoffMultiplier || 1) * 2
-                updateProfile(idx, { loading: false, error: tr("Rate limited"), backoffMultiplier: Math.min(mult, 6) })
-            } else if (status === 401) {
-                updateProfile(idx, { loading: false, error: tr("Token expired") })
+                noteRateLimited(curIdx)
+            } else if (status === 401 || status === 403) {
+                noteAuthFailure(curIdx, tr("Token expired"), tokenSnapshot)
             } else if (status === 0) {
-                updateProfile(idx, { loading: false, error: tr("API error") + " (timeout)" })
+                // B025: only label timeout when ontimeout fired
+                var detail = fromTimeout ? "timeout" : "network error"
+                updateProfile(curIdx, {
+                    loading: false,
+                    error: tr("API error") + " (" + detail + ")",
+                    lastFetchMs: Date.now()
+                })
             } else {
-                updateProfile(idx, { loading: false, error: tr("API error") + " (" + status + ")" })
+                updateProfile(curIdx, {
+                    loading: false,
+                    error: tr("API error") + " (" + status + ")",
+                    lastFetchMs: Date.now()
+                })
             }
         }
 
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
-            settleUsage(xhr.status || 0, xhr.responseText || "")
+            settleUsage(xhr.status || 0, xhr.responseText || "", false)
         }
         xhr.ontimeout = function() {
-            settleUsage(0, "")
+            settleUsage(0, "", true)
         }
         xhr.send()
     }
@@ -743,22 +923,35 @@ Item {
 
     function fetchGrok(idx) {
         var p = profiles[idx]
+        var profileId = p.id
+        var tokenSnapshot = p.accessToken
         var gen = (p.grokFetchGen || 0) + 1
-        updateProfile(idx, { grokFetchGen: gen, grokPending: 2, grokDefaultBody: null, grokCreditsBody: null, grokDefaultStatus: 0 })
-        grokGet(idx, gen, "https://cli-chat-proxy.grok.com/v1/billing", function(ok, body, status) {
+        updateProfile(idx, {
+            grokFetchGen: gen,
+            grokPending: 2,
+            grokDefaultBody: null,
+            grokCreditsBody: null,
+            grokDefaultStatus: 0,
+            grokAuthFailed: false
+        })
+        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing", function(ok, body, status) {
+            var curIdx = findProfileIndex(profileId)
+            if (curIdx < 0) return
             var patch = { grokDefaultStatus: status }
             if (ok) patch.grokDefaultBody = body
-            else if (status === 401 || status === 403) patch.error = tr("Token expired")
-            finishGrokPart(idx, gen, patch)
+            else if (status === 401 || status === 403) patch.grokAuthFailed = true
+            finishGrokPart(profileId, gen, patch, tokenSnapshot)
         })
-        grokGet(idx, gen, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", function(ok, body) {
+        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", function(ok, body) {
             var patch = {}
             if (ok) patch.grokCreditsBody = body
-            finishGrokPart(idx, gen, patch)
+            finishGrokPart(profileId, gen, patch, tokenSnapshot)
         })
     }
 
-    function grokGet(idx, gen, url, callback) {
+    function grokGet(profileId, gen, url, callback) {
+        var idx = findProfileIndex(profileId)
+        if (idx < 0) return
         var p = profiles[idx]
         var epSlug = grokEndpointSlug(url)
         var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
@@ -772,47 +965,66 @@ Item {
         xhr.setRequestHeader("x-grok-client-version", "0.2.93")
         xhr.setRequestHeader("x-grok-client-surface", "grok-build")
 
-        function settleGrok(status, responseText) {
+        function settleGrok(status, responseText, fromTimeout) {
             if (settled) return
             settled = true
             // Always cache the HTTP exchange, even if this generation is stale
             cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
-            if (!profiles[idx] || profiles[idx].grokFetchGen !== gen) return
+            var curIdx = findProfileIndex(profileId)
+            if (curIdx < 0) return
+            if (!profiles[curIdx] || profiles[curIdx].grokFetchGen !== gen) return
             if (status === 200) {
-                try { callback(true, JSON.parse(responseText || ""), status) }
-                catch (e) { callback(false, null, status) }
+                try { callback(true, JSON.parse(responseText || ""), status, fromTimeout) }
+                catch (e) { callback(false, null, status, fromTimeout) }
             } else {
-                callback(false, null, status || 0)
+                callback(false, null, status || 0, fromTimeout)
             }
         }
 
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
-            settleGrok(xhr.status || 0, xhr.responseText || "")
+            settleGrok(xhr.status || 0, xhr.responseText || "", false)
         }
         xhr.ontimeout = function() {
-            settleGrok(0, "")
+            settleGrok(0, "", true)
         }
         xhr.send()
     }
 
-    function finishGrokPart(idx, gen, patch) {
+    function finishGrokPart(profileId, gen, patch, tokenSnapshot) {
+        var idx = findProfileIndex(profileId)
+        if (idx < 0) return
         var p = profiles[idx]
         if (!p || p.grokFetchGen !== gen) return
         patch.grokPending = Math.max(0, (p.grokPending || 2) - 1)
         updateProfile(idx, patch)
+        idx = findProfileIndex(profileId)
+        if (idx < 0) return
         var cur = profiles[idx]
         if (!cur || cur.grokPending > 0) return
         p = cur
+        if (p.grokAuthFailed || p.grokDefaultStatus === 401 || p.grokDefaultStatus === 403) {
+            noteAuthFailure(idx, tr("Token expired"), tokenSnapshot)
+            return
+        }
+        if (p.grokDefaultStatus === 429) {
+            noteRateLimited(idx)
+            return
+        }
         if (!p.grokDefaultBody) {
-            updateProfile(idx, { loading: false, error: p.error || tr("API error") })
+            var detail = p.grokDefaultStatus === 0 ? "network error" : String(p.grokDefaultStatus || "error")
+            updateProfile(idx, {
+                loading: false,
+                error: p.error || (tr("API error") + " (" + detail + ")"),
+                lastFetchMs: Date.now()
+            })
             return
         }
         try {
             var result = QP.parseGrok(p.grokDefaultBody, p.grokCreditsBody)
             applyUsageResult(idx, result)
         } catch (e) {
-            updateProfile(idx, { loading: false, error: "Parse error" })
+            updateProfile(idx, { loading: false, error: "Parse error", lastFetchMs: Date.now() })
         }
     }
 
@@ -841,8 +1053,14 @@ Item {
         var now = Date.now()
         for (var i = 0; i < profiles.length; i++) {
             var p = profiles[i]
-            var interval = refreshIntervalMs(p.provider) * (p.backoffMultiplier || 1)
-            if (!p.lastFetchMs || (now - p.lastFetchMs) >= interval) due.push(p.id)
+            if (!p || p.enabled === false) continue
+            if (p.loading) continue
+            // B026/B029: do not auto-refresh suspended / held profiles
+            if (isAutoRefreshHeld(p, now)) continue
+            // B013: absolute 60min cap on backoff-scaled interval
+            var interval = effectiveRefreshIntervalMs(p)
+            if (!p.lastFetchMs || (now - p.lastFetchMs) >= interval)
+                due.push(p.id)
         }
         return due
     }
@@ -896,7 +1114,7 @@ Item {
             console.log("Claude Usage: credentials stdout len=", stdout.length, "exit=", exitCode, "idx=", idx)
 
             if (stdout.length < 2) {
-                updateProfile(idx, { loading: false, error: tr("Not logged in") })
+                noteAuthFailure(idx, tr("Not logged in"), "")
                 return
             }
             try {
@@ -910,34 +1128,42 @@ Item {
                 }
                 var auth = extractAuth(prof.provider, creds, prof)
                 console.log("Claude Usage: auth token len=", (auth.token || "").length, "provider=", prof.provider, "plan=", auth.planName)
-                updateProfile(idx, {
+                var authPatch = {
                     accessToken: auth.token,
                     accountId: auth.accountId || "",
                     resourceUrl: auth.resourceUrl,
                     opencodeSlot: auth.opencodeSlot || prof.opencodeSlot,
                     planName: auth.planName || prof.planName
-                })
+                }
+                // Token/credential changed → lift auto-refresh suspension (B029)
+                if (auth.token && auth.token !== prof.lastFailedToken) {
+                    var clear = clearFailureStatePatch()
+                    authPatch.authFailCount = clear.authFailCount
+                    authPatch.authSuspended = clear.authSuspended
+                    authPatch.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
+                    authPatch.lastFailedToken = clear.lastFailedToken
+                    authPatch.backoffMultiplier = clear.backoffMultiplier
+                }
+                updateProfile(idx, authPatch)
+                if (!auth.token) {
+                    noteAuthFailure(idx, tr("Not logged in"), "")
+                    return
+                }
                 fetchUsage(idx)
             } catch (e) {
                 console.log("Claude Usage: credential parse error", e)
-                updateProfile(idx, { loading: false, error: tr("Not logged in") })
+                noteAuthFailure(idx, tr("Not logged in"), "")
             }
         }
     }
-
-    property int staggerIndex: 0
 
     Timer {
         id: staggerRefresh
         interval: 2000
         repeat: true
         onTriggered: {
-            if (controller.staggerIndex >= controller.profiles.length) {
+            if (!controller.drainOneRefresh() || controller.refreshQueue.length === 0)
                 stop()
-                return
-            }
-            controller.loadCredentials(controller.staggerIndex)
-            controller.staggerIndex++
         }
     }
 
@@ -955,11 +1181,11 @@ Item {
         running: profiles.length > 0
         repeat: true
         onTriggered: {
+            // B002: enqueue due profiles and stagger; never burst loadCredentials
             var due = controller.dueProfiles()
-            for (var i = 0; i < due.length; i++) {
-                var idx = controller.findProfileIndex(due[i])
-                if (idx >= 0) controller.loadCredentials(idx)
-            }
+            for (var i = 0; i < due.length; i++)
+                controller.queueProfileRefresh(due[i], false)
+            controller.kickRefreshQueue()
         }
     }
 
