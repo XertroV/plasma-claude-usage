@@ -31,3 +31,4 @@ bugs:
     - file: B030-when-a-card-is-refreshing-it-a.todo
     - file: B031-settings-are-still-well-outdat.todo
     - file: B032-add-hidden-toggle-visible-on-d.todo
+    - file: B033-grok-2-failed-expired-token-bu.todo
