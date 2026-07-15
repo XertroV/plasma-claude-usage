@@ -32,6 +32,8 @@ QtObject {
             "Hide this account from the panel": "Hide this account from the panel",
             "All accounts hidden": "All accounts hidden",
             "Open details to unhide": "Open details to unhide",
+            "No profiles": "No profiles",
+            "Discovery failed": "Discovery failed",
             "Not logged in": "Not logged in",
             "Token expired": "Token expired",
             "API error": "API error",

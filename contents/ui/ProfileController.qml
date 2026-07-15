@@ -10,6 +10,8 @@ Item {
     property var i18n
     property var profiles: []
     property bool discovering: false
+    // User-visible discovery failure (parse/exit/path); empty when OK (B017)
+    property string discoveryError: ""
     property string lastGlobalUpdate: ""
     // Must be double/real — QML int is 32-bit and overflows Date.now() (~1.7e12)
     property double nowMs: Date.now()
@@ -310,7 +312,27 @@ Item {
 
     function discoverProfiles() {
         discovering = true
+        discoveryError = ""
         discoverSource.connectSource("bash " + shellQuote(discoverScript))
+    }
+
+    /** Set discoveryError from exit/stderr and stop the discovering spinner (B017). */
+    function failDiscovery(shortMsg, exitCode, stderr) {
+        var snip = String(stderr || "").replace(/\s+/g, " ").trim()
+        if (snip.length > 120)
+            snip = snip.substring(0, 117) + "..."
+        var msg = shortMsg || "Discovery failed"
+        // Common install/runtime hints when stderr is unhelpful
+        if (!snip) {
+            if (exitCode === 127)
+                snip = "command not found"
+            else if (exitCode && exitCode !== 0)
+                snip = "exit " + exitCode
+        }
+        discoveryError = snip ? (msg + ": " + snip) : msg
+        discovering = false
+        dataEpoch++
+        console.log("Claude Usage: discovery failed —", discoveryError)
     }
 
     function resolveCustomCredPath(entry) {
@@ -443,6 +465,7 @@ Item {
             rows.push(row)
         }
         profiles = rows
+        discoveryError = ""
         discovering = false
         dataEpoch++
         console.log("Claude Usage: merged", rows.length, "profile(s)")
@@ -1393,13 +1416,33 @@ Item {
         connectedSources: []
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
+            var stderr = data["stderr"] || ""
+            var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
+            var trimmed = String(stdout).replace(/^\s+|\s+$/g, "")
+            // Non-zero exit with empty/invalid body → surface to panel (B017)
+            if (!trimmed) {
+                if (exitCode && exitCode !== 0) {
+                    failDiscovery("Discovery failed", exitCode, stderr)
+                    return
+                }
+                // Empty stdout + success → no profiles found
+                discoveryError = ""
+                mergeDiscovered([])
+                return
+            }
             try {
-                var list = JSON.parse(stdout)
+                var list = JSON.parse(trimmed)
+                if (!Array.isArray(list)) {
+                    failDiscovery("Discovery returned invalid data", exitCode, stderr)
+                    return
+                }
+                if (exitCode && exitCode !== 0)
+                    console.log("Claude Usage: discovery exit=", exitCode, "stderr=", stderr)
                 mergeDiscovered(list)
             } catch (e) {
-                console.log("Claude Usage: discovery parse error", e)
-                discovering = false
+                console.log("Claude Usage: discovery parse error", e, stderr)
+                failDiscovery("Discovery failed", exitCode, stderr || String(e))
             }
         }
     }
