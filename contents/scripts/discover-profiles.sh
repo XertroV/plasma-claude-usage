@@ -62,19 +62,79 @@ extract_dir_profile_key() {
     fi
 }
 
+# True if dirname looks like a backup/temp/cache, not a real multi-account profile.
+# Accepts only ".${base}" and ".${base}-<suffix>" (hyphen multi-account convention).
+profile_dir_is_junk() {
+    local base="$1"
+    local dirname="$2"
+    local dotbase=".${base}"
+    local suffix lower
+
+    if [[ "$dirname" == "$dotbase" ]]; then
+        return 1
+    fi
+
+    # Require hyphen multi-account form: .base-SUFFIX (non-empty suffix).
+    if [[ "$dirname" != "${dotbase}-"* ]]; then
+        return 0
+    fi
+    suffix="${dirname#${dotbase}-}"
+    if [[ -z "$suffix" ]]; then
+        return 0
+    fi
+
+    # Lowercase for case-insensitive junk checks (bash 4+ ${var,,}).
+    lower="${suffix,,}"
+
+    case "$lower" in
+        backup|bak|old|orig|tmp|temp|cache|copy|prev|previous|save|saved|swp|dist|shared)
+            return 0
+            ;;
+    esac
+
+    # Compound junk: -backup-*, *.bak*, *tmp*, *temp*, *cache*, trailing ~
+    if [[ "$lower" == *backup* || "$lower" == *.bak* || "$lower" == *tmp* \
+        || "$lower" == *temp* || "$lower" == *cache* || "$lower" == *~ ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Discover all multi-account dirs: .${base} and .${base}-* under $HOME.
+# Fixed suffixes (-p/-w/-1/-2) remain covered; arbitrary names like -work/-3/-science too.
 scan_provider_dirs() {
     local provider="$1"
     local base="$2"
     local cred_rel="$3"
 
-    local suffix dir dirname cred
-    for suffix in "" "-p" "-w" "-1" "-2"; do
-        dirname=".${base}${suffix}"
-        dir="${HOME}/${dirname}"
-        cred="${dir}/${cred_rel}"
-        if [[ -e "$dir" || -L "$dir" ]]; then
-            add_candidate "$provider" "$dir" "$cred" "false" "$(extract_dir_profile_key "$base" "$dirname")"
+    local dir dirname matches nullglob_was_set=0
+
+    shopt -q nullglob && nullglob_was_set=1
+    shopt -s nullglob
+    # Exact base dir plus any hyphen-suffixed multi-account dirs.
+    matches=("${HOME}/.${base}" "${HOME}/.${base}-"*)
+    if (( ! nullglob_was_set )); then
+        shopt -u nullglob
+    fi
+
+    for dir in "${matches[@]}"; do
+        # Directory or symlink (possibly to a dir); cred file check is in add_candidate.
+        [[ -d "$dir" || -L "$dir" ]] || continue
+
+        dirname="${dir##*/}"
+
+        # Only .base / .base-<suffix>; skip stray nullglob leftovers and non-hyphen globs.
+        if [[ "$dirname" != ".${base}" && "$dirname" != ".${base}-"* ]]; then
+            continue
         fi
+
+        if profile_dir_is_junk "$base" "$dirname"; then
+            continue
+        fi
+
+        add_candidate "$provider" "$dir" "${dir}/${cred_rel}" "false" \
+            "$(extract_dir_profile_key "$base" "$dirname")"
     done
 }
 
