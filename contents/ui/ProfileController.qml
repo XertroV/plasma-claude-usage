@@ -1057,8 +1057,16 @@ Item {
 
     function extractOpencodeAuth(creds, profile) {
         var auth = { token: "", accountId: "", opencodeSlot: "anthropic", planName: "OpenCode" }
+        // B007: honor cfg opencodeAccountIndex (settings ComboBox) for multi-account file
         if (profile.profileKey === "anthropic-accounts" && creds.accounts && creds.accounts.length) {
-            auth.token = creds.accounts[0].access || ""
+            var n = creds.accounts.length
+            var idx = parseInt(cfgValue("opencodeAccountIndex", 0), 10)
+            if (isNaN(idx) || idx < 0)
+                idx = 0
+            if (idx >= n)
+                idx = n - 1
+            var acct = creds.accounts[idx] || {}
+            auth.token = acct.access || ""
             auth.opencodeSlot = "anthropic"
             return auth
         }
