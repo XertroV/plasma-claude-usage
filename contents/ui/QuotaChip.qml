@@ -9,7 +9,7 @@ RowLayout {
     id: chipRoot
 
     required property var windowData
-    required property int nowMs
+    required property double nowMs
     property string colorMode: "capacity"
 
     spacing: 2

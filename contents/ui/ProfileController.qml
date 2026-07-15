@@ -11,7 +11,10 @@ Item {
     property var profiles: []
     property bool discovering: false
     property string lastGlobalUpdate: ""
-    property int nowMs: Date.now()
+    // Must be double/real — QML int is 32-bit and overflows Date.now() (~1.7e12)
+    property double nowMs: Date.now()
+    // Bumped on every profile mutation so UI can re-sync reliably
+    property int dataEpoch: 0
 
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
@@ -149,8 +152,9 @@ Item {
         } else if (provider === "codex") {
             credPath = "$HOME/.codex/auth.json"
         } else if (provider === "zai") {
-            credPath = "$HOME/.api-zai"
-            isFlat = true
+            // Parity with pre-refactor + OpenCode layout (not a bare ~/.api-zai file)
+            credPath = "$HOME/.local/share/opencode/auth.json"
+            isFlat = false
             effectiveProvider = "zai"
         } else if (provider === "opencode") {
             var sub = cfgValue("opencodeSubProvider", "anthropic")
@@ -159,17 +163,21 @@ Item {
                 isFlat = true
                 effectiveProvider = "kimi"
             } else if (sub === "zai") {
-                credPath = "$HOME/.api-zai"
-                isFlat = true
+                credPath = "$HOME/.local/share/opencode/auth.json"
+                isFlat = false
                 effectiveProvider = "zai"
             } else if (sub === "openai") {
                 credPath = "$HOME/.codex/auth.json"
                 effectiveProvider = "codex"
+            } else if (sub === "anthropic") {
+                credPath = "$HOME/.config/opencode/anthropic-accounts.json"
+                effectiveProvider = "claude"
             } else {
-                return
+                credPath = "$HOME/.local/share/opencode/auth.json"
             }
         } else if (provider === "grok") {
-            credPath = "$HOME/.grok-1/auth.json"
+            // Prefer default grok path; discovery/filter will match grok-N when present
+            credPath = "$HOME/.grok/auth.json"
             effectiveProvider = "grok"
         } else {
             return
@@ -258,6 +266,7 @@ Item {
         }
         profiles = rows
         discovering = false
+        dataEpoch++
         console.log("Claude Usage: merged", rows.length, "profile(s)")
         staggerRefreshAll()
     }
@@ -269,19 +278,57 @@ Item {
         return -1
     }
 
+    function cloneProfile(src) {
+        var p = {}
+        if (!src) return p
+        for (var k in src) {
+            if (!src.hasOwnProperty(k)) continue
+            // Shallow-copy arrays so windows/list fields get a new reference
+            if (Array.isArray(src[k])) p[k] = src[k].slice()
+            else p[k] = src[k]
+        }
+        return p
+    }
+
     function updateProfile(idx, patch) {
-        var copy = profiles.slice()
+        if (idx < 0 || idx >= profiles.length) return
+        var copy = []
+        for (var i = 0; i < profiles.length; i++)
+            copy.push(i === idx ? cloneProfile(profiles[i]) : profiles[i])
         var p = copy[idx]
         for (var k in patch) {
             if (patch.hasOwnProperty(k)) p[k] = patch[k]
         }
         copy[idx] = p
         profiles = copy
+        dataEpoch++
+    }
+
+    function loadingStats() {
+        var total = 0
+        var done = 0
+        var loading = 0
+        for (var i = 0; i < profiles.length; i++) {
+            var p = profiles[i]
+            if (!p || p.enabled === false) continue
+            total++
+            if (p.loading)
+                loading++
+            else if (p.error || (p.windows && p.windows.length) || p.lastFetchMs)
+                done++
+        }
+        return { total: total, done: done, loading: loading }
     }
 
     function staggerRefreshAll() {
         staggerIndex = 0
-        if (profiles.length > 0) staggerRefresh.start()
+        staggerRefresh.stop()
+        if (profiles.length === 0) return
+        // First profile immediately so panel shows data without a 2s blank wait
+        loadCredentials(0)
+        staggerIndex = 1
+        if (profiles.length > 1)
+            staggerRefresh.start()
     }
 
     function refreshAll() {
@@ -298,11 +345,24 @@ Item {
         return "'" + String(path).replace(/'/g, "'\\''") + "'"
     }
 
+    // Bootstrap paths use $HOME; must NOT be single-quoted or the shell won't expand it.
+    // User-configured absolute paths are quoted to avoid injection.
+    function catCommand(path) {
+        var p = String(path || "").trim()
+        if (!p) return "cat /dev/null 2>/dev/null"
+        if (p.indexOf("~/") === 0)
+            p = "$HOME/" + p.substring(2)
+        if (p.indexOf("$HOME") === 0 || p.indexOf("${HOME}") === 0)
+            return "cat " + p + " 2>/dev/null"
+        return "cat " + shellQuote(p) + " 2>/dev/null"
+    }
+
     function loadCredentials(idx) {
         var p = profiles[idx]
         updateProfile(idx, { loading: true, error: "" })
-        var path = p.credPath
-        credReader.connectSource("cat " + shellQuote(path) + " 2>/dev/null")
+        var cmd = catCommand(p.credPath)
+        console.log("Claude Usage: loadCredentials", p.id, p.provider, "cmd=", cmd)
+        credReader.connectSource(cmd)
         credReader._pendingIdx = idx
     }
 
@@ -435,6 +495,12 @@ Item {
             backoffMultiplier: 1
         })
         lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+        var primaryCount = 0
+        for (var pi = 0; pi < windows.length; pi++) {
+            if (windows[pi] && windows[pi].role === "primary" && windows[pi].visible !== false)
+                primaryCount++
+        }
+        console.log("Claude Usage: applyUsageResult idx=", idx, "windows=", windows.length, "primary=", primaryCount)
     }
 
     function fetchUsage(idx) {
@@ -477,8 +543,10 @@ Item {
                     else if (ep === "zai") result = QP.parseZai(data)
                     else if (ep === "kimi") result = QP.parseKimi(data)
                     if (!result.planName && cur.planName) result.planName = cur.planName
+                    console.log("Claude Usage: API ok", ep, "windows=", (result.windows || []).length)
                     applyUsageResult(idx, result)
                 } catch (e) {
+                    console.log("Claude Usage: parse error", e)
                     updateProfile(idx, { loading: false, error: "Parse error" })
                 }
             } else if (xhr.status === 429) {
@@ -614,10 +682,13 @@ Item {
 
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
+            var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
             var idx = credReader._pendingIdx
             credReader._pendingIdx = -1
             if (idx < 0 || idx >= profiles.length) return
+
+            console.log("Claude Usage: credentials stdout len=", stdout.length, "exit=", exitCode, "idx=", idx)
 
             if (stdout.length < 2) {
                 updateProfile(idx, { loading: false, error: tr("Not logged in") })
@@ -633,6 +704,7 @@ Item {
                     creds = JSON.parse(trimmed)
                 }
                 var auth = extractAuth(prof.provider, creds, prof)
+                console.log("Claude Usage: auth token len=", (auth.token || "").length, "provider=", prof.provider, "plan=", auth.planName)
                 updateProfile(idx, {
                     accessToken: auth.token,
                     accountId: auth.accountId || "",
@@ -642,6 +714,7 @@ Item {
                 })
                 fetchUsage(idx)
             } catch (e) {
+                console.log("Claude Usage: credential parse error", e)
                 updateProfile(idx, { loading: false, error: tr("Not logged in") })
             }
         }

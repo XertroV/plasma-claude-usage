@@ -8,7 +8,7 @@ RowLayout {
     id: rowRoot
 
     required property var profile
-    required property int nowMs
+    required property double nowMs
     property string sessionColorMode: "capacity"
     property string weeklyColorMode: "efficiency"
     property bool showBankedBadge: true

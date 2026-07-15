@@ -93,6 +93,8 @@ function defaultProfileLabel(provider, profileKey) {
     if (!profileKey || profileKey === "") return base
     if (profileKey === "anthropic-accounts") return base + " Anthropic"
     if (profileKey === "local-share") return base
+    // Bootstrap / single-instance placeholders — do not show "Z.ai-legacy"
+    if (profileKey === "legacy" || profileKey.indexOf("legacy") === 0) return base
     return base + "-" + profileKey
 }
 
