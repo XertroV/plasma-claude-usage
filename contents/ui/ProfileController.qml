@@ -61,27 +61,28 @@ Item {
 
     function normalizePath(path) {
         if (!path) return ""
-        var p = String(path).replace(/\/+$/, "")
-        if (p.indexOf("/.claude/") >= 0 || p.indexOf("/.claude-") >= 0) {
+        var p = QC.expandUserPath(path)
+        if (p.indexOf("/.claude/") >= 0 || p.indexOf("/.claude-") >= 0
+                || p.indexOf("$HOME/.claude/") >= 0 || p.indexOf("$HOME/.claude-") >= 0) {
             p = p.replace(/\/\.credentials\.json$/, "")
         }
         return p
     }
 
     function pathsEqual(a, b) {
-        if (!a || !b) return false
-        return String(a) === String(b) || normalizePath(a) === normalizePath(b)
+        return QC.pathsEqual(a, b)
     }
 
+    /**
+     * Multi-profile dashboard is the default (B004).
+     * Legacy single-profile mode only when multiProfileMode is explicitly false.
+     * (Old trap: any credentialsPath / displayName / non-claude provider forced legacy.)
+     */
     function isLegacySingleInstance() {
-        if (cfgValue("credentialsPath", "")) return true
-        if (cfgValue("displayName", "")) return true
-        var provider = cfgValue("provider", "claude")
-        if (provider !== "claude") return true
-        if (provider === "opencode") {
-            var sub = cfgValue("opencodeSubProvider", "anthropic")
-            if (sub !== "anthropic") return true
-        }
+        var multi = cfgValue("multiProfileMode", true)
+        // Kcfg bool may arrive as string in some Plasma paths
+        if (multi === false || multi === "false" || multi === 0 || multi === "0")
+            return true
         return false
     }
 
@@ -110,6 +111,16 @@ Item {
         var out = []
         for (var i = 0; i < discovered.length; i++) {
             if (legacyProfileMatches(discovered[i])) out.push(discovered[i])
+        }
+        // B004: legacy is single-profile — if no credentialsPath, keep one canonical match
+        if (out.length > 1 && !cfgValue("credentialsPath", "")) {
+            out.sort(function(a, b) {
+                var pa = String(a.credPath || a.configDir || "")
+                var pb = String(b.credPath || b.configDir || "")
+                if (pa.length !== pb.length) return pa.length - pb.length
+                return pa < pb ? -1 : (pa > pb ? 1 : 0)
+            })
+            out = [out[0]]
         }
         return out
     }
@@ -223,6 +234,52 @@ Item {
         discoverSource.connectSource("bash " + shellQuote(discoverScript))
     }
 
+    function resolveCustomCredPath(entry) {
+        if (!entry) return ""
+        if (entry.credPath)
+            return entry.credPath
+        // B009: path is often a config *directory* — resolve auth file by provider
+        return QC.defaultCredPathForProvider(entry.provider, entry.path)
+    }
+
+    function blankProfileRow(meta, visIds) {
+        return {
+            id: meta.id,
+            provider: meta.provider,
+            profileKey: meta.profileKey || "",
+            configDir: meta.configDir || "",
+            credPath: meta.credPath || "",
+            isFlatFile: !!meta.isFlatFile,
+            displayName: profileDisplayName(meta),
+            enabled: true,
+            loading: false,
+            error: "",
+            planName: "",
+            bankedResets: 0,
+            windows: [],
+            lastUpdate: "",
+            accessToken: "",
+            accountId: "",
+            resourceUrl: "https://api.minimax.io",
+            opencodeSlot: "",
+            grokFetchGen: 0,
+            grokPending: 0,
+            grokDefaultBody: null,
+            grokCreditsBody: null,
+            grokDefaultStatus: 0,
+            grokDefaultFromTimeout: false,
+            grokAuthFailed: false,
+            usageFetchGen: 0,
+            backoffMultiplier: 1,
+            lastFetchMs: 0,
+            authFailCount: 0,
+            authSuspended: false,
+            autoRefreshHoldUntilMs: 0,
+            lastFailedToken: "",
+            visibleWindowIds: visIds
+        }
+    }
+
     function mergeDiscovered(discovered) {
         var custom = parseJsonConfig(cfgValue("customProfilesJson", "[]"), [])
         var merged = filterDiscoveredProfiles(discovered.slice())
@@ -240,66 +297,145 @@ Item {
                 })
             }
         }
-        for (var c = 0; c < custom.length; c++) {
-            var entry = custom[c]
-            if (!entry || !entry.path || !entry.provider) continue
-            merged.push({
-                id: entry.id || (entry.provider + "-custom-" + c),
-                provider: entry.provider,
-                profileKey: entry.profileKey || "custom",
-                configDir: entry.path,
-                credPath: entry.credPath || entry.path,
-                credInode: "custom:" + c,
-                isFlatFile: !!entry.isFlatFile
-            })
+        // Customs are multi-profile only (B004) — legacy single stays one row
+        if (!isLegacySingleInstance()) {
+            for (var c = 0; c < custom.length; c++) {
+                var entry = custom[c]
+                if (!entry || !entry.path || !entry.provider) continue
+                var resolvedCred = resolveCustomCredPath(entry)
+                var isFlat = !!entry.isFlatFile
+                if (entry.provider === "kimi" && resolvedCred === entry.path)
+                    isFlat = true
+                merged.push({
+                    id: entry.id || (entry.provider + "-custom-" + c),
+                    provider: entry.provider,
+                    profileKey: entry.profileKey || "custom",
+                    configDir: entry.path,
+                    credPath: resolvedCred,
+                    credInode: "custom:" + (entry.id || c),
+                    isFlatFile: isFlat,
+                    // Prefer explicit entry.displayName when no cfg rename
+                    displayNameHint: entry.displayName || ""
+                })
+            }
         }
 
         var visIds = visibleWindowIds()
+        // Preserve fetch/auth state across rediscover / config reapply (B003)
+        var prevById = {}
+        for (var pi = 0; pi < profiles.length; pi++) {
+            if (profiles[pi] && profiles[pi].id)
+                prevById[profiles[pi].id] = profiles[pi]
+        }
+
         var rows = []
         for (var i = 0; i < merged.length; i++) {
             var meta = merged[i]
             if (!isProfileEnabled(meta)) continue
-            rows.push({
-                id: meta.id,
-                provider: meta.provider,
-                profileKey: meta.profileKey || "",
-                configDir: meta.configDir || "",
-                credPath: meta.credPath || "",
-                isFlatFile: !!meta.isFlatFile,
-                displayName: profileDisplayName(meta),
-                enabled: true,
-                loading: false,
-                error: "",
-                planName: "",
-                bankedResets: 0,
-                windows: [],
-                lastUpdate: "",
-                accessToken: "",
-                accountId: "",
-                resourceUrl: "https://api.minimax.io",
-                opencodeSlot: "",
-                grokFetchGen: 0,
-                grokPending: 0,
-                grokDefaultBody: null,
-                grokCreditsBody: null,
-                grokDefaultStatus: 0,
-                grokDefaultFromTimeout: false,
-                grokAuthFailed: false,
-                usageFetchGen: 0,
-                backoffMultiplier: 1,
-                lastFetchMs: 0,
-                authFailCount: 0,
-                authSuspended: false,
-                autoRefreshHoldUntilMs: 0,
-                lastFailedToken: "",
-                visibleWindowIds: visIds
-            })
+            var row = blankProfileRow(meta, visIds)
+            if (meta.displayNameHint && row.displayName === QC.defaultProfileLabel(meta.provider, meta.profileKey))
+                row.displayName = meta.displayNameHint
+            var prev = prevById[meta.id]
+            if (prev) {
+                // Keep live usage + auth; refresh labels / visibility from config
+                var keepKeys = [
+                    "loading", "error", "planName", "bankedResets", "windows",
+                    "lastUpdate", "accessToken", "accountId", "resourceUrl",
+                    "opencodeSlot", "grokFetchGen", "grokPending", "grokDefaultBody",
+                    "grokCreditsBody", "grokDefaultStatus", "grokDefaultFromTimeout",
+                    "grokAuthFailed", "usageFetchGen", "backoffMultiplier", "lastFetchMs",
+                    "authFailCount", "authSuspended", "autoRefreshHoldUntilMs",
+                    "lastFailedToken"
+                ]
+                for (var ki = 0; ki < keepKeys.length; ki++) {
+                    var k = keepKeys[ki]
+                    if (prev[k] !== undefined)
+                        row[k] = Array.isArray(prev[k]) ? prev[k].slice() : prev[k]
+                }
+                // Re-apply window visibility from new config
+                if (row.windows && row.windows.length) {
+                    row.windows = QC.applyVisibility(row.windows, visIds.length ? visIds : null)
+                    for (var wi = 0; wi < row.windows.length; wi++)
+                        QC.updateTimePercent(row.windows[wi], nowMs)
+                }
+            }
+            rows.push(row)
         }
         profiles = rows
         discovering = false
         dataEpoch++
         console.log("Claude Usage: merged", rows.length, "profile(s)")
-        staggerRefreshAll()
+        // Only kick fetches for rows that still need data
+        var needFetch = false
+        for (var ri = 0; ri < rows.length; ri++) {
+            if (!rows[ri].windows || rows[ri].windows.length === 0) {
+                needFetch = true
+                break
+            }
+        }
+        if (needFetch || rows.length === 0)
+            staggerRefreshAll()
+        else {
+            // Ensure empty new rows still load
+            for (var rj = 0; rj < rows.length; rj++) {
+                if (!rows[rj].windows || rows[rj].windows.length === 0)
+                    queueProfileRefresh(rows[rj].id, true)
+            }
+            kickRefreshQueue()
+        }
+    }
+
+    /**
+     * Re-apply config after KCM Apply (B003).
+     * - rediscover/membership: full discoverProfiles (merge preserves fetch state)
+     * - soft: names + window visibility only on current rows
+     */
+    function reapplyConfig(opts) {
+        opts = opts || {}
+        if (opts.rediscover || opts.forceFull || opts.membership) {
+            console.log("Claude Usage: reapplyConfig → rediscover",
+                        opts.membership ? "(membership)" : "")
+            if (isLegacySingleInstance() && profiles.length === 0)
+                bootstrapLegacyProfiles()
+            discoverProfiles()
+            return
+        }
+
+        if (profiles.length === 0) {
+            if (isLegacySingleInstance())
+                bootstrapLegacyProfiles()
+            if (cfgValue("discoverOnLoad", true) !== false)
+                discoverProfiles()
+            return
+        }
+
+        // Soft: patch names + visibility; do not change membership here
+        var visIds = visibleWindowIds()
+        var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
+        var rows = []
+        for (var j = 0; j < profiles.length; j++) {
+            var p = profiles[j]
+            if (!p || !p.id) continue
+            var copy = cloneProfile(p)
+            if (isLegacySingleInstance()) {
+                var legacyName = cfgValue("displayName", "")
+                if (legacyName) copy.displayName = legacyName
+            } else if (names && names[p.id]) {
+                copy.displayName = names[p.id]
+            }
+            // else keep existing displayName (custom displayNameHint / prior label)
+            copy.visibleWindowIds = visIds
+            if (copy.windows && copy.windows.length) {
+                copy.windows = QC.applyVisibility(copy.windows, visIds.length ? visIds : null)
+                for (var wi = 0; wi < copy.windows.length; wi++)
+                    QC.updateTimePercent(copy.windows[wi], nowMs)
+            }
+            rows.push(copy)
+        }
+
+        profiles = rows
+        dataEpoch++
+        console.log("Claude Usage: reapplyConfig soft-patched", rows.length, "profile(s)")
     }
 
     function findProfileIndex(id) {
@@ -413,8 +549,14 @@ Item {
                 skippedLoading = 0
                 continue
             }
+            // Only dequeue if loadCredentials accepted the job
+            if (!loadCredentials(idx, { manual: !!item.manual })) {
+                // Reader busy or row already loading — rotate to end
+                refreshQueue = refreshQueue.slice(1).concat([item])
+                skippedLoading++
+                continue
+            }
             refreshQueue = refreshQueue.slice(1)
-            loadCredentials(idx, { manual: !!item.manual })
             return true
         }
         // Still have loading items — keep timer alive so we retry after they settle
@@ -439,8 +581,9 @@ Item {
     function refreshProfile(profileId) {
         var idx = findProfileIndex(profileId)
         if (idx < 0) return
-        // Manual single-profile refresh — bypass auto hold / suspension
-        loadCredentials(idx, { manual: true })
+        // Manual single-profile refresh — queue so we don't drop when credReader busy
+        queueProfileRefresh(profileId, true)
+        kickRefreshQueue()
     }
 
     function shellQuote(path) {
@@ -599,27 +742,41 @@ Item {
         }
     }
 
-    // Bootstrap paths use $HOME; must NOT be single-quoted or the shell won't expand it.
-    // User-configured absolute paths are quoted to avoid injection.
+    // Expand ~/ and $HOME safely, then always shell-quote the absolute-or-token path.
+    // Uses shell only for HOME expansion via printf %s (no user-controlled metachar eval).
     function catCommand(path) {
         var p = String(path || "").trim()
         if (!p) return "cat /dev/null 2>/dev/null"
         if (p.indexOf("~/") === 0)
             p = "$HOME/" + p.substring(2)
-        if (p.indexOf("$HOME") === 0 || p.indexOf("${HOME}") === 0)
-            return "cat " + p + " 2>/dev/null"
+        else if (p === "~")
+            p = "$HOME"
+        else if (p.indexOf("${HOME}") === 0)
+            p = "$HOME" + p.substring(7)
+        // $HOME-relative: expand via parameter expansion in a quoted assignment, then cat quoted
+        if (p.indexOf("$HOME") === 0) {
+            var rest = p.substring(5) // may start with /
+            // rest is appended inside double quotes after expanded HOME — strip dangerous chars
+            rest = rest.replace(/["\\`$]/g, "")
+            return "HOME=\"${HOME:-/}\"; cat \"$HOME" + rest + "\" 2>/dev/null"
+        }
         return "cat " + shellQuote(p) + " 2>/dev/null"
     }
 
+    // Returns true if a credential read was started (or skipped as held).
+    // Returns false if caller should re-queue (busy reader / already loading).
     function loadCredentials(idx, opts) {
         opts = opts || {}
         var manual = !!opts.manual
-        if (idx < 0 || idx >= profiles.length) return
+        if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
-        if (!p) return
+        if (!p) return true
         // Avoid stacking concurrent loads for the same row (pairs with B001; helps B002/B026)
-        if (p.loading) return
-        if (!manual && isAutoRefreshHeld(p, Date.now())) return
+        if (p.loading) return false
+        if (!manual && isAutoRefreshHeld(p, Date.now())) return true
+        // Serialize credential reads — single in-flight (index would race on reapply)
+        if (credReader._pendingId)
+            return false
 
         var patch = { loading: true, error: "" }
         if (manual) {
@@ -631,8 +788,9 @@ Item {
         p = profiles[idx]
         var cmd = catCommand(p.credPath)
         console.log("Claude Usage: loadCredentials", p.id, p.provider, "manual=", manual, "cmd=", cmd)
+        credReader._pendingId = p.id
         credReader.connectSource(cmd)
-        credReader._pendingIdx = idx
+        return true
     }
 
     function noteAuthFailure(idx, errorText, tokenSnapshot) {
@@ -1125,20 +1283,26 @@ Item {
         id: credReader
         engine: "executable"
         connectedSources: []
-        property int _pendingIdx: -1
+        property string _pendingId: ""
 
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
             var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
-            var idx = credReader._pendingIdx
-            credReader._pendingIdx = -1
-            if (idx < 0 || idx >= profiles.length) return
+            var pendingId = credReader._pendingId
+            credReader._pendingId = ""
+            var idx = findProfileIndex(pendingId)
+            if (idx < 0 || idx >= profiles.length) {
+                // Re-kick queue if merge dropped the row mid-read
+                kickRefreshQueue()
+                return
+            }
 
-            console.log("Claude Usage: credentials stdout len=", stdout.length, "exit=", exitCode, "idx=", idx)
+            console.log("Claude Usage: credentials stdout len=", stdout.length, "exit=", exitCode, "id=", pendingId)
 
             if (stdout.length < 2) {
                 noteAuthFailure(idx, tr("Not logged in"), "")
+                kickRefreshQueue()
                 return
             }
             try {
@@ -1171,6 +1335,7 @@ Item {
                 updateProfile(idx, authPatch)
                 if (!auth.token) {
                     noteAuthFailure(idx, tr("Not logged in"), "")
+                    kickRefreshQueue()
                     return
                 }
                 // Suspended with unchanged token: re-probe creds only, skip usage API (B029)
@@ -1182,12 +1347,16 @@ Item {
                         error: prof.error || tr("Token expired")
                     })
                     console.log("Claude Usage: auth still suspended, skip API", prof.id)
+                    kickRefreshQueue()
                     return
                 }
                 fetchUsage(idx)
+                // Next profile can start cat while XHR runs (loading still true on this row)
+                kickRefreshQueue()
             } catch (e) {
                 console.log("Claude Usage: credential parse error", e)
                 noteAuthFailure(idx, tr("Not logged in"), "")
+                kickRefreshQueue()
             }
         }
     }

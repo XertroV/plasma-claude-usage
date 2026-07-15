@@ -8,6 +8,86 @@ var MS_12H = 12 * MS_HOUR
 var MS_10D = 10 * MS_DAY
 var MS_45D = 45 * MS_DAY
 
+/**
+ * Normalize ~/ and $HOME forms for path comparison (B010).
+ * Does not require a resolved home directory — maps user-relative prefixes
+ * to a stable "$HOME/..." token and absolute /home|Users/user/... to the same tail.
+ */
+function expandUserPath(path) {
+    if (!path) return ""
+    var p = String(path).trim()
+    if (p === "~") return "$HOME"
+    if (p.indexOf("~/") === 0)
+        p = "$HOME/" + p.substring(2)
+    if (p.indexOf("${HOME}") === 0)
+        p = "$HOME" + p.substring(7)
+    // Leave $HOME/... and absolute paths as-is for pathCompareKey
+    return p.replace(/\/+$/, "")
+}
+
+/**
+ * Stable key so ~/.claude/x, $HOME/.claude/x, and /home/u/.claude/x match.
+ */
+function pathCompareKey(path) {
+    var p = expandUserPath(path)
+    if (!p) return ""
+    if (p.indexOf("$HOME/") === 0) return p.substring(6)
+    if (p === "$HOME") return ""
+    // /home/user/... or /Users/user/...
+    if (p.indexOf("/home/") === 0 || p.indexOf("/Users/") === 0) {
+        var parts = p.split("/")
+        // ["", "home", "user", "rest"...]
+        if (parts.length >= 4)
+            return parts.slice(3).join("/")
+    }
+    return p
+}
+
+function pathsEqual(a, b) {
+    if (!a || !b) return false
+    if (String(a) === String(b)) return true
+    var ka = pathCompareKey(a)
+    var kb = pathCompareKey(b)
+    if (ka && kb && ka === kb) return true
+    // Also compare with trailing auth filenames stripped for dir-vs-file cases
+    function stripAuthSuffix(s) {
+        return String(s || "")
+            .replace(/\/\.credentials\.json$/, "")
+            .replace(/\/auth\.json$/, "")
+            .replace(/\/config\.json$/, "")
+    }
+    var sa = stripAuthSuffix(ka)
+    var sb = stripAuthSuffix(kb)
+    return !!(sa && sb && sa === sb)
+}
+
+/**
+ * Resolve auth file when custom profile only has a config directory (B009).
+ */
+function defaultCredPathForProvider(provider, configDirOrPath) {
+    var dir = String(configDirOrPath || "").replace(/\/+$/, "")
+    if (!dir) return ""
+    // Already looks like a credentials file — keep it
+    if (/\.(json)$/i.test(dir) || dir.indexOf(".credentials") >= 0)
+        return dir
+    switch (String(provider || "")) {
+    case "claude":
+        return dir + "/.credentials.json"
+    case "codex":
+    case "grok":
+    case "opencode":
+    case "zai":
+        return dir + "/auth.json"
+    case "minimax":
+        return dir + "/config.json"
+    case "kimi":
+        // Flat token file is often the path itself
+        return dir
+    default:
+        return dir
+    }
+}
+
 /** Canonical period label from duration seconds (604800 → "7d", never "168h"). */
 function formatPeriodLabel(seconds) {
     var s = Math.floor(Number(seconds) || 0)
