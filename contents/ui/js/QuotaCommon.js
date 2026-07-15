@@ -397,19 +397,225 @@ function parseResetMs(value) {
     return isNaN(d.getTime()) ? 0 : d.getTime()
 }
 
-function applyVisibility(windows, visibleIds) {
-    if (!windows) return []
-    var forced = {}
-    if (visibleIds && visibleIds.length) {
-        for (var i = 0; i < visibleIds.length; i++) forced[visibleIds[i]] = true
+/**
+ * Count own keys on a plain object (QML/JS-safe).
+ */
+function objectKeyCount(obj) {
+    var n = 0
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return 0
+    for (var k in obj) {
+        if (obj.hasOwnProperty(k)) n++
     }
+    return n
+}
+
+/**
+ * True if value looks like a per-window bool map (not an array / not nested provider map).
+ * Nested provider maps have object values; window maps have boolean (or 0/1) values.
+ */
+function isWindowBoolMap(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false
+    var saw = false
+    for (var k in obj) {
+        if (!obj.hasOwnProperty(k)) continue
+        saw = true
+        var v = obj[k]
+        if (typeof v === "object" && v !== null) return false
+    }
+    return saw
+}
+
+/**
+ * Normalize visibleWindowsJson into a structured config.
+ *
+ * Formats:
+ *  - [] or {} or null → defaults for every provider
+ *  - ["5h","weekly"] → legacy global allowlist (only those ids, all providers)
+ *  - {"claude":{"5h":true,"weekly":false}, "grok":{"session":true}} → per-provider overrides
+ *  - {"5h":true,"weekly":false} → treat as global override map (all providers)
+ *
+ * Returns:
+ *  { mode: "defaults"|"globalAllowlist"|"globalMap"|"perProvider",
+ *    globalAllowlist: string[],
+ *    globalMap: object|null,
+ *    byProvider: { provider: { windowId: bool } } }
+ */
+function parseVisibleWindowsConfig(raw) {
+    var empty = {
+        mode: "defaults",
+        globalAllowlist: [],
+        globalMap: null,
+        byProvider: {}
+    }
+    if (raw === undefined || raw === null || raw === "") return empty
+
+    var parsed = raw
+    if (typeof raw === "string") {
+        var s = raw.trim()
+        if (!s || s === "[]" || s === "{}") return empty
+        try { parsed = JSON.parse(s) } catch (e) { return empty }
+    }
+
+    if (Array.isArray(parsed)) {
+        if (!parsed.length) return empty
+        return {
+            mode: "globalAllowlist",
+            globalAllowlist: parsed.slice(),
+            globalMap: null,
+            byProvider: {}
+        }
+    }
+
+    if (!parsed || typeof parsed !== "object") return empty
+
+    // Flat window map applied to all providers
+    if (isWindowBoolMap(parsed)) {
+        if (objectKeyCount(parsed) === 0) return empty
+        return {
+            mode: "globalMap",
+            globalAllowlist: [],
+            globalMap: parsed,
+            byProvider: {}
+        }
+    }
+
+    // Per-provider maps (values are objects or arrays)
+    var byProvider = {}
+    var any = false
+    for (var prov in parsed) {
+        if (!parsed.hasOwnProperty(prov)) continue
+        var entry = parsed[prov]
+        if (entry === undefined || entry === null) continue
+        if (Array.isArray(entry)) {
+            // Per-provider allowlist array → bool map (true only for listed)
+            if (!entry.length) continue
+            var am = {}
+            for (var i = 0; i < entry.length; i++) am[entry[i]] = true
+            // Mark as strict allowlist via special key
+            am.__allowlist = true
+            byProvider[prov] = am
+            any = true
+        } else if (typeof entry === "object") {
+            if (objectKeyCount(entry) === 0) continue
+            byProvider[prov] = entry
+            any = true
+        }
+    }
+    if (!any) return empty
+    return {
+        mode: "perProvider",
+        globalAllowlist: [],
+        globalMap: null,
+        byProvider: byProvider
+    }
+}
+
+/**
+ * Map profile.provider (+ OpenCode slot / profileKey) to the config key used for column visibility.
+ * OpenCode rows inherit the underlying parser's window ids, so share that provider's toggles.
+ *
+ * @param provider - profile.provider
+ * @param opencodeSlot - resolved slot after auth (anthropic/openai/kimi/zai) when known
+ * @param profileKey - discovery key e.g. "anthropic-accounts" (used before auth loads)
+ */
+function visibilityProviderKey(provider, opencodeSlot, profileKey) {
+    var p = provider || ""
+    if (p === "opencode") {
+        var slot = opencodeSlot || ""
+        if (!slot && profileKey) {
+            var pk = String(profileKey)
+            if (pk.indexOf("anthropic") >= 0) slot = "anthropic"
+            else if (pk.indexOf("openai") >= 0 || pk.indexOf("codex") >= 0) slot = "openai"
+            else if (pk.indexOf("kimi") >= 0) slot = "kimi"
+            else if (pk.indexOf("zai") >= 0 || pk.indexOf("z-ai") >= 0) slot = "zai"
+        }
+        if (!slot) slot = "anthropic"
+        if (slot === "openai") return "codex"
+        if (slot === "anthropic") return "claude"
+        if (slot === "kimi") return "kimi"
+        if (slot === "zai") return "zai"
+        return "opencode"
+    }
+    return p
+}
+
+/**
+ * Resolve the visibility spec for one provider from a parseVisibleWindowsConfig() result.
+ * Returns:
+ *  - null → use each window's defaultVisible
+ *  - string[] → strict allowlist (legacy)
+ *  - object map {id:bool} → overrides; missing keys fall back to defaultVisible
+ *    (unless map.__allowlist === true, then missing = hidden)
+ */
+function visibilitySpecForProvider(cfg, provider) {
+    if (!cfg || cfg.mode === "defaults") return null
+    if (cfg.mode === "globalAllowlist") {
+        return (cfg.globalAllowlist && cfg.globalAllowlist.length) ? cfg.globalAllowlist : null
+    }
+    if (cfg.mode === "globalMap") {
+        return cfg.globalMap && objectKeyCount(cfg.globalMap) ? cfg.globalMap : null
+    }
+    if (cfg.mode === "perProvider") {
+        var m = cfg.byProvider && cfg.byProvider[provider]
+        if (!m || objectKeyCount(m) === 0) return null
+        return m
+    }
+    return null
+}
+
+/**
+ * Apply visibility to a windows array.
+ *
+ * @param windows - array of window objects
+ * @param spec - null | string[] (allowlist) | {id:bool} (overrides)
+ *               For override maps, unlisted ids keep defaultVisible unless __allowlist.
+ */
+function applyVisibility(windows, spec) {
+    if (!windows) return []
+    var mode = "defaults" // defaults | allowlist | map
+    var forced = {}
+    var allowlistStrict = false
+
+    if (spec === undefined || spec === null) {
+        mode = "defaults"
+    } else if (Array.isArray(spec)) {
+        if (spec.length) {
+            mode = "allowlist"
+            for (var i = 0; i < spec.length; i++) forced[spec[i]] = true
+        } else {
+            mode = "defaults"
+        }
+    } else if (typeof spec === "object") {
+        if (objectKeyCount(spec) === 0) {
+            mode = "defaults"
+        } else {
+            mode = "map"
+            allowlistStrict = !!spec.__allowlist
+            for (var k in spec) {
+                if (!spec.hasOwnProperty(k) || k === "__allowlist") continue
+                forced[k] = !!spec[k]
+            }
+            // Empty after stripping meta → defaults
+            if (objectKeyCount(forced) === 0 && !allowlistStrict)
+                mode = "defaults"
+        }
+    }
+
     var out = []
     for (var j = 0; j < windows.length; j++) {
         var w = windows[j]
         var copy = {}
-        for (var k in w) copy[k] = w[k]
-        if (visibleIds && visibleIds.length) {
+        for (var ck in w) copy[ck] = w[ck]
+        if (mode === "allowlist") {
             copy.visible = !!forced[w.id]
+        } else if (mode === "map") {
+            // forced[id] only set for explicitly configured keys
+            if (forced[w.id] !== undefined)
+                copy.visible = !!forced[w.id]
+            else if (allowlistStrict)
+                copy.visible = false
+            else
+                copy.visible = w.defaultVisible !== false
         } else {
             copy.visible = w.defaultVisible !== false
         }
