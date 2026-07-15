@@ -786,6 +786,11 @@ Item {
     property var _cacheWriteQueue: []
     property bool _cacheWriteBusy: false
     property int _cacheWriteSeq: 0
+    // B023: unique pending payload file names (separate from drain seq)
+    property int _cachePendingSeq: 0
+    // Chunk size for staging payload to a temp file without putting the full
+    // body on a single Plasma executable argv (ARG_MAX + process-list leak).
+    readonly property int cachePayloadChunkSize: 8192
 
     function enqueueCacheWrite(cmd) {
         _cacheWriteQueue = _cacheWriteQueue.concat([cmd])
@@ -803,6 +808,81 @@ Item {
         cacheWriter.connectSource("CACHE_WRITE_SEQ=" + _cacheWriteSeq + " " + next)
     }
 
+    /**
+     * Expand response-cache root to an absolute path for local shell writes.
+     * When $HOME is not yet known, fall back under /tmp so we never create a
+     * literal "$HOME/..." directory via shell-quoted paths.
+     */
+    function absoluteCacheRoot() {
+        var root = responseCacheRoot().replace(/\/+$/, "")
+        if (root.indexOf("$HOME/") === 0) {
+            if (homeDir)
+                return homeDir.replace(/\/+$/, "") + "/" + root.substring("$HOME/".length)
+            return "/tmp/plasma-claude-usage-cache"
+        }
+        if (root.indexOf("${HOME}/") === 0) {
+            if (homeDir)
+                return homeDir.replace(/\/+$/, "") + "/" + root.substring("${HOME}/".length)
+            return "/tmp/plasma-claude-usage-cache"
+        }
+        if (root.charAt(0) === "~" && root.length > 1 && root.charAt(1) === "/") {
+            if (homeDir)
+                return homeDir.replace(/\/+$/, "") + root.substring(1)
+            return "/tmp/plasma-claude-usage-cache"
+        }
+        return root
+    }
+
+    function nextPendingPayloadPath() {
+        _cachePendingSeq = (_cachePendingSeq + 1) % 1000000
+        var dir = absoluteCacheRoot() + "/pending"
+        return dir + "/p-" + Date.now() + "-" + _cachePendingSeq + ".json"
+    }
+
+    /**
+     * B023: stage payload to a pending file in small chunks (each connectSource
+     * argv stays short), then run cache-response.sh with only path arguments.
+     * Order is preserved by the serial cache write queue.
+     */
+    function enqueuePayloadFileCacheWrite(histPath, latestPath, payload) {
+        var pendingPath = nextPendingPayloadPath()
+        var pendingDir = pendingPath.substring(0, pendingPath.lastIndexOf("/"))
+        var text = payload === undefined || payload === null ? "" : String(payload)
+        var chunkSize = cachePayloadChunkSize > 0 ? cachePayloadChunkSize : 8192
+        var cmds = []
+
+        // umask 077 so staged bodies are not world-readable while pending
+        if (text.length === 0) {
+            cmds.push("umask 077; mkdir -p -- " + shellQuote(pendingDir)
+                      + " && : > " + shellQuote(pendingPath))
+        } else {
+            var first = true
+            for (var i = 0; i < text.length; i += chunkSize) {
+                var end = i + chunkSize
+                if (end > text.length)
+                    end = text.length
+                var chunk = text.substring(i, end)
+                if (first) {
+                    cmds.push("umask 077; mkdir -p -- " + shellQuote(pendingDir)
+                              + " && printf %s " + shellQuote(chunk)
+                              + " > " + shellQuote(pendingPath))
+                    first = false
+                } else {
+                    cmds.push("umask 077; printf %s " + shellQuote(chunk)
+                              + " >> " + shellQuote(pendingPath))
+                }
+            }
+        }
+
+        cmds.push("bash " + shellQuote(cacheScript)
+                  + " " + shellQuote(histPath)
+                  + " " + shellQuote(latestPath)
+                  + " " + shellQuote(pendingPath))
+
+        for (var j = 0; j < cmds.length; j++)
+            enqueueCacheWrite(cmds[j])
+    }
+
     function cacheResponse(profile, endpointSlug, url, httpStatus, responseText) {
         if (!cfgBool("cacheResponses", true))
             return
@@ -811,7 +891,7 @@ Item {
         try {
             var paths = buildResponseCachePaths(profile, endpointSlug)
             var rawText = responseText === undefined || responseText === null ? "" : String(responseText)
-            // Keep argv under ARG_MAX; usage JSON is small, but error HTML can be huge
+            // Truncation backstop: usage JSON is small, but error HTML can be huge
             var maxRaw = 200000
             var truncated = false
             if (rawText.length > maxRaw) {
@@ -842,11 +922,8 @@ Item {
                 truncated: truncated
             }
             var payload = JSON.stringify(envelope)
-            var cmd = "bash " + shellQuote(cacheScript)
-                + " " + shellQuote(paths.hist)
-                + " " + shellQuote(paths.latest)
-                + " " + shellQuote(payload)
-            enqueueCacheWrite(cmd)
+            // B023: never put the full envelope on cache-response.sh argv
+            enqueuePayloadFileCacheWrite(paths.hist, paths.latest, payload)
         } catch (e) {
             console.log("Claude Usage: cacheResponse error", e)
         }
