@@ -560,6 +560,61 @@ Item {
         return p
     }
 
+    /**
+     * Keys kept only on controller.profiles for API auth / fetch state (B012).
+     * Never copy these into UI-facing profileList / CardsView / DetailWindow trees.
+     */
+    function isUiSecretKey(k) {
+        return k === "accessToken"
+            || k === "accountId"
+            || k === "resourceUrl"
+            || k === "lastFailedToken"
+            || k === "grokDefaultBody"
+            || k === "grokCreditsBody"
+    }
+
+    /**
+     * Deep-enough UI snapshot of one profile: new object + window shells, no secrets.
+     * Fetch still uses controller.profiles (with tokens) via refreshProfile(id).
+     */
+    function toUiProfile(src) {
+        var row = {}
+        if (!src) return row
+        for (var ck in src) {
+            if (!src.hasOwnProperty(ck)) continue
+            if (isUiSecretKey(ck)) continue
+            if (ck === "windows" && Array.isArray(src[ck])) {
+                var wcopy = []
+                for (var wi = 0; wi < src[ck].length; wi++) {
+                    var ww = {}
+                    var sw = src[ck][wi]
+                    if (sw) {
+                        for (var wk in sw) {
+                            if (sw.hasOwnProperty(wk)) ww[wk] = sw[wk]
+                        }
+                    }
+                    wcopy.push(ww)
+                }
+                row[ck] = wcopy
+            } else if (Array.isArray(src[ck])) {
+                row[ck] = src[ck].slice()
+            } else {
+                row[ck] = src[ck]
+            }
+        }
+        return row
+    }
+
+    /** Full UI-facing list (no tokens / account ids / raw API bodies). */
+    function publicProfiles() {
+        var out = []
+        var list = profiles || []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i]) out.push(toUiProfile(list[i]))
+        }
+        return out
+    }
+
     function updateProfile(idx, patch) {
         if (idx < 0 || idx >= profiles.length) return
         var copy = []
