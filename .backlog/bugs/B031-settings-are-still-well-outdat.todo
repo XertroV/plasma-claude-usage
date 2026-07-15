@@ -1,0 +1,14 @@
+---
+complexity: medium
+created_at: "2026-07-15T05:39:53Z"
+depends_on: []
+estimate_hours: 1
+id: B031
+priority: high
+status: pending
+tags: []
+title: Settings are still well outdated and insufficient for current data model. Must be overhauled
+updated_at: "2026-07-15T05:39:53Z"
+---
+
+Settings are still well outdated and insufficient for current data model. Must be overhauled
