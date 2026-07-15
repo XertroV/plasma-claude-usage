@@ -96,22 +96,39 @@ Rectangle {
                 }
             }
 
-            PlasmaComponents.Label {
-                text: "⋯"
-                font.bold: true
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: Kirigami.Theme.disabledTextColor
+            // B022: never put MouseArea as a bare RowLayout child (zero size).
+            // Wrap the "⋯" control in an Item with real implicit size for hit testing.
+            Item {
+                id: detailBtn
+                implicitWidth: Math.max(Kirigami.Units.iconSizes.small,
+                                        detailDots.implicitWidth + Kirigami.Units.smallSpacing * 2)
+                implicitHeight: Math.max(Kirigami.Units.iconSizes.small,
+                                         detailDots.implicitHeight + Kirigami.Units.smallSpacing * 2)
+                Layout.preferredWidth: implicitWidth
+                Layout.preferredHeight: implicitHeight
+                Layout.alignment: Qt.AlignVCenter
                 Accessible.name: "Details"
-                MouseArea {
-                    id: detailMouse
-                    anchors.fill: parent
-                    anchors.margins: -Kirigami.Units.smallSpacing
-                    hoverEnabled: true
+                Accessible.role: Accessible.Button
+                Accessible.onPressAction: cardRoot.detailRequested(cardRoot.profile)
+
+                PlasmaComponents.Label {
+                    id: detailDots
+                    anchors.centerIn: parent
+                    text: "⋯"
+                    font.bold: true
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: detailHover.hovered
+                           ? Kirigami.Theme.textColor
+                           : Kirigami.Theme.disabledTextColor
+                }
+
+                HoverHandler { id: detailHover }
+                TapHandler {
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: cardRoot.detailRequested(cardRoot.profile)
+                    onTapped: cardRoot.detailRequested(cardRoot.profile)
                 }
                 QQC2.ToolTip {
-                    visible: detailMouse.containsMouse
+                    visible: detailHover.hovered
                     text: "Details"
                 }
             }

@@ -106,37 +106,55 @@ Item {
             color: Kirigami.Theme.disabledTextColor
         }
 
-        PlasmaComponents.Label {
-            // Idle empty: none discovered, or all Hidden (B032)
+        // B022: hover/click on a sized Item, not a bare layout MouseArea.
+        Item {
+            id: emptyState
             visible: cardsRoot.cards.length === 0 && !cardsRoot.isLoading
-            text: {
-                var all = cardsRoot.profiles || []
-                if (all.length > 0)
-                    return cardsRoot.tr("All accounts hidden")
-                return cardsRoot.tr("No profiles")
-            }
-            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-            color: Kirigami.Theme.disabledTextColor
-            Accessible.name: text
+            implicitWidth: emptyLabel.implicitWidth + Kirigami.Units.smallSpacing * 2
+            implicitHeight: emptyLabel.implicitHeight + Kirigami.Units.smallSpacing * 2
+            width: implicitWidth
+            height: implicitHeight
+            Accessible.name: emptyLabel.text
             Accessible.role: Accessible.Button
-            MouseArea {
-                anchors.fill: parent
-                anchors.margins: -Kirigami.Units.smallSpacing
-                enabled: (cardsRoot.profiles || []).length > 0
-                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: {
-                    var list = cardsRoot.profiles || []
-                    for (var i = 0; i < list.length; i++) {
-                        if (list[i] && list[i].id) {
-                            cardsRoot.detailRequested(list[i])
-                            return
-                        }
+            Accessible.onPressAction: emptyState.openFirstDetail()
+
+            readonly property bool canUnhide: (cardsRoot.profiles || []).length > 0
+
+            function openFirstDetail() {
+                if (!canUnhide)
+                    return
+                var list = cardsRoot.profiles || []
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i] && list[i].id) {
+                        cardsRoot.detailRequested(list[i])
+                        return
                     }
                 }
             }
-            HoverHandler { id: emptyHover }
+
+            PlasmaComponents.Label {
+                id: emptyLabel
+                anchors.centerIn: parent
+                text: {
+                    if (emptyState.canUnhide)
+                        return cardsRoot.tr("All accounts hidden")
+                    return cardsRoot.tr("No profiles")
+                }
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                color: Kirigami.Theme.disabledTextColor
+            }
+
+            HoverHandler {
+                id: emptyHover
+                enabled: emptyState.canUnhide
+            }
+            TapHandler {
+                enabled: emptyState.canUnhide
+                cursorShape: emptyState.canUnhide ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onTapped: emptyState.openFirstDetail()
+            }
             QQC2.ToolTip {
-                visible: emptyHover.hovered && (cardsRoot.profiles || []).length > 0
+                visible: emptyHover.hovered && emptyState.canUnhide
                 text: cardsRoot.tr("Open details to unhide")
             }
         }
