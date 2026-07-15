@@ -22,6 +22,12 @@ Item {
         return u
     }
 
+    readonly property string cacheScript: {
+        var u = Qt.resolvedUrl("../scripts/cache-response.sh").toString()
+        if (u.indexOf("file://") === 0) return u.substring(7)
+        return u
+    }
+
     function tr(text) { return i18n ? i18n.tr(text) : text }
 
     function cfgValue(key, fallback) {
@@ -345,6 +351,158 @@ Item {
         return "'" + String(path).replace(/'/g, "'\\''") + "'"
     }
 
+    function pad2(n) {
+        n = Math.floor(Number(n) || 0)
+        return n < 10 ? "0" + n : String(n)
+    }
+
+    function pad3(n) {
+        n = Math.floor(Number(n) || 0) % 1000
+        if (n < 10) return "00" + n
+        if (n < 100) return "0" + n
+        return String(n)
+    }
+
+    function profileSlug(id) {
+        var s = String(id || "unknown")
+        var out = ""
+        for (var i = 0; i < s.length; i++) {
+            var c = s.charAt(i)
+            if ((c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+                    || (c >= "0" && c <= "9") || c === "." || c === "_" || c === "-") {
+                out += c
+            } else {
+                out += "-"
+            }
+        }
+        while (out.indexOf("--") >= 0)
+            out = out.replace("--", "-")
+        while (out.length && out.charAt(0) === "-")
+            out = out.substring(1)
+        while (out.length && out.charAt(out.length - 1) === "-")
+            out = out.substring(0, out.length - 1)
+        return out || "unknown"
+    }
+
+    function responseCacheRoot() {
+        var override = String(cfgValue("responseCachePath", "") || "").trim()
+        if (override) {
+            if (override.indexOf("~/") === 0)
+                return "$HOME/" + override.substring(2)
+            return override
+        }
+        return "$HOME/.cache/plasma-claude-usage"
+    }
+
+    function endpointSlugForProvider(ep) {
+        if (ep === "codex" || ep === "openai") return "wham-usage"
+        if (ep === "zai") return "quota-limit"
+        if (ep === "kimi") return "coding-usages"
+        if (ep === "minimax") return "coding-plan-remains"
+        if (ep === "grok") return "billing"
+        return "oauth-usage"
+    }
+
+    function grokEndpointSlug(url) {
+        if (String(url || "").indexOf("format=credits") >= 0)
+            return "billing-credits"
+        return "billing"
+    }
+
+    function buildResponseCachePaths(profile, endpointSlug) {
+        var root = responseCacheRoot().replace(/\/+$/, "")
+        var now = new Date()
+        var y = now.getFullYear()
+        var mo = pad2(now.getMonth() + 1)
+        var d = pad2(now.getDate())
+        var hms = pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds())
+        var ms3 = pad3(now.getMilliseconds())
+        var provider = profileSlug(effectiveProvider(profile) || profile.provider || "unknown")
+        var slug = profileSlug(profile.id)
+        var ep = profileSlug(endpointSlug || "response")
+        var base = hms + "-" + ms3 + "-" + provider + "-" + slug + "-" + ep + ".json"
+        return {
+            hist: root + "/responses/" + y + "/" + mo + "/" + d + "/" + base,
+            latest: root + "/latest/" + provider + "-" + slug + "-" + ep + ".json"
+        }
+    }
+
+    function cfgBool(key, fallback) {
+        var v = cfgValue(key, fallback)
+        if (v === true || v === 1 || v === "true" || v === "1") return true
+        if (v === false || v === 0 || v === "false" || v === "0") return false
+        return !!fallback
+    }
+
+    property var _cacheWriteQueue: []
+    property bool _cacheWriteBusy: false
+    property int _cacheWriteSeq: 0
+
+    function enqueueCacheWrite(cmd) {
+        _cacheWriteQueue = _cacheWriteQueue.concat([cmd])
+        drainCacheWriteQueue()
+    }
+
+    function drainCacheWriteQueue() {
+        if (_cacheWriteBusy) return
+        if (!_cacheWriteQueue.length) return
+        var next = _cacheWriteQueue[0]
+        _cacheWriteQueue = _cacheWriteQueue.slice(1)
+        _cacheWriteBusy = true
+        // Unique env prefix so Plasma never collapses identical command strings
+        _cacheWriteSeq = (_cacheWriteSeq + 1) % 100000
+        cacheWriter.connectSource("CACHE_WRITE_SEQ=" + _cacheWriteSeq + " " + next)
+    }
+
+    function cacheResponse(profile, endpointSlug, url, httpStatus, responseText) {
+        if (!cfgBool("cacheResponses", true))
+            return
+        if (!profile)
+            return
+        try {
+            var paths = buildResponseCachePaths(profile, endpointSlug)
+            var rawText = responseText === undefined || responseText === null ? "" : String(responseText)
+            // Keep argv under ARG_MAX; usage JSON is small, but error HTML can be huge
+            var maxRaw = 200000
+            var truncated = false
+            if (rawText.length > maxRaw) {
+                rawText = rawText.substring(0, maxRaw)
+                truncated = true
+            }
+            var body = null
+            var raw = null
+            if (rawText.length) {
+                try {
+                    body = JSON.parse(rawText)
+                } catch (e) {
+                    body = null
+                    raw = rawText
+                }
+            }
+            var now = new Date()
+            var envelope = {
+                savedAt: now.toISOString(),
+                savedAtMs: now.getTime(),
+                provider: effectiveProvider(profile) || profile.provider || "",
+                profileId: profile.id || "",
+                endpoint: endpointSlug || "",
+                url: url || "",
+                httpStatus: httpStatus || 0,
+                body: body,
+                raw: raw,
+                truncated: truncated
+            }
+            var payload = JSON.stringify(envelope)
+            var cmd = "bash " + shellQuote(cacheScript)
+                + " " + shellQuote(paths.hist)
+                + " " + shellQuote(paths.latest)
+                + " " + shellQuote(payload)
+            enqueueCacheWrite(cmd)
+        } catch (e) {
+            console.log("Claude Usage: cacheResponse error", e)
+        }
+    }
+
     // Bootstrap paths use $HOME; must NOT be single-quoted or the shell won't expand it.
     // User-configured absolute paths are quoted to avoid injection.
     function catCommand(path) {
@@ -515,8 +673,14 @@ Item {
             return
         }
 
+        var url = usageUrl(p)
+        var epSlug = endpointSlugForProvider(ep)
+        // Snapshot identity for caching even if the profile row is removed mid-flight
+        var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
+        var settled = false
         var xhr = new XMLHttpRequest()
-        xhr.open("GET", usageUrl(p))
+        xhr.open("GET", url)
+        xhr.timeout = 25000
         xhr.setRequestHeader("Content-Type", "application/json")
         if (ep === "zai") {
             xhr.setRequestHeader("Authorization", p.accessToken)
@@ -529,13 +693,15 @@ Item {
             if (p.accountId) xhr.setRequestHeader("ChatGPT-Account-Id", p.accountId)
         }
 
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
+        function settleUsage(status, responseText) {
+            if (settled) return
+            settled = true
+            cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
             var cur = profiles[idx]
             if (!cur) return
-            if (xhr.status === 200) {
+            if (status === 200) {
                 try {
-                    var data = JSON.parse(xhr.responseText)
+                    var data = JSON.parse(responseText || "")
                     var result = emptyUsage()
                     if (ep === "claude" || ep === "anthropic") result = QP.parseClaude(data)
                     else if (ep === "codex" || ep === "openai") result = QP.parseCodex(data)
@@ -549,14 +715,24 @@ Item {
                     console.log("Claude Usage: parse error", e)
                     updateProfile(idx, { loading: false, error: "Parse error" })
                 }
-            } else if (xhr.status === 429) {
+            } else if (status === 429) {
                 var mult = (cur.backoffMultiplier || 1) * 2
                 updateProfile(idx, { loading: false, error: tr("Rate limited"), backoffMultiplier: Math.min(mult, 6) })
-            } else if (xhr.status === 401) {
+            } else if (status === 401) {
                 updateProfile(idx, { loading: false, error: tr("Token expired") })
+            } else if (status === 0) {
+                updateProfile(idx, { loading: false, error: tr("API error") + " (timeout)" })
             } else {
-                updateProfile(idx, { loading: false, error: tr("API error") + " (" + xhr.status + ")" })
+                updateProfile(idx, { loading: false, error: tr("API error") + " (" + status + ")" })
             }
+        }
+
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            settleUsage(xhr.status || 0, xhr.responseText || "")
+        }
+        xhr.ontimeout = function() {
+            settleUsage(0, "")
         }
         xhr.send()
     }
@@ -584,6 +760,9 @@ Item {
 
     function grokGet(idx, gen, url, callback) {
         var p = profiles[idx]
+        var epSlug = grokEndpointSlug(url)
+        var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
+        var settled = false
         var xhr = new XMLHttpRequest()
         xhr.open("GET", url)
         xhr.timeout = 25000
@@ -592,17 +771,28 @@ Item {
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.setRequestHeader("x-grok-client-version", "0.2.93")
         xhr.setRequestHeader("x-grok-client-surface", "grok-build")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            if (profiles[idx].grokFetchGen !== gen) return
-            if (xhr.status === 200) {
-                try { callback(true, JSON.parse(xhr.responseText), xhr.status) }
-                catch (e) { callback(false, null, xhr.status) }
+
+        function settleGrok(status, responseText) {
+            if (settled) return
+            settled = true
+            // Always cache the HTTP exchange, even if this generation is stale
+            cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
+            if (!profiles[idx] || profiles[idx].grokFetchGen !== gen) return
+            if (status === 200) {
+                try { callback(true, JSON.parse(responseText || ""), status) }
+                catch (e) { callback(false, null, status) }
             } else {
-                callback(false, null, xhr.status || 0)
+                callback(false, null, status || 0)
             }
         }
-        xhr.ontimeout = function() { callback(false, null, 0) }
+
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            settleGrok(xhr.status || 0, xhr.responseText || "")
+        }
+        xhr.ontimeout = function() {
+            settleGrok(0, "")
+        }
         xhr.send()
     }
 
@@ -671,6 +861,21 @@ Item {
                 console.log("Claude Usage: discovery parse error", e)
                 discovering = false
             }
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: cacheWriter
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
+            var stderr = data["stderr"] || ""
+            disconnectSource(sourceName)
+            _cacheWriteBusy = false
+            if (exitCode && exitCode !== 0)
+                console.log("Claude Usage: cache write failed exit=", exitCode, stderr)
+            drainCacheWriteQueue()
         }
     }
 

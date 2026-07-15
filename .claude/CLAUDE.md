@@ -21,11 +21,33 @@ Pure QML, no external deps:
 1. **Credentials**: `Plasma5Support.DataSource` executable engine (`cat $HOME/...`)
 2. **API**: QML `XMLHttpRequest`
 3. **UI**: Plasma / Kirigami
+4. **Response cache**: every API response written via `contents/scripts/cache-response.sh`
+
+## Response cache
+
+Default root: `~/.cache/plasma-claude-usage` (override with `responseCachePath`; disable with `cacheResponses=false`).
+
+```
+{root}/responses/{YYYY}/{MM}/{DD}/{HHMMSS}-{ms3}-{provider}-{profileSlug}-{endpoint}.json
+{root}/latest/{provider}-{profileSlug}-{endpoint}.json
+```
+
+Envelope JSON: `savedAt`, `savedAtMs`, `provider`, `profileId`, `endpoint`, `url`, `httpStatus`, `body` (parsed) / `raw` (on parse failure). Never stores tokens.
+
+Inspect:
+
+```bash
+ls ~/.cache/plasma-claude-usage/latest/
+ls ~/.cache/plasma-claude-usage/responses/$(date +%Y/%m/%d)/
+jq . ~/.cache/plasma-claude-usage/latest/*-wham-usage.json | head
+```
 
 ## Key Files
 
-- `contents/ui/main.qml` — all provider logic + UI
+- `contents/ui/ProfileController.qml` — multi-profile fetch + response cache
+- `contents/ui/main.qml` — widget shell / UI
 - `contents/ui/configGeneral.qml` — provider picker + paths
+- `contents/scripts/cache-response.sh` — atomic hist + latest write
 - `contents/icons/claude.svg` — icon
 - `metadata.json` — Plasma metadata
 - `fixture-examples/` — sample API payloads for offline reasoning

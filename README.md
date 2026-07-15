@@ -88,6 +88,17 @@ claude
 - Click the refresh button in the popup
 - Check logs: `journalctl --user -f | grep -i claude`
 
+### Inspect live API responses
+
+Every provider response is cached (by default) under:
+
+```
+~/.cache/plasma-claude-usage/latest/          # most recent per profile+endpoint
+~/.cache/plasma-claude-usage/responses/YYYY/MM/DD/   # historical
+```
+
+Disable or change the path in widget settings (Response cache / Cache path).
+
 ## File Structure
 
 ```

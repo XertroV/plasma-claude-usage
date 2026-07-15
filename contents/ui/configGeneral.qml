@@ -30,6 +30,8 @@ KCM.SimpleKCM {
     property string cfg_enabledProfilesJson
     property string cfg_visibleWindowsJson
     property string cfg_customProfilesJson
+    property bool cfg_cacheResponses
+    property string cfg_responseCachePath
 
     readonly property var providerValues: ["claude", "codex", "grok", "zai", "opencode"]
     readonly property var providerNames: ["Claude (Anthropic)", "Codex (OpenAI)", "Grok (xAI)", "Z.ai (GLM)", "OpenCode"]
@@ -287,6 +289,21 @@ KCM.SimpleKCM {
             placeholderText: '[{"provider":"claude","path":"/home/me/.claude-custom","displayName":"Custom"}]'
             text: cfg_customProfilesJson || "[]"
             onTextChanged: cfg_customProfilesJson = text
+        }
+
+        QQC2.CheckBox {
+            Kirigami.FormData.label: tr("Response cache:")
+            text: tr("Save every provider API response to disk")
+            checked: cfg_cacheResponses !== false
+            onCheckedChanged: cfg_cacheResponses = checked
+        }
+
+        QQC2.TextField {
+            Kirigami.FormData.label: tr("Cache path:")
+            placeholderText: "~/.cache/plasma-claude-usage"
+            text: cfg_responseCachePath || ""
+            enabled: cfg_cacheResponses !== false
+            onTextChanged: cfg_responseCachePath = text
         }
     }
 }

@@ -78,5 +78,13 @@
             <label>Custom profile paths JSON array</label>
             <default>[]</default>
         </entry>
+        <entry name="cacheResponses" type="Bool">
+            <label>Cache provider API responses to disk</label>
+            <default>true</default>
+        </entry>
+        <entry name="responseCachePath" type="String">
+            <label>Override root for response cache (empty = ~/.cache/plasma-claude-usage)</label>
+            <default></default>
+        </entry>
     </group>
 </kcfg>
