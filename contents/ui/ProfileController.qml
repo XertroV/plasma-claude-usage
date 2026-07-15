@@ -841,6 +841,14 @@ Item {
     property var _cacheWriteQueue: []
     property bool _cacheWriteBusy: false
     property int _cacheWriteSeq: 0
+    // B024: track in-flight write so a stuck executable engine cannot wedge the queue forever
+    property string _cacheWriteInFlightCmd: ""
+    property string _cacheWriteInFlightSource: ""
+    property int _cacheWriteAttempt: 0
+    // How long to wait for cacheWriter.onNewData before treating the write as stalled
+    readonly property int cacheWriteWatchdogMs: 12000
+    // Original attempt + retries; drop after this many stalls (no infinite retry)
+    readonly property int cacheWriteMaxAttempts: 2
 
     function enqueueCacheWrite(cmd) {
         _cacheWriteQueue = _cacheWriteQueue.concat([cmd])
@@ -852,10 +860,52 @@ Item {
         if (!_cacheWriteQueue.length) return
         var next = _cacheWriteQueue[0]
         _cacheWriteQueue = _cacheWriteQueue.slice(1)
+        _cacheWriteAttempt = 1
+        launchCacheWrite(next)
+    }
+
+    // Start (or restart after stall) one cache write; requires !_cacheWriteBusy on first call
+    function launchCacheWrite(cmd) {
         _cacheWriteBusy = true
+        _cacheWriteInFlightCmd = cmd
         // Unique env prefix so Plasma never collapses identical command strings
         _cacheWriteSeq = (_cacheWriteSeq + 1) % 100000
-        cacheWriter.connectSource("CACHE_WRITE_SEQ=" + _cacheWriteSeq + " " + next)
+        var sourceName = "CACHE_WRITE_SEQ=" + _cacheWriteSeq + " " + cmd
+        _cacheWriteInFlightSource = sourceName
+        cacheWriteWatchdog.restart()
+        cacheWriter.connectSource(sourceName)
+    }
+
+    // B024: executable engine never called onNewData — unstick busy and optionally retry once
+    function onCacheWriteWatchdogFired() {
+        if (!_cacheWriteBusy)
+            return
+        var cmd = _cacheWriteInFlightCmd
+        var src = _cacheWriteInFlightSource
+        var attempt = _cacheWriteAttempt
+        var seq = _cacheWriteSeq
+        console.log("Claude Usage: cache write stalled (onNewData never fired), attempt=",
+                    attempt, "seq=", seq)
+        // Clear in-flight identity first so a late onNewData (e.g. from disconnect) is ignored
+        _cacheWriteInFlightSource = ""
+        _cacheWriteInFlightCmd = ""
+        _cacheWriteBusy = false
+        if (src) {
+            try {
+                cacheWriter.disconnectSource(src)
+            } catch (e) {
+                // disconnect may throw if source already gone
+            }
+        }
+        if (cmd && attempt < cacheWriteMaxAttempts) {
+            _cacheWriteAttempt = attempt + 1
+            launchCacheWrite(cmd)
+            return
+        }
+        if (cmd)
+            console.log("Claude Usage: cache write dropped after stall, attempts=", attempt)
+        _cacheWriteAttempt = 0
+        drainCacheWriteQueue()
     }
 
     function cacheResponse(profile, endpointSlug, url, httpStatus, responseText) {
@@ -1475,11 +1525,26 @@ Item {
             var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             var stderr = data["stderr"] || ""
             disconnectSource(sourceName)
-            _cacheWriteBusy = false
+            // Stale completion after watchdog already moved on — do not double-drain
+            if (sourceName !== controller._cacheWriteInFlightSource)
+                return
+            cacheWriteWatchdog.stop()
+            controller._cacheWriteBusy = false
+            controller._cacheWriteInFlightCmd = ""
+            controller._cacheWriteInFlightSource = ""
+            controller._cacheWriteAttempt = 0
             if (exitCode && exitCode !== 0)
                 console.log("Claude Usage: cache write failed exit=", exitCode, stderr)
-            drainCacheWriteQueue()
+            controller.drainCacheWriteQueue()
         }
+    }
+
+    // B024: if cacheWriter.onNewData never fires, busy would stay true and drop all later caches
+    Timer {
+        id: cacheWriteWatchdog
+        interval: controller.cacheWriteWatchdogMs
+        repeat: false
+        onTriggered: controller.onCacheWriteWatchdogFired()
     }
 
     // Resolve $HOME once with a fixed command (B006) — never interpolate user strings here
