@@ -65,7 +65,8 @@ function parseClaude(data) {
     var limits = data.limits || []
     for (var i = 0; i < limits.length; i++) {
         var entry = limits[i]
-        if (entry.group !== "weekly") continue
+        // Prefer kind weekly_scoped; skip weekly_all / session aggregates (also group weekly).
+        if (entry.kind !== "weekly_scoped") continue
         var slug = scopedModelSlug(entry)
         if (!slug) continue
         var id = "weekly_" + slug
