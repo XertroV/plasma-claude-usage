@@ -1362,7 +1362,10 @@ Item {
             copy[i].windows = newWins
             changed = true
         }
-        if (changed) profiles = copy
+        if (changed) {
+            profiles = copy
+            dataEpoch++  // B018: CardsView/main key off dataEpoch; shallow slice alone is not enough
+        }
     }
 
     function dueProfiles() {
