@@ -1,0 +1,26 @@
+---
+complexity: low
+created_at: "2026-07-15T04:43:52Z"
+depends_on: []
+estimate_hours: 1
+id: B024
+priority: medium
+status: pending
+tags:
+    - cache
+    - ProfileController
+    - reliability
+title: Cache write queue can stall if cacheWriter onNewData never fires
+updated_at: "2026-07-15T04:43:52Z"
+---
+## Problem
+`enqueueCacheWrite` sets `_cacheWriteBusy = true` then `cacheWriter.connectSource(...)`. The queue only drains in `cacheWriter.onNewData`. If the executable engine fails to emit `onNewData` (bad source, engine hang, process never started), `_cacheWriteBusy` stays true and all subsequent response caches are silently dropped for the session.
+
+## Location
+`contents/ui/ProfileController.qml` — `drainCacheWriteQueue`, `cacheWriter` DataSource
+
+## Suggested fix
+Add a Timer watchdog that resets `_cacheWriteBusy` and retries/drains after N seconds; or use one-shot DataSource per write without a global busy flag; or call `drainCacheWriteQueue` from a periodic timer when queue non-empty and busy stuck.
+
+## Source
+Post-merge static review of response-cache queue
