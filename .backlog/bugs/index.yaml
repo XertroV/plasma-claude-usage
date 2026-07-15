@@ -24,3 +24,4 @@ bugs:
     - file: B023-response-cache-puts-full-envel.todo
     - file: B024-cache-write-queue-can-stall-if.todo
     - file: B025-http-status-0-always-labeled-a.todo
+    - file: B026-grok-2-profile-stuck-reloading.todo
