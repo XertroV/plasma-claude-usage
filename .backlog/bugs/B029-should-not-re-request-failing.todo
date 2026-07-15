@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T05:22:57Z"
 claimed_by: grok-pirfl
-completed_at: null
+completed_at: "2026-07-15T05:30:31Z"
 complexity: medium
 created_at: "2026-07-15T05:09:44Z"
 depends_on: []
+duration_minutes: 7.579529987033333
 estimate_hours: 1
 id: B029
 priority: high
 started_at: "2026-07-15T05:22:57Z"
-status: in_progress
+status: done
 tags: []
 title: Should not re-request failing things too much. If it's a problem with expired oauth, don't re-request more than twice (and wait like 5 min between).
-updated_at: "2026-07-15T05:22:57Z"
+updated_at: "2026-07-15T05:30:31Z"
 ---
 
 Should not re-request failing things too much. If it's a problem with expired oauth, don't re-request more than twice (and wait like 5 min between).
