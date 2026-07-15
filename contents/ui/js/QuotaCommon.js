@@ -259,6 +259,8 @@ function displayWindowLabel(window) {
     return col !== "extra" ? col : ""
 }
 
+// Window visibility: treat missing/undefined `visible` as shown.
+// Only explicit `visible === false` hides (never truthy-check `w.visible`).
 function primaryWindows(profile) {
     var out = []
     if (!profile || !profile.windows) return out

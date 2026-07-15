@@ -203,24 +203,8 @@ PlasmoidItem {
         errorMsg = p.error || ""
         bankedResets = p.bankedResets || 0
 
-        var primaries = []
-        var wins = p.windows || []
-        for (var j = 0; j < wins.length; j++) {
-            var w = wins[j]
-            // Accept primary windows; also any visible window if role missing
-            if (!w) continue
-            var isPrimary = (w.role === "primary" || w.role === "" || w.role === undefined)
-            var isVisible = (w.visible !== false)
-            if (isVisible && isPrimary)
-                primaries.push(w)
-        }
-        // Fallback: if nothing marked primary, use first two visible windows
-        if (primaries.length === 0) {
-            for (var k = 0; k < wins.length; k++) {
-                if (wins[k] && wins[k].visible !== false)
-                    primaries.push(wins[k])
-            }
-        }
+        // Single source of truth: QC.primaryWindows uses visible !== false (B019)
+        var primaries = QC.primaryWindows(p)
 
         if (primaries.length >= 2) {
             hasSessionWindow = true
