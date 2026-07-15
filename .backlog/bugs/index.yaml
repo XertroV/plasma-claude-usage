@@ -28,3 +28,4 @@ bugs:
     - file: B027-tooltips-reset-when-ui-updates.todo
     - file: B028-should-be-able-to-refresh-indi.todo
     - file: B029-should-not-re-request-failing.todo
+    - file: B030-when-a-card-is-refreshing-it-a.todo
