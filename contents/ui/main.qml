@@ -131,34 +131,10 @@ PlasmoidItem {
 
     function syncCompactFromController() {
         if (!controller) return
+        // Controller-internal profiles still hold tokens for XHR; UI list strips secrets (B012).
         var list = controller.profiles || []
-        // Deep-enough copy for UI: new array + new profile shells so Repeaters update
-        var uiList = []
-        for (var ci = 0; ci < list.length; ci++) {
-            var src = list[ci]
-            if (!src) continue
-            var row = {}
-            for (var ck in src) {
-                if (!src.hasOwnProperty(ck)) continue
-                if (ck === "windows" && Array.isArray(src[ck])) {
-                    var wcopy = []
-                    for (var wi = 0; wi < src[ck].length; wi++) {
-                        var ww = {}
-                        var sw = src[ck][wi]
-                        if (sw) {
-                            for (var wk in sw) {
-                                if (sw.hasOwnProperty(wk)) ww[wk] = sw[wk]
-                            }
-                        }
-                        wcopy.push(ww)
-                    }
-                    row[ck] = wcopy
-                } else {
-                    row[ck] = src[ck]
-                }
-            }
-            uiList.push(row)
-        }
+        // publicProfiles()/toUiProfile omit accessToken, accountId, resourceUrl, lastFailedToken, raw bodies
+        var uiList = controller.publicProfiles()
         profileList = uiList
         dataEpoch = controller.dataEpoch
         nowMs = controller.nowMs
