@@ -365,10 +365,15 @@ Item {
             opencodeSlot: "",
             grokFetchGen: 0,
             grokPending: 0,
+            grokDefaultSettled: false,
+            grokCreditsSettled: false,
+            grokFinalized: false,
             grokDefaultBody: null,
             grokCreditsBody: null,
             grokDefaultStatus: 0,
+            grokCreditsStatus: 0,
             grokDefaultFromTimeout: false,
+            grokCreditsFromTimeout: false,
             grokAuthFailed: false,
             usageFetchGen: 0,
             backoffMultiplier: 1,
@@ -377,6 +382,7 @@ Item {
             authSuspended: false,
             autoRefreshHoldUntilMs: 0,
             lastFailedToken: "",
+            credLoadManual: false,
             visibleWindowIds: visIds
         }
     }
@@ -444,11 +450,14 @@ Item {
                 var keepKeys = [
                     "loading", "error", "planName", "bankedResets", "windows",
                     "lastUpdate", "accessToken", "accountId", "resourceUrl",
-                    "opencodeSlot", "grokFetchGen", "grokPending", "grokDefaultBody",
-                    "grokCreditsBody", "grokDefaultStatus", "grokDefaultFromTimeout",
+                    "opencodeSlot", "grokFetchGen", "grokPending",
+                    "grokDefaultSettled", "grokCreditsSettled", "grokFinalized",
+                    "grokDefaultBody", "grokCreditsBody",
+                    "grokDefaultStatus", "grokCreditsStatus",
+                    "grokDefaultFromTimeout", "grokCreditsFromTimeout",
                     "grokAuthFailed", "usageFetchGen", "backoffMultiplier", "lastFetchMs",
                     "authFailCount", "authSuspended", "autoRefreshHoldUntilMs",
-                    "lastFailedToken"
+                    "lastFailedToken", "credLoadManual"
                 ]
                 for (var ki = 0; ki < keepKeys.length; ki++) {
                     var k = keepKeys[ki]
@@ -1114,9 +1123,10 @@ Item {
         if (!cmd)
             return false
 
-        var patch = { loading: true, error: "" }
+        var patch = { loading: true, error: "", credLoadManual: manual }
         if (manual) {
-            // Manual refresh may retry after OAuth/billing fixes (B029)
+            // Manual refresh: lift suspension/holds so dual-fetch re-runs with
+            // freshly catted credentials after token renewal (B029/B033)
             patch.authSuspended = false
             patch.autoRefreshHoldUntilMs = 0
         }
@@ -1449,45 +1459,72 @@ Item {
     function fetchGrok(idx) {
         var p = profiles[idx]
         var profileId = p.id
-        var tokenSnapshot = p.accessToken
+        // Snapshot token once so both dual-fetch legs use the same post-reload
+        // credential (B033: avoid stale token on one leg after concurrent updates)
+        var tokenSnapshot = p.accessToken || ""
+        if (!tokenSnapshot) {
+            noteAuthFailure(idx, tr("Not logged in"), "")
+            return
+        }
         var gen = allocFetchGen()
         updateProfile(idx, {
             grokFetchGen: gen,
             grokPending: 2,
+            grokDefaultSettled: false,
+            grokCreditsSettled: false,
+            grokFinalized: false,
             grokDefaultBody: null,
             grokCreditsBody: null,
             grokDefaultStatus: 0,
+            grokCreditsStatus: 0,
             grokDefaultFromTimeout: false,
+            grokCreditsFromTimeout: false,
             grokAuthFailed: false
         })
-        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing", function(ok, body, status, fromTimeout) {
-            var curIdx = findProfileIndex(profileId)
-            if (curIdx < 0) return
-            var patch = { grokDefaultStatus: status, grokDefaultFromTimeout: !!fromTimeout }
+        var defaultUrl = "https://cli-chat-proxy.grok.com/v1/billing"
+        var creditsUrl = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+        grokGet(profileId, gen, defaultUrl, tokenSnapshot, function(ok, body, status, fromTimeout) {
+            var patch = {
+                grokDefaultSettled: true,
+                grokDefaultStatus: status || 0,
+                grokDefaultFromTimeout: !!fromTimeout
+            }
             if (ok) patch.grokDefaultBody = body
             else if (status === 401 || status === 403) patch.grokAuthFailed = true
             finishGrokPart(profileId, gen, patch, tokenSnapshot)
         })
-        grokGet(profileId, gen, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", function(ok, body) {
-            var patch = {}
+        // Always re-request credits on every fetch — partial monthly success must
+        // not prevent a later credits success (B033)
+        grokGet(profileId, gen, creditsUrl, tokenSnapshot, function(ok, body, status, fromTimeout) {
+            var patch = {
+                grokCreditsSettled: true,
+                grokCreditsStatus: status || 0,
+                grokCreditsFromTimeout: !!fromTimeout
+            }
+            // Auth failure on credits alone: mark; shared-token case usually fails both
             if (ok) patch.grokCreditsBody = body
+            else if (status === 401 || status === 403) patch.grokAuthFailed = true
             finishGrokPart(profileId, gen, patch, tokenSnapshot)
         })
     }
 
-    function grokGet(profileId, gen, url, callback) {
+    function grokGet(profileId, gen, url, token, callback) {
         var idx = findProfileIndex(profileId)
         if (idx < 0) return
         var p = profiles[idx]
         var epSlug = grokEndpointSlug(url)
         var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
+        var authToken = token || p.accessToken || ""
         var settled = false
         var xhr = new XMLHttpRequest()
         xhr.open("GET", url)
         xhr.timeout = 25000
-        xhr.setRequestHeader("Authorization", "Bearer " + p.accessToken)
+        xhr.setRequestHeader("Authorization", "Bearer " + authToken)
         xhr.setRequestHeader("Accept", "application/json")
         xhr.setRequestHeader("Content-Type", "application/json")
+        // Bypass any HTTP cache that may have stored pre-relogin 401s (B033)
+        xhr.setRequestHeader("Cache-Control", "no-cache")
+        xhr.setRequestHeader("Pragma", "no-cache")
         xhr.setRequestHeader("x-grok-client-version", "0.2.93")
         xhr.setRequestHeader("x-grok-client-surface", "grok-build")
 
@@ -1521,17 +1558,40 @@ Item {
         var idx = findProfileIndex(profileId)
         if (idx < 0) return
         var p = profiles[idx]
-        if (!p || p.grokFetchGen !== gen) return
-        patch.grokPending = Math.max(0, (p.grokPending || 2) - 1)
+        if (!p || p.grokFetchGen !== gen || p.grokFinalized) return
+
+        // Only the leg that completes the pair claims finalization (avoids
+        // double applyUsageResult if updateProfile re-enters on property notify)
+        var defDone = !!(patch.grokDefaultSettled || p.grokDefaultSettled)
+        var credDone = !!(patch.grokCreditsSettled || p.grokCreditsSettled)
+        var claimFinalize = defDone && credDone && !p.grokFinalized
+        if (claimFinalize) {
+            // Claim on the live row immediately so reentrant finishGrokPart
+            // (property-notify during updateProfile) cannot finalize twice
+            p.grokFinalized = true
+            patch.grokFinalized = true
+        }
+        patch.grokPending = (defDone && credDone) ? 0 : ((defDone || credDone) ? 1 : 2)
         updateProfile(idx, patch)
+
+        if (!claimFinalize) return
+
         idx = findProfileIndex(profileId)
         if (idx < 0) return
-        var cur = profiles[idx]
-        if (!cur || cur.grokPending > 0) return
-        p = cur
-        if (p.grokAuthFailed || p.grokDefaultStatus === 401 || p.grokDefaultStatus === 403) {
-            noteAuthFailure(idx, tr("Token expired"), tokenSnapshot)
-            return
+        p = profiles[idx]
+        if (!p || p.grokFetchGen !== gen) return
+
+        // Auth: default or credits 401/403 after both legs settled
+        if (p.grokAuthFailed || p.grokDefaultStatus === 401 || p.grokDefaultStatus === 403
+                || p.grokCreditsStatus === 401 || p.grokCreditsStatus === 403) {
+            // Monthly body present → partial success (show mo; next refresh retries credits)
+            // Shared-token case: either both fail auth or neither does.
+            if (!p.grokDefaultBody) {
+                noteAuthFailure(idx, tr("Token expired"), tokenSnapshot)
+                return
+            }
+            console.log("Claude Usage: grok partial — credits auth fail, monthly ok", profileId,
+                        "default=", p.grokDefaultStatus, "credits=", p.grokCreditsStatus)
         }
         if (p.grokDefaultStatus === 429) {
             noteRateLimited(idx)
@@ -1551,9 +1611,20 @@ Item {
             return
         }
         try {
-            var result = QP.parseGrok(p.grokDefaultBody, p.grokCreditsBody)
+            var creditsBody = p.grokCreditsBody
+            if (!creditsBody) {
+                console.log("Claude Usage: grok credits missing/failed", profileId,
+                            "status=", p.grokCreditsStatus,
+                            "timeout=", !!p.grokCreditsFromTimeout,
+                            "— applying monthly only; next refresh retries credits")
+            } else {
+                console.log("Claude Usage: grok dual-fetch ok", profileId,
+                            "default=", p.grokDefaultStatus, "credits=", p.grokCreditsStatus)
+            }
+            var result = QP.parseGrok(p.grokDefaultBody, creditsBody)
             applyUsageResult(idx, result)
         } catch (e) {
+            console.log("Claude Usage: grok parse error", e)
             updateProfile(idx, { loading: false, error: "Parse error", lastFetchMs: Date.now() })
         }
     }
@@ -1747,8 +1818,15 @@ Item {
                     opencodeSlot: auth.opencodeSlot || prof.opencodeSlot,
                     planName: auth.planName || prof.planName
                 }
-                // Token/credential changed → lift auto-refresh suspension (B029)
-                if (auth.token && auth.token !== prof.lastFailedToken) {
+                // Clear auth failure when token rotated, or on any successful manual
+                // credential reload so dual-fetch always re-runs after re-login (B029/B033)
+                var wasManual = !!prof.credLoadManual
+                var clearAuth = false
+                if (auth.token) {
+                    if (wasManual || auth.token !== prof.lastFailedToken)
+                        clearAuth = true
+                }
+                if (clearAuth) {
                     var clear = clearFailureStatePatch()
                     authPatch.authFailCount = clear.authFailCount
                     authPatch.authSuspended = clear.authSuspended
@@ -1756,6 +1834,7 @@ Item {
                     authPatch.lastFailedToken = clear.lastFailedToken
                     authPatch.backoffMultiplier = clear.backoffMultiplier
                 }
+                authPatch.credLoadManual = false
                 updateProfile(idx, authPatch)
                 if (!auth.token) {
                     noteAuthFailure(idx, tr("Not logged in"), "")
@@ -1763,6 +1842,7 @@ Item {
                     return
                 }
                 // Suspended with unchanged token: re-probe creds only, skip usage API (B029)
+                // Manual path already cleared suspension/lastFailedToken above when token present.
                 prof = profiles[idx]
                 if (prof.authSuspended && auth.token === prof.lastFailedToken) {
                     updateProfile(idx, {

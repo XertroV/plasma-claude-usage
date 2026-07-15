@@ -230,15 +230,21 @@ function parseGrok(defaultBody, creditsBody) {
     else
         periodMs = MS_7D
 
+    // Weekly / period product usage from ?format=credits (session UI slot).
+    // When credits body is present with a period but no percentages, still emit
+    // a 0% period row so dual-fetch success after token refresh shows both mo
+    // and 7d (B033). Products without any usage field (e.g. bare "Api") are skipped.
     var weeklyPct = null
     var products = creditsCfg.productUsage || creditsCfg.product_usage || []
     if (products && products.length) {
         for (var i = 0; i < products.length; i++) {
             var prod = products[i]
             var name = prod.product || "product"
-            var pct = prod.usagePercent != null ? Number(prod.usagePercent)
-                    : (prod.usage_percent != null ? Number(prod.usage_percent) : null)
-            if (pct == null || isNaN(pct)) continue
+            var rawPct = prod.usagePercent != null ? prod.usagePercent
+                       : (prod.usage_percent != null ? prod.usage_percent : null)
+            if (rawPct == null) continue
+            var pct = Number(rawPct)
+            if (isNaN(pct)) continue
             var short = name === "GrokBuild" ? "build" : name
             var disp = periodLabel + "/" + short
             if (weeklyPct === null) {
@@ -254,7 +260,14 @@ function parseGrok(defaultBody, creditsBody) {
                     : (creditsCfg.credit_usage_percent != null ? Number(creditsCfg.credit_usage_percent) : null)
         if (overall != null && !isNaN(overall)) {
             r.windows.push(QC.makeWindow("session", periodLabel, overall, periodEnd, periodMs, "primary", true))
+            weeklyPct = overall
         }
+    }
+    // Credits response present with a billing period but no usage fields (some
+    // accounts omit productUsage at 0%) → still show the period row at 0%.
+    if (weeklyPct === null && creditsBody && (period || creditsCfg.billingPeriodEnd || creditsCfg.billing_period_end)) {
+        r.windows.push(QC.makeWindow("session", periodLabel, 0, periodEnd, periodMs, "primary", true))
+        weeklyPct = 0
     }
 
     var monthEnd = defaultCfg.billingPeriodEnd ? QC.parseResetMs(defaultCfg.billingPeriodEnd) : 0
