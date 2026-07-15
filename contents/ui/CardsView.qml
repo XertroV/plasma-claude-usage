@@ -23,6 +23,7 @@ Item {
     property var i18n: null
 
     signal detailRequested(var profile)
+    signal refreshRequested(var profile)
 
     function tr(t) { return i18n ? i18n.tr(t) : t }
 
@@ -81,6 +82,7 @@ Item {
                     return Math.max(minWidth, w)
                 }
                 onDetailRequested: function(p) { cardsRoot.detailRequested(p) }
+                onRefreshRequested: function(p) { cardsRoot.refreshRequested(p) }
             }
         }
 
