@@ -9,6 +9,33 @@ var MS_10D = 10 * MS_DAY
 var MS_45D = 45 * MS_DAY
 
 /**
+ * Expand ~/ $HOME ${HOME} to an absolute path using a resolved home directory (B006).
+ * Returns "" if home-relative and homeDir is empty. Never returns a string meant for
+ * unquoted shell use — callers must still shellQuote.
+ */
+function expandToAbsolute(path, homeDir) {
+    if (!path) return ""
+    var p = String(path).trim()
+    if (!p) return ""
+    if (p === "~") {
+        return homeDir ? String(homeDir) : ""
+    }
+    if (p.indexOf("~/") === 0) {
+        if (!homeDir) return ""
+        return String(homeDir).replace(/\/+$/, "") + "/" + p.substring(2)
+    }
+    if (p.indexOf("${HOME}") === 0) {
+        if (!homeDir) return ""
+        return String(homeDir).replace(/\/+$/, "") + p.substring(7)
+    }
+    if (p.indexOf("$HOME") === 0) {
+        if (!homeDir) return ""
+        return String(homeDir).replace(/\/+$/, "") + p.substring(5)
+    }
+    return p
+}
+
+/**
  * Normalize ~/ and $HOME forms for path comparison (B010).
  * Does not require a resolved home directory — maps user-relative prefixes
  * to a stable "$HOME/..." token and absolute /home|Users/user/... to the same tail.

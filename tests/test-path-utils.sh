@@ -62,6 +62,23 @@ def default_cred_path(provider, config_dir):
         "kimi": d,
     }.get(provider, d)
 
+def expand_to_absolute(path, home):
+    if not path:
+        return ""
+    p = str(path).strip()
+    if p == "~":
+        return home or ""
+    if p.startswith("~/"):
+        return (home.rstrip("/") + "/" + p[2:]) if home else ""
+    if p.startswith("${HOME}"):
+        return (home.rstrip("/") + p[7:]) if home else ""
+    if p.startswith("$HOME"):
+        return (home.rstrip("/") + p[5:]) if home else ""
+    return p
+
+def shell_quote(path):
+    return "'" + str(path).replace("'", "'\\''") + "'"
+
 # B010 cases
 assert paths_equal("~/.claude/.credentials.json", "/home/xertrov/.claude/.credentials.json")
 assert paths_equal("$HOME/.codex/auth.json", "/home/me/.codex/auth.json")
@@ -74,6 +91,17 @@ assert default_cred_path("codex", "/home/me/.codex-work") == "/home/me/.codex-wo
 assert default_cred_path("grok", "/home/me/.grok-3") == "/home/me/.grok-3/auth.json"
 assert default_cred_path("minimax", "/home/me/.mmx") == "/home/me/.mmx/config.json"
 assert default_cred_path("claude", "/home/me/.claude/.credentials.json") == "/home/me/.claude/.credentials.json"
+
+# B006: expand then quote — injection becomes a literal path, not shell metachar
+home = "/home/me"
+evil = expand_to_absolute("$HOME/foo; rm -rf /", home)
+assert evil == "/home/me/foo; rm -rf /"
+q = shell_quote(evil)
+assert q.startswith("'") and q.endswith("'")
+assert "; rm" in q  # inside quotes — shell will not execute
+assert expand_to_absolute("~/x", home) == "/home/me/x"
+assert expand_to_absolute("~/x", "") == ""
+assert expand_to_absolute("/abs/path", "") == "/abs/path"
 
 print("path utils ok")
 PY
