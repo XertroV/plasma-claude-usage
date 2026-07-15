@@ -1,13 +1,17 @@
 ---
+claimed_at: "2026-07-15T05:22:57Z"
+claimed_by: grok-pirfl
+completed_at: null
 complexity: medium
 created_at: "2026-07-15T04:47:54Z"
 depends_on: []
 estimate_hours: 1
 id: B026
 priority: high
-status: pending
+started_at: "2026-07-15T05:22:57Z"
+status: in_progress
 tags: []
 title: grok-2 profile stuck reloading (likely OAuth/expired token)
-updated_at: "2026-07-15T04:47:54Z"
+updated_at: "2026-07-15T05:22:57Z"
 ---
 The grok-2 profile has been trying to reload but this is probably an OAuth/expired token issue.

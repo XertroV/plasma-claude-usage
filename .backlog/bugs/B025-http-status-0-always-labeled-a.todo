@@ -1,17 +1,18 @@
 ---
+claimed_at: "2026-07-15T05:22:57Z"
+claimed_by: grok-pirfl
+completed_at: null
 complexity: low
 created_at: "2026-07-15T04:43:52Z"
 depends_on: []
 estimate_hours: 0.5
 id: B025
 priority: low
-status: pending
-tags:
-    - ux
-    - ProfileController
-    - xhr
+started_at: "2026-07-15T05:22:57Z"
+status: in_progress
+tags: []
 title: HTTP status 0 always labeled as timeout in non-Grok usage path
-updated_at: "2026-07-15T04:43:52Z"
+updated_at: "2026-07-15T05:22:57Z"
 ---
 ## Problem
 `settleUsage` maps any `status === 0` to `API error (timeout)`. Network failures, aborts, and CORS-like failures also report status 0, so the UI mislabels them.
