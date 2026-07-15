@@ -19,7 +19,10 @@ Rectangle {
     signal detailRequested(var profile)
 
     readonly property var primaries: QC.primaryWindows(profile)
-    readonly property bool loading: !!(profile && profile.loading)
+    // Any in-flight fetch (refresh or first load)
+    readonly property bool refreshing: !!(profile && profile.loading)
+    // First load only — no windows yet. Never collapse existing rows while refreshing.
+    readonly property bool initialLoad: refreshing
             && !(profile.windows && profile.windows.length)
     readonly property bool hasError: !!(profile && profile.error)
     readonly property string title: profile
@@ -44,7 +47,7 @@ Rectangle {
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
 
-        // Header: name · plan tip · banked · detail
+        // Header: name · spinner · banked · detail  (spinner replaces the old "…" body line)
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
@@ -64,9 +67,21 @@ Rectangle {
                         var bits = [cardRoot.title]
                         if (profile && profile.planName) bits.push(profile.planName)
                         if (profile && profile.configDir) bits.push(profile.configDir)
+                        if (cardRoot.refreshing) bits.push("Refreshing…")
                         return bits.join("\n")
                     }
                 }
+            }
+
+            // Always-allocated spinner slot so refresh never reflows the card
+            PlasmaComponents.BusyIndicator {
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                Layout.alignment: Qt.AlignVCenter
+                opacity: cardRoot.refreshing ? 1 : 0
+                running: cardRoot.refreshing
+                Accessible.name: "Refreshing"
+                Accessible.ignored: !cardRoot.refreshing
             }
 
             PlasmaComponents.Label {
@@ -114,7 +129,7 @@ Rectangle {
             maximumLineCount: 2
         }
 
-        // Primary quota rows or skeleton
+        // Primary quota rows or first-load skeleton (stale rows kept while refreshing)
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
@@ -122,13 +137,12 @@ Rectangle {
 
             Repeater {
                 model: {
-                    if (cardRoot.loading || (!primaries || primaries.length === 0)) {
-                        // Two skeleton rows while loading / empty
-                        if (cardRoot.loading || (profile && !profile.lastFetchMs && !hasError))
-                            return [null, null]
-                        return []
-                    }
-                    return primaries
+                    if (primaries && primaries.length > 0)
+                        return primaries
+                    // First load / empty: two skeleton rows (not on mid-refresh with data)
+                    if (cardRoot.initialLoad || (profile && !profile.lastFetchMs && !hasError))
+                        return [null, null]
+                    return []
                 }
                 QuotaRow {
                     required property var modelData
@@ -137,18 +151,13 @@ Rectangle {
                     nowMs: cardRoot.nowMs
                     mode: modelData ? "data" : "skeleton"
                     compact: true
+                    // Slight dim while refreshing existing data
+                    opacity: (modelData && cardRoot.refreshing) ? 0.75 : 1
                     colorMode: modelData
                         ? QC.colorModeForWindow(modelData, sessionColorMode, weeklyColorMode)
                         : sessionColorMode
                 }
             }
-        }
-
-        PlasmaComponents.Label {
-            visible: loading && (!primaries || primaries.length === 0)
-            text: "…"
-            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-            color: Kirigami.Theme.disabledTextColor
         }
     }
 }

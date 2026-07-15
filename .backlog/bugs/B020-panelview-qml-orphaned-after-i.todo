@@ -1,17 +1,19 @@
 ---
+claimed_at: "2026-07-15T05:49:45Z"
+claimed_by: cli-user
+completed_at: "2026-07-15T05:49:45Z"
 complexity: low
 created_at: "2026-07-15T04:40:48Z"
 depends_on: []
+duration_minutes: 0.0051144803
 estimate_hours: 0.25
 id: B020
 priority: low
-status: pending
-tags:
-    - nit
-    - dead-code
-    - PanelView
+started_at: "2026-07-15T05:49:45Z"
+status: done
+tags: []
 title: PanelView.qml orphaned after inline compact rewrite
-updated_at: "2026-07-15T04:40:48Z"
+updated_at: "2026-07-15T05:49:45Z"
 ---
 ## Problem
 `PanelView.qml` is orphaned after the inline compact UI rewrite; plan checklist still marks it as the panel path. Dead code increases confusion during future edits.

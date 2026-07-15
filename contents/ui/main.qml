@@ -32,7 +32,7 @@ PlasmoidItem {
     property string loadingCountText: ""
     property var profileList: []
     property int lastSyncedEpoch: -1
-    // Mirrored for fullRepresentation / ExpandedView (sibling ids do not resolve there)
+    // Mirrored for fullRepresentation / CardsView (sibling ids do not resolve there)
     property int dataEpoch: 0
     property double nowMs: Date.now()
     property string lastGlobalUpdate: ""

@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-15T05:49:00Z"
 claimed_by: cli-user
-completed_at: null
+completed_at: "2026-07-15T05:49:45Z"
 complexity: medium
 created_at: "2026-07-15T05:39:30Z"
 depends_on: []
+duration_minutes: 0.7551028639
 estimate_hours: 1
 id: B030
 priority: high
 started_at: "2026-07-15T05:49:00Z"
-status: in_progress
+status: done
 tags: []
 title: When a card is refreshing, it adds a line saying just '...' which causes things to reflow (bad). We should just show a spinner next to the profile name instead.
-updated_at: "2026-07-15T05:49:00Z"
+updated_at: "2026-07-15T05:49:45Z"
 ---
 
 When a card is refreshing, it adds a line saying just '...' which causes things to reflow (bad). We should just show a spinner next to the profile name instead.
