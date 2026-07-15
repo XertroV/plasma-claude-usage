@@ -312,45 +312,77 @@ PlasmoidItem {
         }
     }
 
-    // Panel is the product — cards with primary quotas (no day-to-day popup)
-    preferredRepresentation: compactRepresentation
-    switchWidth: Kirigami.Units.gridUnit * 20
-    switchHeight: Kirigami.Units.gridUnit * 8
+    // Cards are the product for both panel (compact) and main/windowed (full).
+    preferredRepresentation: fullRepresentation
+    switchWidth: Kirigami.Units.gridUnit * 12
+    switchHeight: Kirigami.Units.gridUnit * 6
 
     compactRepresentation: Item {
         id: compactRoot
 
-        readonly property int cardMinW: Kirigami.Units.gridUnit * 11
-        readonly property int hPad: Kirigami.Units.smallSpacing
-        readonly property int vPad: Kirigami.Units.smallSpacing
-        readonly property var cards: root.enabledProfiles()
-        readonly property int maxCards: 8
-
-        // Implicit size drives Plasma panel allocation
-        implicitWidth: Math.max(Kirigami.Units.gridUnit * 12,
-                                cardFlow.implicitWidth + hPad * 2 + iconCol.implicitWidth + Kirigami.Units.smallSpacing)
-        implicitHeight: Math.max(Kirigami.Units.iconSizes.medium,
-                                 cardFlow.implicitHeight + vPad * 2)
+        implicitWidth: Math.max(Kirigami.Units.gridUnit * 14, cardsCompact.implicitWidth + Kirigami.Units.smallSpacing * 2)
+        implicitHeight: Math.max(Kirigami.Units.iconSizes.medium, cardsCompact.implicitHeight + Kirigami.Units.smallSpacing)
 
         Layout.minimumWidth: Kirigami.Units.gridUnit * 10
         Layout.minimumHeight: Kirigami.Units.iconSizes.medium
         Layout.preferredWidth: implicitWidth
         Layout.preferredHeight: implicitHeight
 
-        RowLayout {
-            id: usageRow
+        CardsView {
+            id: cardsCompact
             anchors.fill: parent
-            anchors.margins: 0
+            anchors.margins: Kirigami.Units.smallSpacing / 2
+            profiles: root.profileList
+            dataEpoch: root.dataEpoch
+            nowMs: root.nowMs
+            sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
+            weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+            showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
+            isLoading: root.isLoading
+            loadingText: root.loadingCountText
+            maxCards: 8
+            cardMinWidth: Kirigami.Units.gridUnit * 10
+            fillWidth: true
+            i18n: root.i18nObj
+            onDetailRequested: function(p) { root.openDetailFor(p) }
+        }
+    }
+
+    // Main widget surface (plasmawindowed, desktop widget, expanded): card list
+    fullRepresentation: Item {
+        id: fullRoot
+
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 16
+        Layout.minimumHeight: Kirigami.Units.gridUnit * 10
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 28
+        // Prefer content-sized height; avoid a huge empty body when few card rows
+        Layout.preferredHeight: Math.min(
+            Kirigami.Units.gridUnit * 28,
+            Math.max(Kirigami.Units.gridUnit * 12,
+                     cardsFull.implicitHeight + Kirigami.Units.gridUnit * 6))
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 48
+        clip: true
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.smallSpacing
 
-            ColumnLayout {
-                id: iconCol
-                Layout.alignment: Qt.AlignTop
-                spacing: Kirigami.Units.smallSpacing / 2
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
                 Kirigami.Icon {
                     Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
                     Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
                     source: Qt.resolvedUrl("../icons/claude.svg")
+                }
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: root.i18nObj ? root.i18nObj.tr("AI Usage") : "AI Usage"
+                    font.bold: true
+                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
+                    elide: Text.ElideRight
                 }
                 PlasmaComponents.Label {
                     visible: root.isLoading
@@ -358,120 +390,67 @@ PlasmoidItem {
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                     color: Kirigami.Theme.disabledTextColor
                 }
-            }
-
-            // Auto-flow account cards
-            Flow {
-                id: cardFlow
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.alignment: Qt.AlignTop | Qt.AlignLeft
-                spacing: Kirigami.Units.smallSpacing
-                flow: Flow.LeftToRight
-
-                Repeater {
-                    model: {
-                        var _ = root.dataEpoch
-                        return compactRoot.cards
-                    }
-                    AccountCard {
-                        required property var modelData
-                        required property int index
-                        visible: index < compactRoot.maxCards
-                        profile: modelData
-                        nowMs: root.nowMs
-                        sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
-                        weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
-                        showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
-                        minWidth: compactRoot.cardMinW
-                        // Fill width efficiently when only one card, or when row has room
-                        width: {
-                            var avail = cardFlow.width
-                            if (avail <= 0) return minWidth
-                            var cols = Math.max(1, Math.floor((avail + cardFlow.spacing) / (minWidth + cardFlow.spacing)))
-                            var n = Math.min(compactRoot.cards.length, compactRoot.maxCards)
-                            if (n <= 1) return Math.max(minWidth, avail)
-                            var w = Math.floor((avail - cardFlow.spacing * (cols - 1)) / cols)
-                            return Math.max(minWidth, w)
-                        }
-                        onDetailRequested: function(p) { root.openDetailFor(p) }
-                    }
-                }
-
-                // Ghost cards while discovering with no profiles yet
-                Repeater {
-                    model: (compactRoot.cards.length === 0 && root.isLoading) ? 2 : 0
-                    AccountCard {
-                        profile: ({ displayName: "…", loading: true, windows: [], error: "" })
-                        nowMs: root.nowMs
-                        minWidth: compactRoot.cardMinW
-                        width: Math.max(minWidth, Math.floor((cardFlow.width - cardFlow.spacing) / 2) || minWidth)
-                    }
-                }
-
-                PlasmaComponents.Label {
-                    visible: compactRoot.cards.length > compactRoot.maxCards
-                    text: "+" + (compactRoot.cards.length - compactRoot.maxCards) + " more"
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.disabledTextColor
-                }
-
-                PlasmaComponents.Label {
-                    visible: compactRoot.cards.length === 0 && !root.isLoading
-                    text: root.i18nObj ? root.i18nObj.tr("No profiles") : "No profiles"
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.disabledTextColor
-                }
-            }
-        }
-    }
-
-    // Popup deprioritized: short help + open detail / configure
-    fullRepresentation: Item {
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 14
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 8
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: Kirigami.Units.largeSpacing
-            spacing: Kirigami.Units.smallSpacing
-
-            PlasmaComponents.Label {
-                Layout.fillWidth: true
-                text: root.i18nObj ? root.i18nObj.tr("AI Usage") : "AI Usage"
-                font.bold: true
-            }
-            PlasmaComponents.Label {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: root.i18nObj
-                      ? root.i18nObj.tr("Quotas are shown on the panel. Open details for paths and extra limits.")
-                      : "Quotas are shown on the panel. Open details for paths and extra limits."
-                color: Kirigami.Theme.disabledTextColor
-            }
-            RowLayout {
                 PlasmaComponents.Button {
-                    text: root.i18nObj ? root.i18nObj.tr("Details…") : "Details…"
-                    onClicked: root.openDetailFor(null)
-                }
-                PlasmaComponents.Button {
-                    text: root.i18nObj ? root.i18nObj.tr("Refresh") : "Refresh"
                     icon.name: "view-refresh"
+                    text: root.i18nObj ? root.i18nObj.tr("Refresh") : "Refresh"
                     onClicked: {
                         if (root.usageController) root.usageController.refreshAll()
                     }
                 }
+            }
+
+            PlasmaComponents.ScrollView {
+                id: fullScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+
+                CardsView {
+                    id: cardsFull
+                    width: fullScroll.availableWidth
+                    // Height follows flow content so ScrollView can scroll when many cards
+                    height: Math.max(implicitHeight, fullScroll.availableHeight > 0
+                                     ? fullScroll.availableHeight : implicitHeight)
+                    profiles: root.profileList
+                    dataEpoch: root.dataEpoch
+                    nowMs: root.nowMs
+                    sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
+                    weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+                    showBankedBadge: Plasmoid.configuration.showBankedBadge !== false
+                    isLoading: root.isLoading
+                    loadingText: ""
+                    maxCards: 12
+                    cardMinWidth: Kirigami.Units.gridUnit * 11
+                    fillWidth: true
+                    i18n: root.i18nObj
+                    onDetailRequested: function(p) { root.openDetailFor(p) }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                    text: {
+                        if (root.lastGlobalUpdate && root.lastGlobalUpdate !== "")
+                            return (root.i18nObj ? root.i18nObj.tr("Updated:") : "Updated:") + " " + root.lastGlobalUpdate
+                        if (root.isLoading)
+                            return root.i18nObj ? root.i18nObj.tr("Loading...") : "Loading..."
+                        return ""
+                    }
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: Kirigami.Theme.disabledTextColor
+                }
                 PlasmaComponents.Button {
-                    text: root.i18nObj ? root.i18nObj.tr("Configure…") : "Configure…"
                     icon.name: "configure"
+                    text: root.i18nObj ? root.i18nObj.tr("Configure…") : "Configure…"
                     onClicked: {
                         try { Plasmoid.internalAction("configure").trigger() } catch (e) {}
                     }
                 }
             }
-            Item { Layout.fillHeight: true }
         }
     }
 
