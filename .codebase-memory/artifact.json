@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "b2057187f96f2ba909585df0de461f8279b74b14",
+    "indexed_at": "2026-07-13T21:51:10Z",
+    "project": "plasma-claude-usage",
+    "nodes": 302,
+    "edges": 442,
+    "original_size": 1310720,
+    "compressed_size": 44022,
+    "compression_level": 9
+}
