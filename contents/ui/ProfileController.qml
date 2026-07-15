@@ -1675,6 +1675,8 @@ Item {
                     QC.updateTimePercent(wins[j], nowMs)
             }
         }
+        // B018 intent (notify UI of tick) is satisfied without profiles reassignment
+        // or dataEpoch bump — B027 keeps tooltips stable; UI binds to nowMs instead.
     }
 
     function dueProfiles() {
