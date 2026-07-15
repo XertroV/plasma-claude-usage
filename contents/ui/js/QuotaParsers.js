@@ -2,6 +2,7 @@
 .import "QuotaCommon.js" as QC
 
 var MS_5H = 5 * 3600000
+var MS_1D = 86400000
 var MS_7D = 7 * 86400000
 var MS_30D = 30 * 86400000
 
@@ -202,13 +203,31 @@ function parseGrok(defaultBody, creditsBody) {
     var periodType = (period && period.type) ? String(period.type) : "USAGE_PERIOD_TYPE_WEEKLY"
     var periodLabel = "7d"
     var upper = periodType.toUpperCase()
-    if (upper.indexOf("MONTH") >= 0) periodLabel = "mo"
-    else if (upper.indexOf("DAY") >= 0 && upper.indexOf("WEEK") < 0) periodLabel = "1d"
+    // Match quotas period_type_label order: WEEK before DAY (WEEKDAY etc.).
+    // Note: "DAILY" does not contain substring "DAY" — check both.
+    if (upper.indexOf("WEEK") >= 0) periodLabel = "7d"
+    else if (upper.indexOf("MONTH") >= 0) periodLabel = "mo"
+    else if (upper.indexOf("DAILY") >= 0 || upper.indexOf("DAY") >= 0) periodLabel = "1d"
+    // else unknown stays "7d"
 
+    var periodStart = period && period.start ? QC.parseResetMs(period.start) : 0
+    if (!periodStart && (creditsCfg.billingPeriodStart || creditsCfg.billing_period_start))
+        periodStart = QC.parseResetMs(creditsCfg.billingPeriodStart || creditsCfg.billing_period_start)
     var periodEnd = period && period.end ? QC.parseResetMs(period.end) : 0
-    if (!periodEnd && creditsCfg.billingPeriodEnd) periodEnd = QC.parseResetMs(creditsCfg.billingPeriodEnd)
-    var periodMs = MS_7D
-    if (periodLabel === "mo") periodMs = MS_30D
+    if (!periodEnd && (creditsCfg.billingPeriodEnd || creditsCfg.billing_period_end))
+        periodEnd = QC.parseResetMs(creditsCfg.billingPeriodEnd || creditsCfg.billing_period_end)
+
+    // Prefer measured duration from start/end when valid; else type constants.
+    // B014: daily must not keep MS_7D (breaks time-percent/pace).
+    var periodMs = 0
+    if (periodStart > 0 && periodEnd > periodStart)
+        periodMs = periodEnd - periodStart
+    else if (periodLabel === "mo")
+        periodMs = MS_30D
+    else if (periodLabel === "1d")
+        periodMs = MS_1D
+    else
+        periodMs = MS_7D
 
     var weeklyPct = null
     var products = creditsCfg.productUsage || creditsCfg.product_usage || []
