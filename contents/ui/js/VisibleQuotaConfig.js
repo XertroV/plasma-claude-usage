@@ -1,9 +1,10 @@
 .pragma library
 
 /**
- * Pure visible-quota configuration core (I004 / P1.M4.E1.T001).
+ * Pure visible-quota configuration core (I004 / P1.M4.E1.T001–T002).
  *
- * Public runtime seam:
+ * Public seam:
+ *   configuration({ persisted, event }) -> { persisted, changed, providers }
  *   specFor(profile, persisted) -> opaqueSpec
  *   apply(windows, opaqueSpec)  -> clonedWindows
  *
@@ -15,7 +16,100 @@
  *
  * Opaque runtime spec:
  *   { provider: string, policy: <policy> }
+ *
+ * Editor document (private):
+ *   { maps: { provider: { windowId: boolean } } }
  */
+
+// ---------------------------------------------------------------------------
+// Private: built-in KCM catalogue (order is part of the projection contract)
+// ---------------------------------------------------------------------------
+
+// Labels match configGeneral.qml; IDs/defaultVisible match QuotaParsers.js.
+var CATALOG = [
+    {
+        provider: "claude",
+        title: "Claude",
+        windows: [
+            { id: "5h", label: "5h", defaultVisible: true },
+            { id: "weekly", label: "7d", defaultVisible: true },
+            { id: "weekly_fable", label: "Fable", defaultVisible: false },
+            { id: "weekly_oracle", label: "Oracle", defaultVisible: false },
+            { id: "weekly_opus", label: "Opus", defaultVisible: false },
+            { id: "weekly_sonnet", label: "Sonnet", defaultVisible: false },
+            { id: "weekly_oauth_apps", label: "OAuth apps", defaultVisible: false }
+        ]
+    },
+    {
+        provider: "codex",
+        title: "Codex",
+        windows: [
+            { id: "session", label: "session", defaultVisible: true },
+            { id: "weekly", label: "weekly", defaultVisible: true },
+            { id: "credits", label: "credits $", defaultVisible: false },
+            { id: "extra_spk_7d", label: "Spark / 7d", defaultVisible: false }
+        ]
+    },
+    {
+        provider: "grok",
+        title: "Grok",
+        windows: [
+            { id: "session", label: "session (product %)", defaultVisible: true },
+            { id: "weekly", label: "mo ($ allowance)", defaultVisible: true },
+            { id: "on_demand", label: "on-demand", defaultVisible: false }
+        ]
+    },
+    {
+        provider: "zai",
+        title: "Z.ai",
+        windows: [
+            { id: "session", label: "5h", defaultVisible: true },
+            { id: "weekly", label: "mo", defaultVisible: true }
+        ]
+    },
+    {
+        provider: "minimax",
+        title: "MiniMax",
+        windows: [
+            { id: "5h/general", label: "5h/general", defaultVisible: true },
+            { id: "wk/general", label: "7d/general", defaultVisible: true }
+        ]
+    },
+    {
+        provider: "kimi",
+        title: "Kimi",
+        windows: [
+            { id: "session", label: "5h", defaultVisible: true },
+            { id: "weekly", label: "7d", defaultVisible: true },
+            { id: "total_quota", label: "total quota", defaultVisible: false }
+        ]
+    }
+]
+
+// ---------------------------------------------------------------------------
+// Public: KCM configuration projection / edit
+// ---------------------------------------------------------------------------
+
+/**
+ * Project and optionally edit visible-window configuration for the KCM.
+ *
+ * Inspection (no event): changed:false, original persisted text, checkbox projection.
+ * Supported events: set | resetProvider | resetAll.
+ * Writes are never eager — only accepted events return changed:true + serialised form.
+ */
+function configuration(input) {
+    var request = input || {}
+    var original = persistedText(request.persisted)
+    var editor = editorDocument(decodePersisted(request.persisted))
+    if (request.event !== undefined) {
+        var edited = applyEditorEvent(editor, request.event)
+        if (!edited.accepted)
+            return configurationResult(editor, original, false)
+        editor = edited.document
+        return configurationResult(editor, serializeEditor(editor), true)
+    }
+    return configurationResult(editor, original, false)
+}
 
 // ---------------------------------------------------------------------------
 // Public: runtime
@@ -55,6 +149,264 @@ function apply(windows, spec) {
         out.push(copy)
     }
     return out
+}
+
+// ---------------------------------------------------------------------------
+// Private: editor document, events, serialisation
+// ---------------------------------------------------------------------------
+
+function catalogForProvider(provider) {
+    for (var i = 0; i < CATALOG.length; i++) {
+        if (CATALOG[i].provider === provider)
+            return CATALOG[i]
+    }
+    return null
+}
+
+/**
+ * Convert private runtime policy into a KCM editor document of per-provider
+ * Boolean maps. Reproduces current KCM hydrateVisibleByProvider migration.
+ */
+function editorDocument(policy) {
+    var maps = {}
+    if (!policy || typeof policy !== "object")
+        return { maps: maps }
+
+    if (policy.mode === "defaults")
+        return { maps: maps }
+
+    // Strict global allowlist → full known maps only when provider has a match
+    if (policy.mode === "strict") {
+        var listIds = policy.ids || {}
+        for (var pi = 0; pi < CATALOG.length; pi++) {
+            var cat = CATALOG[pi]
+            var pm = {}
+            var any = false
+            for (var wi = 0; wi < cat.windows.length; wi++) {
+                var wid = cat.windows[wi].id
+                var on = !!listIds[wid]
+                pm[wid] = on
+                if (on) any = true
+            }
+            if (any)
+                maps[cat.provider] = pm
+        }
+        return { maps: maps }
+    }
+
+    // Sparse global map → matching keys copied sparsely to relevant providers
+    if (policy.mode === "overrides") {
+        var gm = policy.values || {}
+        for (var gi = 0; gi < CATALOG.length; gi++) {
+            var gcat = CATALOG[gi]
+            var gpm = {}
+            var gany = false
+            for (var gwi = 0; gwi < gcat.windows.length; gwi++) {
+                var gid = gcat.windows[gwi].id
+                if (gm.hasOwnProperty(gid)) {
+                    gpm[gid] = !!gm[gid]
+                    gany = true
+                }
+            }
+            if (gany)
+                maps[gcat.provider] = gpm
+        }
+        return { maps: maps }
+    }
+
+    // Per-provider strict / sparse maps (unknown providers retained)
+    if (policy.mode === "providers") {
+        var bp = policy.byProvider || {}
+        for (var prov in bp) {
+            if (!bp.hasOwnProperty(prov)) continue
+            var entry = bp[prov]
+            if (!entry || typeof entry !== "object") continue
+            var m = {}
+            if (entry.mode === "strict") {
+                var ids = entry.ids || {}
+                for (var k in ids) {
+                    if (!ids.hasOwnProperty(k)) continue
+                    if (ids[k]) m[k] = true
+                }
+                // Materialize missing known IDs as false (unchecked)
+                var cat2 = catalogForProvider(prov)
+                if (cat2) {
+                    for (var ci = 0; ci < cat2.windows.length; ci++) {
+                        var cid = cat2.windows[ci].id
+                        if (!m.hasOwnProperty(cid))
+                            m[cid] = false
+                    }
+                }
+            } else if (entry.mode === "overrides") {
+                var values = entry.values || {}
+                for (var k2 in values) {
+                    if (!values.hasOwnProperty(k2)) continue
+                    m[k2] = !!values[k2]
+                }
+            } else {
+                continue
+            }
+            if (objectKeyCount(m) > 0)
+                maps[prov] = m
+        }
+        return { maps: maps }
+    }
+
+    return { maps: maps }
+}
+
+/**
+ * Apply a KCM edit event to an editor document immutably.
+ * Returns { accepted, document? }. Malformed events → accepted:false.
+ */
+function applyEditorEvent(editor, event) {
+    if (!event || typeof event !== "object" || Array.isArray(event))
+        return { accepted: false }
+
+    var type = event.type
+    if (type === "set") {
+        var provider = event.provider
+        var windowId = event.windowId
+        if (typeof provider !== "string" || !provider)
+            return { accepted: false }
+        if (windowId === undefined || windowId === null || windowId === "")
+            return { accepted: false }
+
+        var maps = cloneEditorMaps(editor.maps)
+        var cat = catalogForProvider(provider)
+        var m = maps[provider] ? cloneOwn(maps[provider]) : {}
+
+        // First edit for an empty provider map: seed all known catalogue defaults
+        if (objectKeyCount(m) === 0 && cat) {
+            for (var i = 0; i < cat.windows.length; i++) {
+                var w = cat.windows[i]
+                m[w.id] = w.defaultVisible !== false
+            }
+        }
+        m[windowId] = !!event.visible
+
+        // Collapse to defaults when every known ID matches and no unknown keys
+        if (cat && providerMapMatchesDefaults(m, cat))
+            delete maps[provider]
+        else
+            maps[provider] = m
+
+        return { accepted: true, document: { maps: maps } }
+    }
+
+    if (type === "resetProvider") {
+        var rp = event.provider
+        if (typeof rp !== "string" || !rp)
+            return { accepted: false }
+        var maps2 = cloneEditorMaps(editor.maps)
+        delete maps2[rp]
+        return { accepted: true, document: { maps: maps2 } }
+    }
+
+    if (type === "resetAll")
+        return { accepted: true, document: { maps: {} } }
+
+    return { accepted: false }
+}
+
+function providerMapMatchesDefaults(m, cat) {
+    if (!cat || !m) return true
+    for (var i = 0; i < cat.windows.length; i++) {
+        var w = cat.windows[i]
+        var def = w.defaultVisible !== false
+        if (m.hasOwnProperty(w.id)) {
+            if (!!m[w.id] !== def) return false
+        }
+    }
+    // Extra keys not in catalog count as customization
+    for (var k in m) {
+        if (!m.hasOwnProperty(k)) continue
+        var known = false
+        for (var j = 0; j < cat.windows.length; j++) {
+            if (cat.windows[j].id === k) { known = true; break }
+        }
+        if (!known) return false
+    }
+    return true
+}
+
+function serializeEditor(editor) {
+    var out = {}
+    var anyProv = false
+    var maps = (editor && editor.maps) ? editor.maps : {}
+    for (var prov in maps) {
+        if (!maps.hasOwnProperty(prov)) continue
+        var m = maps[prov]
+        if (!m || typeof m !== "object") continue
+        var pm = {}
+        var anyKey = false
+        for (var k in m) {
+            if (!m.hasOwnProperty(k)) continue
+            pm[k] = !!m[k]
+            anyKey = true
+        }
+        if (anyKey) {
+            out[prov] = pm
+            anyProv = true
+        }
+    }
+    return anyProv ? JSON.stringify(out) : "[]"
+}
+
+function configurationResult(editor, persisted, changed) {
+    var maps = (editor && editor.maps) ? editor.maps : {}
+    var providers = []
+    for (var i = 0; i < CATALOG.length; i++) {
+        var cat = CATALOG[i]
+        var map = maps[cat.provider]
+        var windows = []
+        for (var j = 0; j < cat.windows.length; j++) {
+            var w = cat.windows[j]
+            var checked
+            if (map && map.hasOwnProperty(w.id))
+                checked = !!map[w.id]
+            else
+                checked = w.defaultVisible !== false
+            windows.push({
+                id: w.id,
+                label: w.label,
+                checked: checked
+            })
+        }
+        providers.push({
+            provider: cat.provider,
+            title: cat.title,
+            canReset: !!(map && objectKeyCount(map) > 0),
+            windows: windows
+        })
+    }
+    return {
+        persisted: persisted,
+        changed: !!changed,
+        providers: providers
+    }
+}
+
+function cloneEditorMaps(src) {
+    var out = {}
+    if (!src) return out
+    for (var prov in src) {
+        if (!src.hasOwnProperty(prov)) continue
+        out[prov] = cloneOwn(src[prov])
+    }
+    return out
+}
+
+function persistedText(persisted) {
+    if (persisted === undefined || persisted === null)
+        return "[]"
+    if (typeof persisted === "string")
+        return persisted
+    try {
+        return JSON.stringify(persisted)
+    } catch (e) {
+        return "[]"
+    }
 }
 
 // ---------------------------------------------------------------------------
