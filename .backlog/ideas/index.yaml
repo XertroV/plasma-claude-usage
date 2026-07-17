@@ -17,8 +17,15 @@ ideas:
       status: done
       tags: []
       title: Deepen the profile refresh transaction
-    - file: I003-deepen-the-profile-registry.todo
+    - complexity: high
+      depends_on: []
+      estimate_hours: 10
+      file: I003-deepen-the-profile-registry.todo
       id: I003
+      priority: high
+      status: in_progress
+      tags: []
+      title: Deepen the profile registry
     - file: I004-deepen-visible-quota-configura.todo
       id: I004
     - file: I005-isolate-the-response-cache-pip.todo
