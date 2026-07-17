@@ -1130,7 +1130,7 @@ Item {
         if (!manual && isAutoRefreshHeld(p, Date.now())) return true
 
         var snapshot = cloneProfile(p)
-        // Providers.prepare uses profile.opencodeAccountIndex (was cfgValue in extractOpencodeAuth)
+        // Providers.prepare uses profile.opencodeAccountIndex for multi-account OpenCode slots
         var ocIdx = parseInt(cfgValue("opencodeAccountIndex", 0), 10)
         if (isNaN(ocIdx) || ocIdx < 0)
             ocIdx = 0
@@ -1373,7 +1373,7 @@ Item {
                         "error=", patch.error)
     }
 
-    // Legacy alias kept until Task 4/6 delete loadCredentials; delegates to transaction.
+    // Legacy alias kept until Task 6 deletes loadCredentials; delegates to transaction.
     // Returns true if a credential read was started (or skipped as held).
     // Returns false if caller should re-queue (busy / home not ready / already loading).
     function loadCredentials(idx, opts) {
@@ -1436,129 +1436,18 @@ Item {
         }
     }
 
-    function extractAuth(provider, creds, profile) {
-        var auth = { token: "", accountId: "", resourceUrl: "https://api.minimax.io", opencodeSlot: "", planName: "" }
-
-        if (provider === "claude") {
-            var oauth = creds.claudeAiOauth || {}
-            auth.token = oauth.accessToken || ""
-            var tier = oauth.rateLimitTier || "default_claude_pro"
-            var planMap = {
-                "default_claude_pro": "Pro",
-                "default_claude_max_5x": "Max 5x",
-                "default_claude_max_20x": "Max 20x"
-            }
-            auth.planName = planMap[tier] || tier
-        } else if (provider === "codex") {
-            var tokens = creds.tokens || {}
-            var openai = creds.openai || {}
-            auth.token = tokens.access_token || openai.access || ""
-            auth.accountId = tokens.account_id || openai.accountId || ""
-        } else if (provider === "grok") {
-            auth.token = pickGrokToken(creds)
-        } else if (provider === "minimax") {
-            if (creds.oauth && creds.oauth.access_token) {
-                auth.token = creds.oauth.access_token
-                auth.resourceUrl = creds.oauth.resource_url || creds.resource_url || "https://api.minimax.io"
-            } else if (typeof creds === "string" || (profile && profile.isFlatFile)) {
-                auth.token = String(creds).trim().split("\n")[0]
-            } else if (creds.key) {
-                auth.token = creds.key
-            }
-        } else if (provider === "zai") {
-            var zai = creds["zai-coding-plan"] || creds
-            auth.token = zai.key || (typeof creds === "string" ? String(creds).trim() : "")
-        } else if (provider === "kimi") {
-            auth.token = typeof creds === "string" ? String(creds).trim() : (creds.key || creds.access || "")
-        } else if (provider === "opencode") {
-            auth = extractOpencodeAuth(creds, profile)
-        }
-        return auth
-    }
-
-    function pickGrokToken(creds) {
-        var map = creds
-        if (creds.accounts && typeof creds.accounts === "object" && !Array.isArray(creds.accounts)) {
-            map = creds.accounts
-        }
-        var candidates = []
-        for (var k in map) {
-            if (!map.hasOwnProperty(k)) continue
-            var entry = map[k]
-            if (!entry || typeof entry !== "object") continue
-            var token = entry.key || entry.access_token || entry.token || ""
-            if (!token) continue
-            var expMs = entry.expires_at ? Date.parse(entry.expires_at) : NaN
-            var createMs = entry.create_time ? Date.parse(entry.create_time) : NaN
-            candidates.push({ key: token, expiresAt: isNaN(expMs) ? null : expMs, createTime: isNaN(createMs) ? null : createMs })
-        }
-        if (candidates.length === 0) return ""
-        var now = Date.now()
-        candidates.sort(function(a, b) {
-            var aFresh = a.expiresAt === null || a.expiresAt > now
-            var bFresh = b.expiresAt === null || b.expiresAt > now
-            if (aFresh !== bFresh) return aFresh ? -1 : 1
-            return (b.createTime || 0) - (a.createTime || 0)
-        })
-        return candidates[0].key
-    }
-
-    function extractOpencodeAuth(creds, profile) {
-        var auth = { token: "", accountId: "", opencodeSlot: "anthropic", planName: "OpenCode" }
-        // B007: honor cfg opencodeAccountIndex (settings ComboBox) for multi-account file
-        if (profile.profileKey === "anthropic-accounts" && creds.accounts && creds.accounts.length) {
-            var n = creds.accounts.length
-            var idx = parseInt(cfgValue("opencodeAccountIndex", 0), 10)
-            if (isNaN(idx) || idx < 0)
-                idx = 0
-            if (idx >= n)
-                idx = n - 1
-            var acct = creds.accounts[idx] || {}
-            auth.token = acct.access || ""
-            auth.opencodeSlot = "anthropic"
-            return auth
-        }
-        var priority = [
-            ["anthropic", "anthropic"],
-            ["openai", "openai"],
-            ["minimax-coding-plan", "minimax"],
-            ["zai-coding-plan", "zai"],
-            ["kimi-for-coding", "kimi"]
-        ]
-        for (var i = 0; i < priority.length; i++) {
-            var key = priority[i][0]
-            var slot = priority[i][1]
-            var sub = creds[key] || {}
-            var tok = sub.access || sub.key || ""
-            if (tok) {
-                auth.token = tok
-                auth.opencodeSlot = slot
-                if (slot === "openai") auth.accountId = sub.accountId || ""
-                return auth
-            }
-        }
-        return auth
-    }
-
+    // Cache path/envelope helper (I005 may relocate with the cache pipeline).
+    // Standard-provider auth/URL/parser policy lives in ProfileRefreshProviders.
     function effectiveProvider(profile) {
         if (profile.provider === "opencode") return profile.opencodeSlot || "anthropic"
         return profile.provider
     }
 
-    function usageUrl(profile) {
-        var p = effectiveProvider(profile)
-        if (p === "codex" || p === "openai") return "https://chatgpt.com/backend-api/wham/usage"
-        if (p === "zai") return "https://api.z.ai/api/monitor/usage/quota/limit"
-        if (p === "grok") return "https://cli-chat-proxy.grok.com/v1/billing"
-        if (p === "kimi") return "https://api.kimi.com/coding/v1/usages"
-        if (p === "minimax") return (profile.resourceUrl || "https://api.minimax.io") + "/v1/api/openplatform/coding_plan/remains"
-        return "https://api.anthropic.com/api/oauth/usage"
-    }
-
     /**
-     * Apply normalised usage + live visibility. Optional `patch` from the
-     * ProfileRefresh success transition carries loading/error/auth/backoff fields.
-     * Legacy callers (fetchUsage/fetchGrok until Task 4/5) omit patch.
+     * Apply normalised usage + live visibility/store adapter.
+     * Optional `patch` from the ProfileRefresh success transition carries
+     * loading/error/auth/backoff fields. Legacy Grok (until T005) omits patch.
+     * Does not select provider, classify status, compute retry, or parse JSON.
      */
     function applyUsageResult(idx, result, patch) {
         if (idx < 0 || idx >= profiles.length || !result) return
@@ -1606,109 +1495,7 @@ Item {
         console.log("Claude Usage: applyUsageResult idx=", idx, "windows=", windows.length, "primary=", primaryCount)
     }
 
-    function fetchUsage(idx) {
-        var p = profiles[idx]
-        if (!p || !p.accessToken) {
-            noteAuthFailure(idx, tr("Not logged in"), "")
-            return
-        }
-        var ep = effectiveProvider(p)
-        if (ep === "grok") {
-            fetchGrok(idx)
-            return
-        }
-
-        var url = usageUrl(p)
-        var epSlug = endpointSlugForProvider(ep)
-        // Snapshot identity for caching + stale-response guard (B008)
-        var profileId = p.id
-        var gen = allocFetchGen()
-        var tokenSnapshot = p.accessToken
-        var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
-        updateProfile(idx, { usageFetchGen: gen })
-
-        var settled = false
-        var xhr = new XMLHttpRequest()
-        xhr.open("GET", url)
-        xhr.timeout = 25000
-        xhr.setRequestHeader("Content-Type", "application/json")
-        if (ep === "zai") {
-            xhr.setRequestHeader("Authorization", p.accessToken)
-        } else {
-            xhr.setRequestHeader("Authorization", "Bearer " + p.accessToken)
-        }
-        if (ep === "claude" || ep === "anthropic") {
-            xhr.setRequestHeader("anthropic-beta", "oauth-2025-04-20")
-        } else if (ep === "codex" || ep === "openai") {
-            if (p.accountId) xhr.setRequestHeader("ChatGPT-Account-Id", p.accountId)
-        }
-
-        function resolveIdx() {
-            var curIdx = findProfileIndex(profileId)
-            if (curIdx < 0) return -1
-            var cur = profiles[curIdx]
-            if (!cur || cur.usageFetchGen !== gen) return -1
-            return curIdx
-        }
-
-        function settleUsage(status, responseText, fromTimeout) {
-            if (settled) return
-            settled = true
-            cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
-            var curIdx = resolveIdx()
-            if (curIdx < 0) return
-            var cur = profiles[curIdx]
-            if (status === 200) {
-                try {
-                    var data = JSON.parse(responseText || "")
-                    var result = emptyUsage()
-                    if (ep === "claude" || ep === "anthropic") result = QP.parseClaude(data)
-                    else if (ep === "codex" || ep === "openai") result = QP.parseCodex(data)
-                    else if (ep === "minimax") result = QP.parseMinimax(data)
-                    else if (ep === "zai") result = QP.parseZai(data)
-                    else if (ep === "kimi") result = QP.parseKimi(data)
-                    if (!result.planName && cur.planName) result.planName = cur.planName
-                    console.log("Claude Usage: API ok", ep, "windows=", (result.windows || []).length)
-                    applyUsageResult(curIdx, result)
-                } catch (e) {
-                    console.log("Claude Usage: parse error", e)
-                    updateProfile(curIdx, { loading: false, error: "Parse error", lastFetchMs: Date.now() })
-                }
-            } else if (status === 429) {
-                noteRateLimited(curIdx)
-            } else if (status === 401 || status === 403) {
-                noteAuthFailure(curIdx, tr("Token expired"), tokenSnapshot)
-            } else if (status === 0) {
-                // B025: only label timeout when ontimeout fired
-                var detail = fromTimeout ? "timeout" : "network error"
-                updateProfile(curIdx, {
-                    loading: false,
-                    error: tr("API error") + " (" + detail + ")",
-                    lastFetchMs: Date.now()
-                })
-            } else {
-                updateProfile(curIdx, {
-                    loading: false,
-                    error: tr("API error") + " (" + status + ")",
-                    lastFetchMs: Date.now()
-                })
-            }
-        }
-
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            settleUsage(xhr.status || 0, xhr.responseText || "", false)
-        }
-        xhr.ontimeout = function() {
-            settleUsage(0, "", true)
-        }
-        xhr.send()
-    }
-
-    function emptyUsage() {
-        return { planName: "", bankedResets: 0, windows: [] }
-    }
-
+    // Grok dual-fetch lifecycle retained until T005 moves it into the transaction.
     function fetchGrok(idx) {
         var p = profiles[idx]
         var profileId = p.id
