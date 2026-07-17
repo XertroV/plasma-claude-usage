@@ -1,7 +1,6 @@
 import QtQuick
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
-import "js/QuotaParsers.js" as QP
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
 import "js/ProfileRegistry.js" as Registry
@@ -30,7 +29,7 @@ Item {
 
     // Staggered refresh queue: [{ id, manual }, ...] — used by refresh-all and autoRefresh (B002)
     property var refreshQueue: []
-    // Monotonic fetch generation — never reset on merge, so stale XHR cannot collide (B008)
+    // Monotonic generation for ProfileRefresh transactions (stale async outcomes discarded)
     property int nextFetchGen: 1
     // Resolved $HOME for safe path expansion (B006) — never trust user path in shell
     property string homeDir: ""
@@ -476,7 +475,6 @@ Item {
             accountId: "",
             resourceUrl: "https://api.minimax.io",
             opencodeSlot: "",
-            usageFetchGen: 0,
             // Generic refresh generation for ProfileRefresh transaction (I002)
             refreshGeneration: 0,
             backoffMultiplier: 1,
@@ -742,28 +740,6 @@ Item {
         return "'" + String(path).replace(/'/g, "'\\''") + "'"
     }
 
-    function endpointSlugForProvider(ep) {
-        if (ep === "codex" || ep === "openai") return "wham-usage"
-        if (ep === "zai") return "quota-limit"
-        if (ep === "kimi") return "coding-usages"
-        if (ep === "minimax") return "coding-plan-remains"
-        if (ep === "grok") return "billing"
-        return "oauth-usage"
-    }
-
-    function grokEndpointSlug(url) {
-        if (String(url || "").indexOf("format=credits") >= 0)
-            return "billing-credits"
-        return "billing"
-    }
-    // B024: track in-flight write so a stuck executable engine cannot wedge the queue forever
-    // Original attempt + retries; drop after this many stalls (no infinite retry)
-    // B023: unique pending payload file names (separate from drain seq)
-    // Chunk size for staging payload to a temp file without putting the full
-    // body on a single Plasma executable argv (ARG_MAX + process-list leak).
-
-    // B024: executable engine never called onNewData — unstick busy and optionally retry once
-
     /**
      * Build a unique executable source that always shell-quotes the path (B006)
      * and embeds the profile id so onNewData cannot mis-attribute (B001).
@@ -795,17 +771,19 @@ Item {
     }
 
     /**
-     * I002 production entry: clone profile, allocate generation, run transaction.
-     * Returns false when the credential port cannot start (busy / home / path)
-     * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
-     */
-        /**
      * Thin cache port: forward settled exchange to LocalResponseCache.
+     * Transaction records each exchange exactly once (including later-stale gens).
      */
     function recordRefreshExchange(exchange) {
         responseCache.recordExchange(exchange)
     }
 
+    /**
+     * I002 production entry: clone profile, allocate generation, run transaction.
+     * Returns false when the credential port cannot start (busy / home / path)
+     * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
+     * Provider/auth/HTTP/retry/Grok aggregation live in ProfileRefresh, not here.
+     */
     function startProfileRefresh(idx, manual) {
         if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
@@ -1121,69 +1099,10 @@ Item {
                         "error=", patch.error)
     }
 
-    // Legacy alias kept until Task 4/6 delete loadCredentials; delegates to transaction.
-    // Returns true if a credential read was started (or skipped as held).
-    // Returns false if caller should re-queue (busy / home not ready / already loading).
-    function loadCredentials(idx, opts) {
-        opts = opts || {}
-        return startProfileRefresh(idx, !!opts.manual)
-    }
-
-    function noteAuthFailure(idx, errorText, tokenSnapshot) {
-        if (idx < 0 || idx >= profiles.length) return
-        var cur = profiles[idx]
-        var count = (cur.authFailCount || 0) + 1
-        var now = Date.now()
-        var patch = {
-            loading: false,
-            error: errorText || tr("Token expired"),
-            authFailCount: count,
-            lastFetchMs: now,
-            lastFailedToken: tokenSnapshot !== undefined ? tokenSnapshot : (cur.accessToken || "")
-        }
-        if (count >= maxAuthAutoAttempts) {
-            // Stop auto-refresh until manual refresh or credentials change (B026/B029)
-            patch.authSuspended = true
-            patch.autoRefreshHoldUntilMs = 0
-            console.log("Claude Usage: auth suspended after", count, "failures", cur.id)
-        } else {
-            patch.authSuspended = false
-            patch.autoRefreshHoldUntilMs = now + authRetryHoldMs
-            console.log("Claude Usage: auth hold", authRetryHoldMs, "ms after fail", count, cur.id)
-        }
-        updateProfile(idx, patch)
-    }
-
-    function noteRateLimited(idx) {
-        if (idx < 0 || idx >= profiles.length) return
-        var cur = profiles[idx]
-        var mult = (cur.backoffMultiplier || 1) * 2
-        var base = refreshIntervalMs(cur.provider)
-        var wait = Math.min(base * mult, maxBackoffIntervalMs)
-        // Cap stored mult so base*mult does not keep growing past the ceiling
-        var maxMult = Math.max(1, Math.ceil(maxBackoffIntervalMs / Math.max(base, 1)))
-        if (mult > maxMult) mult = maxMult
-        var now = Date.now()
-        updateProfile(idx, {
-            loading: false,
-            error: tr("Rate limited"),
-            backoffMultiplier: mult,
-            lastFetchMs: now,
-            autoRefreshHoldUntilMs: now + wait
-        })
-        console.log("Claude Usage: 429 backoff wait=", wait, "ms mult=", mult, cur.id)
-    }
-
-    function clearFailureStatePatch() {
-        return {
-            authFailCount: 0,
-            authSuspended: false,
-            autoRefreshHoldUntilMs: 0,
-            lastFailedToken: "",
-            backoffMultiplier: 1
-        }
-    }
-
+    /**
+     * Cache/metadata helper: map opencode profile rows to their concrete sub-provider.
+     * Retained for any non-transaction callers; I005 pipeline has its own copy for cache.
+     */
     function effectiveProvider(profile) {
         if (profile.provider === "opencode") return profile.opencodeSlot || "anthropic"
         return profile.provider
@@ -1193,7 +1112,8 @@ Item {
      * Apply normalised usage through the registry usageResult transition.
      * Optional `patch` carries loading/error/auth/backoff fields (never windows).
      * Visibility/time always run inside ProfileRegistry via the production adapter.
-     * Legacy callers (fetchUsage/fetchGrok) omit patch.
+     * Live refresh success uses applyRefreshTransition → registry usageResult directly;
+     * this helper remains the shared visibility/store adapter for other callers.
      */
     function applyUsageResult(idx, result, patch) {
         if (idx < 0 || idx >= profiles.length || !result) return
@@ -1207,15 +1127,14 @@ Item {
                     out[k] = patch[k]
             }
         } else {
-            var clear = clearFailureStatePatch()
             out.loading = false
             out.error = ""
             out.lastFetchMs = Date.now()
-            out.backoffMultiplier = clear.backoffMultiplier
-            out.authFailCount = clear.authFailCount
-            out.authSuspended = clear.authSuspended
-            out.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
-            out.lastFailedToken = clear.lastFailedToken
+            out.backoffMultiplier = 1
+            out.authFailCount = 0
+            out.authSuspended = false
+            out.autoRefreshHoldUntilMs = 0
+            out.lastFailedToken = ""
         }
         out.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
         if (out.lastFetchMs === undefined)
@@ -1248,9 +1167,6 @@ Item {
         console.log("Claude Usage: applyUsageResult id=", p.id,
                     "accepted=", accepted, "windows=", winCount)
     }
-
-
-
 
     // B027: only advance the clock. Do NOT reassign `profiles` (or bump dataEpoch).
     // Replacing the array every second forced CardsView/Repeaters to rebuild delegates,
@@ -1443,7 +1359,7 @@ Item {
         running: profiles.length > 0
         repeat: true
         onTriggered: {
-            // B002: enqueue due profiles and stagger; never burst loadCredentials
+            // B002: enqueue due profiles and stagger; never burst startProfileRefresh
             var due = controller.dueProfiles()
             for (var i = 0; i < due.length; i++)
                 controller.queueProfileRefresh(due[i], false)
