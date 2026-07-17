@@ -2,6 +2,7 @@ import QtQuick
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
 import "js/QuotaParsers.js" as QP
+import "js/VisibleQuotaConfig.js" as VQ
 
 Item {
     id: controller
@@ -223,30 +224,22 @@ Item {
     }
 
     /**
-     * Parse visibleWindowsJson (B034). Supports:
-     *  - [] / {} → provider defaults
-     *  - ["5h","weekly"] → legacy global allowlist
-     *  - {"claude":{"5h":true,"weekly":false}, ...} → per-provider overrides
+     * Production visibility adapter for I003 ProfileRegistry (and current controller
+     * apply paths until full registry wiring lands). Opaque specs from
+     * VisibleQuotaConfig; time percentages stay outside the configuration module.
      */
-    function visibleWindowsConfig() {
-        return QC.parseVisibleWindowsConfig(cfgValue("visibleWindowsJson", "[]"))
-    }
-
-    /** @deprecated Prefer visibilitySpecForProfile — kept for any residual callers */
-    function visibleWindowIds() {
-        var cfg = visibleWindowsConfig()
-        if (cfg.mode === "globalAllowlist") return cfg.globalAllowlist || []
-        return []
-    }
-
-    function visibilityKeyForProfile(profile) {
-        if (!profile) return ""
-        return QC.visibilityProviderKey(profile.provider, profile.opencodeSlot, profile.profileKey)
-    }
-
-    /** Live per-provider visibility spec (null = defaults). Always re-read from config. */
-    function visibilitySpecForProfile(profile) {
-        return QC.visibilitySpecForProvider(visibleWindowsConfig(), visibilityKeyForProfile(profile))
+    function registryVisibilityAdapter() {
+        return {
+            specFor: function(profile, persisted) {
+                return VQ.specFor(profile, persisted)
+            },
+            apply: function(windows, spec, nowMs) {
+                var projected = VQ.apply(windows, spec)
+                for (var i = 0; i < projected.length; i++)
+                    QC.updateTimePercent(projected[i], nowMs)
+                return projected
+            }
+        }
     }
 
     function refreshIntervalMs(provider) {
@@ -450,7 +443,9 @@ Item {
             }
         }
 
-        var visCfg = visibleWindowsConfig()
+        // Live visibility snapshot for this reconciliation (B034 / I004)
+        var visAdapter = registryVisibilityAdapter()
+        var rawVis = cfgValue("visibleWindowsJson", "[]")
         // Preserve fetch/auth state across rediscover / config reapply (B003)
         var prevById = {}
         for (var pi = 0; pi < profiles.length; pi++) {
@@ -463,8 +458,7 @@ Item {
             var meta = merged[i]
             // Keep hidden (disabled) profiles in the list with enabled:false so the
             // details page can unhide them without a full rediscover (B032).
-            var rowVis = QC.visibilitySpecForProvider(
-                visCfg, QC.visibilityProviderKey(meta.provider, meta.opencodeSlot || "", meta.profileKey || ""))
+            var rowVis = visAdapter.specFor(meta, rawVis)
             var row = blankProfileRow(meta, rowVis)
             row.enabled = isProfileEnabled(meta)
             if (meta.displayNameHint && row.displayName === QC.defaultProfileLabel(meta.provider, meta.profileKey))
@@ -489,14 +483,10 @@ Item {
                     if (prev[k] !== undefined)
                         row[k] = Array.isArray(prev[k]) ? prev[k].slice() : prev[k]
                 }
-                // Re-apply window visibility from per-provider config (B034)
-                row.visibleWindowSpec = QC.visibilitySpecForProvider(
-                    visCfg, visibilityKeyForProfile(row))
-                if (row.windows && row.windows.length) {
-                    row.windows = QC.applyVisibility(row.windows, row.visibleWindowSpec)
-                    for (var wi = 0; wi < row.windows.length; wi++)
-                        QC.updateTimePercent(row.windows[wi], nowMs)
-                }
+                // Re-apply window visibility from live config (B034 / I004 seam)
+                row.visibleWindowSpec = visAdapter.specFor(row, rawVis)
+                if (row.windows && row.windows.length)
+                    row.windows = visAdapter.apply(row.windows, row.visibleWindowSpec, nowMs)
             }
             rows.push(row)
         }
@@ -554,7 +544,9 @@ Item {
         // Soft (+ optional membership): names, window visibility, and enabled flags.
         // Membership is in-place so Hidden can toggle without a full rediscover (B032).
         // Always apply soft fields so multi-key Apply (On + rename) does not drop names.
-        var visCfg = visibleWindowsConfig()
+        // B034/I004: live visibility snapshot — not a stale global list or cached policy.
+        var visAdapter = registryVisibilityAdapter()
+        var rawVis = cfgValue("visibleWindowsJson", "[]")
         var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
         var patchMembership = !!opts.membership
         var rows = []
@@ -570,14 +562,9 @@ Item {
                 copy.displayName = names[p.id]
             }
             // else keep existing displayName (custom displayNameHint / prior label)
-            // B034: per-provider visibility from live config (not a stale global list)
-            copy.visibleWindowSpec = QC.visibilitySpecForProvider(
-                visCfg, visibilityKeyForProfile(copy))
-            if (copy.windows && copy.windows.length) {
-                copy.windows = QC.applyVisibility(copy.windows, copy.visibleWindowSpec)
-                for (var wi = 0; wi < copy.windows.length; wi++)
-                    QC.updateTimePercent(copy.windows[wi], nowMs)
-            }
+            copy.visibleWindowSpec = visAdapter.specFor(copy, rawVis)
+            if (copy.windows && copy.windows.length)
+                copy.windows = visAdapter.apply(copy.windows, copy.visibleWindowSpec, nowMs)
             if (patchMembership) {
                 var wasOn = p.enabled !== false
                 var nowOn = isProfileEnabled(p.id)
@@ -1353,12 +1340,12 @@ Item {
 
     function applyUsageResult(idx, result) {
         var p = profiles[idx]
-        // Always re-read config so Apply/toggles take effect on next fetch (B034)
-        var vis = visibilitySpecForProfile(p)
-        var windows = QC.applyVisibility(result.windows, vis)
-        for (var i = 0; i < windows.length; i++) {
-            QC.updateTimePercent(windows[i], nowMs)
-        }
+        // Always re-read live visibleWindowsJson before specFor (B034 / I004).
+        // Production adapter composes VQ visibility + QC.updateTimePercent.
+        var adapter = registryVisibilityAdapter()
+        var rawVis = cfgValue("visibleWindowsJson", "[]")
+        var vis = adapter.specFor(p, rawVis)
+        var windows = adapter.apply(result.windows || [], vis, nowMs)
         var clear = clearFailureStatePatch()
         updateProfile(idx, {
             loading: false,
