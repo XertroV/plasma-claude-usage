@@ -376,12 +376,7 @@ function parseZai(data) {
 function parseKimi(data) {
     var r = emptyResult()
     r.planName = "Kimi"
-    var usage = data.usage || {}
-    if (usage.limit > 0) {
-        r.windows.push(QC.makeWindow("weekly", "7d", ((usage.used || 0) / usage.limit) * 100,
-            QC.parseResetMs(usage.reset_at || usage.resetAt || usage.reset_time || usage.resetTime), MS_7D, "primary", true))
-    }
-
+    // Order matches other providers: shorter session window first, then weekly.
     var limits = data.limits || []
     var sessionLimit = null
     for (var i = 0; i < limits.length; i++) {
@@ -397,6 +392,12 @@ function parseKimi(data) {
         var detail = sessionLimit.detail || {}
         var pct = detail.limit > 0 ? ((detail.used || 0) / detail.limit) * 100 : 0
         r.windows.push(QC.makeWindow("session", "5h", pct, QC.parseResetMs(sessionLimit.reset_at || sessionLimit.resetAt), MS_5H, "primary", true))
+    }
+
+    var usage = data.usage || {}
+    if (usage.limit > 0) {
+        r.windows.push(QC.makeWindow("weekly", "7d", ((usage.used || 0) / usage.limit) * 100,
+            QC.parseResetMs(usage.reset_at || usage.resetAt || usage.reset_time || usage.resetTime), MS_7D, "primary", true))
     }
 
     var tq = data.totalQuota || {}
