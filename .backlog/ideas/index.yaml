@@ -5,7 +5,7 @@ ideas:
       file: I001-collapse-quota-presentation-po.todo
       id: I001
       priority: critical
-      status: in_progress
+      status: done
       tags: []
       title: Collapse quota presentation policy
     - file: I002-deepen-the-profile-refresh-tra.todo
