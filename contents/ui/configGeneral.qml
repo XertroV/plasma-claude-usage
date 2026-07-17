@@ -10,6 +10,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
+import "js/ProfileRegistry.js" as Registry
 
 KCM.SimpleKCM {
     id: configPage
@@ -34,6 +35,7 @@ KCM.SimpleKCM {
     property string cfg_enabledProfilesJson
     property string cfg_visibleWindowsJson
     property string cfg_customProfilesJson
+    property int cfg_customProfileNextId
     property bool cfg_cacheResponses
     property string cfg_responseCachePath
 
@@ -141,7 +143,6 @@ KCM.SimpleKCM {
     property var customProfiles: []
     property bool _hydrating: true
     property string customFormError: ""
-    property int customIdSeq: 1
 
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
@@ -156,6 +157,74 @@ KCM.SimpleKCM {
     function parseJsonSafe(raw, fallback) {
         if (!raw || raw === "") return fallback
         try { return JSON.parse(raw) } catch (e) { return fallback }
+    }
+
+    /**
+     * Snapshot of kcfg values consumed by Registry.editConfig().
+     * Visibility remains local until I004.
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfg_multiProfileMode,
+            provider: cfg_provider,
+            opencodeSubProvider: cfg_opencodeSubProvider,
+            credentialsPath: cfg_credentialsPath,
+            displayName: cfg_displayName,
+            discoverOnLoad: cfg_discoverOnLoad,
+            enabledProfilesJson: cfg_enabledProfilesJson || "[]",
+            profileDisplayNamesJson: cfg_profileDisplayNamesJson || "{}",
+            customProfilesJson: cfg_customProfilesJson || "[]",
+            customProfileNextId: cfg_customProfileNextId || 0,
+            visibleWindowsJson: cfg_visibleWindowsJson || "[]"
+        }
+    }
+
+    /** Discovered + custom ids for enablement serialisation. */
+    function knownProfileList() {
+        var list = []
+        var seen = {}
+        var i
+        for (i = 0; i < discoveredProfiles.length; i++) {
+            var did = discoveredProfiles[i] && discoveredProfiles[i].id
+            if (!did || seen[did]) continue
+            seen[did] = true
+            list.push({ id: did })
+        }
+        for (i = 0; i < customProfiles.length; i++) {
+            var c = customProfiles[i]
+            var cid = (c && c.id) || (c && c.provider ? (c.provider + "-custom-" + i) : "")
+            if (!cid || seen[cid]) continue
+            seen[cid] = true
+            list.push({ id: cid })
+        }
+        return list
+    }
+
+    /** Apply only patch keys returned by Registry.editConfig(). */
+    function applyRegistryConfigPatch(patch) {
+        if (!patch) return
+        if (patch.hasOwnProperty("enabledProfilesJson"))
+            cfg_enabledProfilesJson = patch.enabledProfilesJson
+        if (patch.hasOwnProperty("profileDisplayNamesJson"))
+            cfg_profileDisplayNamesJson = patch.profileDisplayNamesJson
+        if (patch.hasOwnProperty("customProfilesJson")) {
+            cfg_customProfilesJson = patch.customProfilesJson
+            customProfiles = parseJsonSafe(patch.customProfilesJson, []) || []
+        }
+        if (patch.hasOwnProperty("customProfileNextId"))
+            cfg_customProfileNextId = patch.customProfileNextId
+    }
+
+    /** Refresh working maps from current cfg strings after a registry edit. */
+    function refreshWorkingMapsFromCfg() {
+        nameMap = parseJsonSafe(cfg_profileDisplayNamesJson, {}) || {}
+        var en = parseJsonSafe(cfg_enabledProfilesJson, [])
+        var em = {}
+        if (en && en.length) {
+            for (var i = 0; i < en.length; i++)
+                em[en[i]] = true
+        }
+        enabledMap = em
     }
 
     function hydrateFromCfg() {
@@ -265,70 +334,35 @@ KCM.SimpleKCM {
     }
 
     function reloadEnabledMapFromCfg() {
-        var en = parseJsonSafe(cfg_enabledProfilesJson, [])
-        var em = {}
-        if (en && en.length) {
-            for (var i = 0; i < en.length; i++)
-                em[en[i]] = true
-        }
-        enabledMap = em
+        refreshWorkingMapsFromCfg()
     }
 
-    function pushEnabledJson() {
+    /**
+     * Re-project enabledProfilesJson through Registry after discovery expands
+     * the known set. No-ops while hydrating or before discovery yields rows
+     * (keeps existing allowlist until discovered profiles exist — prior KCM).
+     */
+    function reprojectEnabledJson() {
         if (_hydrating) return
-        // Empty = all discovered enabled
-        if (!discoveredProfiles.length) {
-            // Keep existing allowlist if we haven't discovered yet
-            return
-        }
-        var allOn = true
-        var list = []
-        for (var i = 0; i < discoveredProfiles.length; i++) {
-            var id = discoveredProfiles[i].id
-            var on = enabledMap[id] !== false
-            // When enabledMap is empty/object without keys, treat as all on
-            if (mapKeyCount(enabledMap) === 0)
-                on = true
-            else
-                on = !!enabledMap[id]
-            if (on) list.push(id)
-            else allOn = false
-        }
-        // Always include custom profiles unless explicitly disabled (B003/B009)
-        for (var c = 0; c < customProfiles.length; c++) {
-            var cid = customProfiles[c].id || (customProfiles[c].provider + "-custom-" + c)
-            var customOn = true
-            if (mapKeyCount(enabledMap) > 0)
-                customOn = enabledMap[cid] !== false
-            if (customOn) {
-                if (list.indexOf(cid) < 0) list.push(cid)
-            } else {
-                allOn = false
-            }
-        }
-        var totalSlots = discoveredProfiles.length + customProfiles.length
-        if (mapKeyCount(enabledMap) === 0 || (allOn && list.length >= totalSlots))
-            cfg_enabledProfilesJson = "[]"
-        else if (list.length === 0)
-            // Same all-off sentinel as ProfileController.setProfileHidden (B032)
-            cfg_enabledProfilesJson = JSON.stringify(["__none__"])
-        else
-            cfg_enabledProfilesJson = JSON.stringify(list)
-    }
-
-    function pushNamesJson() {
-        if (_hydrating) return
-        var out = {}
-        for (var k in nameMap) {
-            if (nameMap.hasOwnProperty(k) && nameMap[k])
-                out[k] = nameMap[k]
-        }
-        cfg_profileDisplayNamesJson = JSON.stringify(out)
+        // Keep existing allowlist if we haven't discovered yet
+        if (!discoveredProfiles.length) return
+        var ids = knownProfileList()
+        if (!ids.length) return
+        var first = ids[0].id
+        var on = isProfileEnabled(first)
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: ids,
+            event: { type: "setEnabled", profileId: first, enabled: on }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
 
     function pushVisibleJson() {
         if (_hydrating) return
         // Serialize only providers that have overrides; empty object → "[]" (defaults)
+        // Visible-quota editing stays local until I004.
         var out = {}
         var anyProv = false
         for (var prov in visibleByProvider) {
@@ -351,14 +385,12 @@ KCM.SimpleKCM {
         cfg_visibleWindowsJson = anyProv ? JSON.stringify(out) : "[]"
     }
 
-    function pushCustomJson() {
-        if (_hydrating) return
-        cfg_customProfilesJson = JSON.stringify(customProfiles || [])
-    }
-
     function isProfileEnabled(id) {
         if (!id) return true
         if (mapKeyCount(enabledMap) === 0) return true
+        // __none__ sentinel means all off
+        if (enabledMap["__none__"] && mapKeyCount(enabledMap) === 1)
+            return false
         return !!enabledMap[id]
     }
 
@@ -382,29 +414,25 @@ KCM.SimpleKCM {
     }
 
     function setProfileEnabled(id, on) {
-        var m = cloneMap(enabledMap)
-        // Materialize full map from discovered + custom if empty
-        if (mapKeyCount(m) === 0) {
-            for (var i = 0; i < discoveredProfiles.length; i++)
-                m[discoveredProfiles[i].id] = true
-            for (var c = 0; c < customProfiles.length; c++) {
-                var cid = customProfiles[c].id || (customProfiles[c].provider + "-custom-" + c)
-                m[cid] = true
-            }
-        }
-        m[id] = !!on
-        enabledMap = m
-        pushEnabledJson()
+        if (_hydrating || !id) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "setEnabled", profileId: id, enabled: !!on }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
 
     function setProfileName(id, name) {
-        var m = cloneMap(nameMap)
-        if (name && String(name).trim())
-            m[id] = String(name).trim()
-        else
-            delete m[id]
-        nameMap = m
-        pushNamesJson()
+        if (_hydrating || !id) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "setName", profileId: id, name: name }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
 
     /**
@@ -496,7 +524,8 @@ KCM.SimpleKCM {
             enabledMap = m
         }
         discoverStatus = discoveredProfiles.length + " " + tr("profile(s) found")
-        pushEnabledJson()
+        // Re-serialise through shared registry semantics with the expanded known set
+        reprojectEnabledJson()
     }
 
     function defaultLabelFor(meta) {
@@ -518,32 +547,20 @@ KCM.SimpleKCM {
             customFormError = tr("Provider is required")
             return
         }
-        var entry = {
-            provider: provider,
-            path: path
-        }
-        if (displayName) entry.displayName = displayName
-        if (credPath) {
-            entry.credPath = credPath
-        } else {
-            // B009: store resolved default so advanced JSON / controller agree
-            entry.credPath = QC.defaultCredPathForProvider(provider, path)
-        }
-        // Stable unique id — never reuse length after removals
-        entry.id = provider + "-custom-" + customIdSeq
-        customIdSeq = customIdSeq + 1
-        var next = customProfiles.slice()
-        next.push(entry)
-        customProfiles = next
-        // Seed enable map so customs survive partial allowlists
-        var em = cloneMap(enabledMap)
-        if (mapKeyCount(em) > 0)
-            em[entry.id] = true
-        enabledMap = em
-        pushCustomJson()
-        pushEnabledJson()
-        if (displayName)
-            setProfileName(entry.id, displayName)
+        if (_hydrating) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: {
+                type: "addCustom",
+                provider: provider,
+                path: path,
+                credPath: credPath,
+                displayName: displayName
+            }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
         customPathField.text = ""
         customNameField.text = ""
         customCredField.text = ""
@@ -551,10 +568,17 @@ KCM.SimpleKCM {
     }
 
     function removeCustomAt(index) {
-        var next = customProfiles.slice()
-        next.splice(index, 1)
-        customProfiles = next
-        pushCustomJson()
+        if (_hydrating) return
+        var entry = customProfiles[index]
+        if (!entry) return
+        var profileId = entry.id || (entry.provider + "-custom-" + index)
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "removeCustom", profileId: profileId }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
 
     function enableMultiMode(on) {
@@ -567,15 +591,7 @@ KCM.SimpleKCM {
 
     Component.onCompleted: {
         hydrateFromCfg()
-        // Bump custom id sequence past any existing suffix
-        for (var i = 0; i < customProfiles.length; i++) {
-            var id = String(customProfiles[i].id || "")
-            var m = id.match(/-custom-(\d+)$/)
-            if (m) {
-                var n = parseInt(m[1], 10)
-                if (n >= customIdSeq) customIdSeq = n + 1
-            }
-        }
+        // Durable allocator lives in cfg_customProfileNextId (Registry.editConfig).
         if (cfg_multiProfileMode !== false)
             runDiscover()
     }
