@@ -382,7 +382,7 @@ Add `tests/test-response-cache-pipeline.mjs` and drive the public `recordExchang
 - normal current completion, non-zero completion, and queue advancement;
 - 12-second watchdog, one retry with a fresh source, second-stall drop, and later-work recovery;
 - late completion after watchdog cannot double-drain;
-- sequence wrap for launch and pending names;
+- launch/pending sequence increments plus source-level assertions that their modulo constants remain 100,000 and 1,000,000;
 - stale-generation-labelled exchange is still recorded;
 - malformed/no-profile exchange logs/no-ops without damaging queued work.
 
