@@ -140,15 +140,21 @@ function isoOrNull(ms) {
 /**
  * Defaults for detection / classification.
  * graceMs: how close to expected resetAt counts as "natural".
- * minResetJumpMs: minimum forward movement of resetAt to count as a new window.
+ *   Default 20m so Claude's 15m poll + skew still looks natural; callers should
+ *   pass max(default, refreshIntervalMs + skew).
+ * minResetJumpMs: absolute floor for resetAt forward movement.
+ * minPeriodJumpFraction: require jump ≥ fraction of periodMs when period known
+ *   (avoids celebrating small provider clock corrections).
  * minUsageDropPercent: secondary signal when resetAt was missing previously.
  */
 function mergeOptions(options) {
     var o = options || {}
     return {
         nowMs: o.nowMs !== undefined ? Number(o.nowMs) : Date.now(),
-        graceMs: o.graceMs !== undefined ? Number(o.graceMs) : 5 * 60 * 1000,
+        graceMs: o.graceMs !== undefined ? Number(o.graceMs) : 20 * 60 * 1000,
         minResetJumpMs: o.minResetJumpMs !== undefined ? Number(o.minResetJumpMs) : 60 * 1000,
+        minPeriodJumpFraction: o.minPeriodJumpFraction !== undefined
+            ? Number(o.minPeriodJumpFraction) : 0.25,
         minUsageDropPercent: o.minUsageDropPercent !== undefined
             ? Number(o.minUsageDropPercent) : 5
     }
@@ -175,6 +181,25 @@ function classifyKind(prev, nowMs, graceMs) {
 }
 
 /**
+ * Minimum forward jump of resetAt that counts as a new period.
+ * When periodMs is known, require a substantial fraction of the period so a
+ * few-minute provider clock correction does not celebrate a false reset.
+ */
+function requiredResetJumpMs(prev, next, opts) {
+    var floor = opts.minResetJumpMs > 0 ? opts.minResetJumpMs : 60 * 1000
+    var period = Number(next && next.periodMs) || Number(prev && prev.periodMs) || 0
+    var frac = opts.minPeriodJumpFraction
+    if (!(frac > 0))
+        frac = 0.25
+    if (period > 0) {
+        var need = Math.floor(period * frac)
+        if (need > floor)
+            return need
+    }
+    return floor
+}
+
+/**
  * Did this window roll to a new quota period between prev and next?
  */
 function isWindowReset(prev, next, opts) {
@@ -187,9 +212,12 @@ function isWindowReset(prev, next, opts) {
     var nextUsage = Number(next.usagePercent) || 0
     var drop = prevUsage - nextUsage
     var significantDrop = drop >= opts.minUsageDropPercent
+    var jump = nextReset - prevReset
+    var needJump = requiredResetJumpMs(prev, next, opts)
 
-    // Strongest signal: reset timestamp advanced to a new window end.
-    if (prevReset > 0 && nextReset > 0 && (nextReset - prevReset) >= opts.minResetJumpMs)
+    // Strongest signal: reset timestamp advanced by a period-scale jump.
+    // Does not require a usage drop (second poll may already show ~0%).
+    if (prevReset > 0 && nextReset > 0 && jump >= needJump)
         return true
 
     // First time we learn a resetAt after usage collapsed (e.g. provider
@@ -198,6 +226,7 @@ function isWindowReset(prev, next, opts) {
         return true
 
     // Soft signal: large drop to near-zero with any forward reset movement.
+    // Keeps detection when periodMs is missing/wrong but usage clearly rolled.
     if (significantDrop && nextUsage < 5 && nextReset > prevReset && nextReset > 0)
         return true
 
@@ -226,15 +255,19 @@ function detectResets(input) {
         nowMs: input.nowMs,
         graceMs: input.graceMs,
         minResetJumpMs: input.minResetJumpMs,
+        minPeriodJumpFraction: input.minPeriodJumpFraction,
         minUsageDropPercent: input.minUsageDropPercent
     })
     if (input.options) {
         var extra = mergeOptions(input.options)
-        opts.graceMs = input.graceMs !== undefined ? opts.graceMs : extra.graceMs
-        opts.minResetJumpMs = input.minResetJumpMs !== undefined
-            ? opts.minResetJumpMs : extra.minResetJumpMs
-        opts.minUsageDropPercent = input.minUsageDropPercent !== undefined
-            ? opts.minUsageDropPercent : extra.minUsageDropPercent
+        if (input.graceMs === undefined)
+            opts.graceMs = extra.graceMs
+        if (input.minResetJumpMs === undefined)
+            opts.minResetJumpMs = extra.minResetJumpMs
+        if (input.minPeriodJumpFraction === undefined)
+            opts.minPeriodJumpFraction = extra.minPeriodJumpFraction
+        if (input.minUsageDropPercent === undefined)
+            opts.minUsageDropPercent = extra.minUsageDropPercent
         if (input.nowMs === undefined)
             opts.nowMs = extra.nowMs
     }

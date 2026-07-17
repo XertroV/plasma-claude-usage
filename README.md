@@ -58,7 +58,7 @@ kpackagetool6 -t Plasma/Applet -i .
 
 ## How It Works
 
-The widget reads your Claude Code OAuth credentials from `~/.claude/.credentials.json` and calls the Anthropic usage API directly. No data is stored or sent anywhere else.
+The widget reads OAuth credentials from local files (e.g. `~/.claude/.credentials.json`) and calls each provider's usage API directly. Tokens are never written to the response/reset cache. Optional local caches under `~/.cache/plasma-claude-usage/` store API response envelopes and quota-reset events for debugging.
 
 ### API Endpoint
 

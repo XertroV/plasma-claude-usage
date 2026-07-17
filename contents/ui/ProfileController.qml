@@ -113,6 +113,23 @@ Item {
     }
 
     /**
+     * Grace window for "natural" reset classification: at least one full poll
+     * interval plus skew so Claude's default 15m refresh is not marked late.
+     */
+    function resetClassifyGraceMs(profile) {
+        var base = 20 * 60 * 1000
+        var interval = 0
+        try {
+            interval = refreshIntervalMs(profile && profile.provider)
+        } catch (e) {
+            interval = 0
+        }
+        // interval + 2m skew, never below the 20m floor
+        var fromPoll = (interval > 0 ? interval : 0) + 2 * 60 * 1000
+        return fromPoll > base ? fromPoll : base
+    }
+
+    /**
      * After an accepted usageResult: detect window resets, celebrate, log.
      * Batches multi-window resets into one notification; logs one file per window.
      */
@@ -125,7 +142,8 @@ Item {
             prevWindows: prevWindows,
             nextWindows: nextWindows,
             profile: profile,
-            nowMs: Date.now()
+            nowMs: Date.now(),
+            graceMs: resetClassifyGraceMs(profile)
         })
         if (!result || !result.events || !result.events.length)
             return
@@ -170,12 +188,13 @@ Item {
         for (var i = 0; i < envelopes.length; i++) {
             var cmd = QuotaReset.buildLogCommand(settings, envelopes[i], envelopes[i].observedAtMs)
             if (!cmd) continue
-            // Unique sourceName so concurrent profile resets do not collide.
-            var src = "RESET_LOG=" + String(envelopes[i].profileId || "p")
+            // B006: uniqueness tag is shell no-op with fully quoted payload;
+            // never interpolate raw profileId/windowId into unquoted shell words.
+            var tag = "RESET_LOG=" + String(envelopes[i].profileId || "p")
                     + ":" + String(envelopes[i].windowId || "w")
                     + ":" + String(envelopes[i].observedAtMs || Date.now())
                     + ":" + i
-                    + " " + cmd
+            var src = ": " + shellQuote(tag) + "; " + cmd
             try {
                 resetLogWriter.connectSource(src)
             } catch (e) {

@@ -21,6 +21,7 @@ const QR = loadQmlJs(
         "buildLogCommand",
         "classifyKind",
         "isWindowReset",
+        "requiredResetJumpMs",
         "cacheRoot",
         "slug",
         "shellQuote"
@@ -203,6 +204,67 @@ function win(id, usage, resetAtMs, periodMs, label) {
     assert.equal(r.events.length, 0)
 }
 
+// --- small resetAt clock correction (90s) must not celebrate -----------------
+{
+    const prev = [win("5h", 50, NOW + MS_5H, MS_5H)]
+    const next = [win("5h", 49, NOW + MS_5H + 90_000, MS_5H)]
+    const r = QR.detectResets({
+        prevWindows: prev,
+        nextWindows: next,
+        profile: { id: "drift", provider: "claude" },
+        nowMs: NOW
+    })
+    assert.equal(r.events.length, 0, "90s resetAt drift is not a period roll")
+}
+
+// --- period-scale jump with already-zero usage still counts ------------------
+{
+    const prev = [win("5h", 0, NOW, MS_5H)]
+    const next = [win("5h", 0, NOW + MS_5H, MS_5H)]
+    const r = QR.detectResets({
+        prevWindows: prev,
+        nextWindows: next,
+        profile: { id: "z", provider: "claude" },
+        nowMs: NOW,
+        graceMs: 20 * 60 * 1000
+    })
+    assert.equal(r.events.length, 1)
+    assert.equal(r.events[0].kind, "natural")
+}
+
+// --- Claude 15m poll lag still natural with 20m grace ------------------------
+{
+    const expected = NOW - 12 * 60 * 1000 // observed 12m after expected
+    const prev = [win("5h", 90, expected, MS_5H)]
+    const next = [win("5h", 0, expected + MS_5H, MS_5H)]
+    const r = QR.detectResets({
+        prevWindows: prev,
+        nextWindows: next,
+        profile: { id: "lag", provider: "claude" },
+        nowMs: NOW,
+        graceMs: 20 * 60 * 1000
+    })
+    assert.equal(r.events.length, 1)
+    assert.equal(r.events[0].kind, "natural", "12m poll lag within 20m grace")
+    assert.equal(r.events[0].unexpected, false)
+}
+
+// --- truly late: multi-interval overdue --------------------------------------
+{
+    const expected = NOW - 45 * 60 * 1000
+    const prev = [win("5h", 90, expected, MS_5H)]
+    const next = [win("5h", 0, expected + MS_5H, MS_5H)]
+    const r = QR.detectResets({
+        prevWindows: prev,
+        nextWindows: next,
+        profile: { id: "late", provider: "claude" },
+        nowMs: NOW,
+        graceMs: 20 * 60 * 1000
+    })
+    assert.equal(r.events[0].kind, "late")
+    assert.equal(r.events[0].unexpected, true)
+}
+
 // --- paths + log command -----------------------------------------------------
 {
     const env = QR.buildLogEnvelope({
@@ -235,8 +297,7 @@ function win(id, usage, resetAtMs, periodMs, label) {
     assert.match(cmd, /log-reset\.sh/)
     assert.match(cmd, /printf %s/)
     assert.match(cmd, /events\.jsonl/)
-    // shell-quoted payload must not embed unescaped single quotes from path issues
-    assert.ok(cmd.indexOf("bash '/opt/log-reset.sh'") >= 0 || cmd.indexOf("bash '/opt/log-reset.sh'") >= 0)
+    assert.ok(cmd.indexOf("bash '/opt/log-reset.sh'") >= 0)
 }
 
 // --- classifyKind unit -------------------------------------------------------

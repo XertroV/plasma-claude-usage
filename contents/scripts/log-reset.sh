@@ -90,7 +90,15 @@ if [[ -n "$JSONL_RAW" && "$JSONL_RAW" != "-" ]]; then
         umask 077
         # One JSON object per line; payload must already be a single line
         # (JSON.stringify does not emit raw newlines inside strings for our fields).
-        printf '%s\n' "$PAYLOAD" >>"$JSONL"
+        # flock serialises concurrent multi-profile reset writes.
+        if command -v flock >/dev/null 2>&1; then
+            (
+                flock 9
+                printf '%s\n' "$PAYLOAD" >>"$JSONL"
+            ) 9>>"$JSONL"
+        else
+            printf '%s\n' "$PAYLOAD" >>"$JSONL"
+        fi
     fi
 fi
 

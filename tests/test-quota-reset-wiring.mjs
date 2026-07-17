@@ -33,6 +33,11 @@ assert.match(controller, /resetNotificationComponent/)
 assert.match(controller, /resetLogWriter/)
 assert.match(controller, /cfgTruthy\("notifyOnQuotaReset"/)
 assert.match(controller, /cfgTruthy\("logQuotaResets"/)
+// B006: RESET_LOG tag must be shell-quoted (never raw profileId in unquoted words)
+assert.match(controller, /shellQuote\(tag\)/)
+assert.match(controller, /: " \+ shellQuote\(tag\)/)
+assert.match(controller, /resetClassifyGraceMs/)
+assert.match(controller, /graceMs:\s*resetClassifyGraceMs/)
 
 // Kcfg + KCM
 assert.match(mainXml, /name="notifyOnQuotaReset"/)
