@@ -3,6 +3,7 @@ import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
 import "js/QuotaParsers.js" as QP
 import "js/VisibleQuotaConfig.js" as VQ
+import "js/ProfileRefresh.js" as ProfileRefresh
 
 Item {
     id: controller
@@ -392,6 +393,8 @@ Item {
             grokCreditsFromTimeout: false,
             grokAuthFailed: false,
             usageFetchGen: 0,
+            // Generic refresh generation for ProfileRefresh transaction (I002)
+            refreshGeneration: 0,
             backoffMultiplier: 1,
             lastFetchMs: 0,
             authFailCount: 0,
@@ -474,7 +477,8 @@ Item {
                     "grokDefaultBody", "grokCreditsBody",
                     "grokDefaultStatus", "grokCreditsStatus",
                     "grokDefaultFromTimeout", "grokCreditsFromTimeout",
-                    "grokAuthFailed", "usageFetchGen", "backoffMultiplier", "lastFetchMs",
+                    "grokAuthFailed", "usageFetchGen", "refreshGeneration",
+                    "backoffMultiplier", "lastFetchMs",
                     "authFailCount", "authSuspended", "autoRefreshHoldUntilMs",
                     "lastFailedToken", "credLoadManual"
                 ]
@@ -755,8 +759,8 @@ Item {
                 skippedLoading = 0
                 continue
             }
-            // Only dequeue if loadCredentials accepted the job
-            if (!loadCredentials(idx, { manual: !!item.manual })) {
+            // Only dequeue if the refresh transaction accepted the job
+            if (!startProfileRefresh(idx, !!item.manual)) {
                 // Reader busy or row already loading — rotate to end
                 refreshQueue = refreshQueue.slice(1).concat([item])
                 skippedLoading++
@@ -1112,45 +1116,70 @@ Item {
         return n
     }
 
-    // Returns true if a credential read was started (or skipped as held).
-    // Returns false if caller should re-queue (busy / home not ready / already loading).
-    function loadCredentials(idx, opts) {
-        opts = opts || {}
-        var manual = !!opts.manual
+    /**
+     * I002 production entry: clone profile, allocate generation, run transaction.
+     * Returns false when the credential port cannot start (busy / home / path)
+     * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
+     */
+    function startProfileRefresh(idx, manual) {
         if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
         if (!p) return true
         // Avoid stacking concurrent loads for the same row (B001/B002)
         if (p.loading) return false
         if (!manual && isAutoRefreshHeld(p, Date.now())) return true
-        // Cap concurrent cats; map-by-sourceName is safe, but keep load gentle
+
+        var snapshot = cloneProfile(p)
+        // Providers.prepare uses profile.opencodeAccountIndex (was cfgValue in extractOpencodeAuth)
+        var ocIdx = parseInt(cfgValue("opencodeAccountIndex", 0), 10)
+        if (isNaN(ocIdx) || ocIdx < 0)
+            ocIdx = 0
+        snapshot.opencodeAccountIndex = ocIdx
+
+        var generation = allocFetchGen()
+        console.log("Claude Usage: startProfileRefresh", snapshot.id, snapshot.provider,
+                    "manual=", !!manual, "gen=", generation)
+
+        return ProfileRefresh.run({
+            profile: snapshot,
+            generation: generation,
+            manual: !!manual,
+            policy: {
+                authRetryHoldMs: authRetryHoldMs,
+                maxBackoffIntervalMs: maxBackoffIntervalMs,
+                maxAuthAutoAttempts: maxAuthAutoAttempts,
+                baseRefreshIntervalMs: refreshIntervalMs(snapshot.provider)
+            }
+        }, {
+            readCredentials: readRefreshCredentials,
+            requestHttp: requestRefreshHttp,
+            recordExchange: recordRefreshExchange,
+            now: function() { return Date.now() }
+        }, applyRefreshTransition)
+    }
+
+    /**
+     * Thin credential port: capacity / HOME / path / shell safety only.
+     * Stores sourceName → { profileId, generation, callback }; no provider policy.
+     */
+    function readRefreshCredentials(request, callback) {
+        if (!request || typeof callback !== "function")
+            return false
         if (pendingCredCount() >= maxCredInflight)
             return false
-        // Wait for HOME probe before expanding ~/ or $HOME paths (B006)
+
+        var rawPath = String(request.path || "")
         var needsHome = false
-        var rawPath = String(p.credPath || "")
         if (rawPath.indexOf("~/") === 0 || rawPath === "~"
                 || rawPath.indexOf("$HOME") === 0 || rawPath.indexOf("${HOME}") === 0)
             needsHome = true
         if (needsHome && !homeReady)
             return false
 
-        var cmd = catCommand(p.credPath, p.id)
+        var cmd = catCommand(request.path, request.profileId)
         if (!cmd)
             return false
 
-        var patch = { loading: true, error: "", credLoadManual: manual }
-        if (manual) {
-            // Manual refresh: lift suspension/holds so dual-fetch re-runs with
-            // freshly catted credentials after token renewal (B029/B033)
-            patch.authSuspended = false
-            patch.autoRefreshHoldUntilMs = 0
-        }
-        updateProfile(idx, patch)
-        p = profiles[idx]
-        console.log("Claude Usage: loadCredentials", p.id, p.provider, "manual=", manual, "cmd=", cmd)
-
-        // B001: key pending work by full sourceName → profile id (not array index)
         var map = {}
         var prev = credReader._pendingBySource
         if (prev) {
@@ -1158,10 +1187,198 @@ Item {
                 if (prev.hasOwnProperty(k)) map[k] = prev[k]
             }
         }
-        map[cmd] = p.id
+        // B001: key by full sourceName → request/callback (never array index)
+        map[cmd] = {
+            profileId: request.profileId,
+            generation: request.generation,
+            callback: callback
+        }
         credReader._pendingBySource = map
+        console.log("Claude Usage: readRefreshCredentials", request.profileId,
+                    "gen=", request.generation, "cmd=", cmd)
         credReader.connectSource(cmd)
         return true
+    }
+
+    /**
+     * Thin HTTP port: one XHR from a request spec, once-only settlement.
+     * No provider/status/JSON/auth/retry policy.
+     */
+    function requestRefreshHttp(request, callback) {
+        if (!request || typeof callback !== "function")
+            return
+        var method = request.method || "GET"
+        var url = request.url || ""
+        var headers = request.headers || {}
+        var timeoutMs = request.timeoutMs > 0 ? request.timeoutMs : 25000
+        var settled = false
+        var xhr = new XMLHttpRequest()
+        xhr.open(method, url)
+        xhr.timeout = timeoutMs
+        for (var h in headers) {
+            if (headers.hasOwnProperty(h) && headers[h] !== undefined && headers[h] !== null)
+                xhr.setRequestHeader(h, headers[h])
+        }
+
+        function settle(status, responseText, fromTimeout) {
+            if (settled) return
+            settled = true
+            callback({
+                key: request.key,
+                profileId: request.profileId,
+                generation: request.generation,
+                provider: request.provider,
+                opencodeSlot: request.opencodeSlot,
+                endpoint: request.endpoint,
+                url: url,
+                status: status || 0,
+                responseText: responseText || "",
+                fromTimeout: !!fromTimeout
+            })
+        }
+
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            settle(xhr.status || 0, xhr.responseText || "", false)
+        }
+        xhr.ontimeout = function() {
+            settle(0, "", true)
+        }
+        xhr.send()
+    }
+
+    /**
+     * Thin cache port: forward exchange metadata to existing cacheResponse().
+     * Fire-and-forget; refresh never waits for cache persistence.
+     */
+    function recordRefreshExchange(exchange) {
+        if (!exchange) return
+        var cacheProf = {
+            id: exchange.profileId || "",
+            provider: exchange.provider || "",
+            opencodeSlot: exchange.opencodeSlot || ""
+        }
+        cacheResponse(cacheProf, exchange.endpoint, exchange.url,
+                      exchange.status || 0, exchange.responseText || "")
+    }
+
+    /**
+     * Map transaction error metadata to existing translated UI strings.
+     */
+    function translateRefreshError(transition, fallback) {
+        var err = transition && transition.error ? transition.error : {}
+        var code = err.code || ""
+        if (code === "not_logged_in") return tr("Not logged in")
+        if (code === "token_expired") return tr("Token expired")
+        if (code === "rate_limited") return tr("Rate limited")
+        if (code === "timeout") return tr("API error") + " (timeout)"
+        if (code === "network") return tr("API error") + " (network error)"
+        if (code === "http") return tr("API error") + " (" + (err.status || 0) + ")"
+        if (code === "parse") return "Parse error"
+        if (code === "auth_suspended")
+            return fallback || tr("Token expired")
+        // Fallback: re-translate known English patches from ProfileRefresh.js
+        var msg = fallback !== undefined && fallback !== null ? String(fallback) : ""
+        if (msg === "Not logged in") return tr("Not logged in")
+        if (msg === "Token expired") return tr("Token expired")
+        if (msg === "Rate limited") return tr("Rate limited")
+        if (msg === "Parse error") return "Parse error"
+        if (msg.indexOf("API error (") === 0) {
+            var detail = msg.substring("API error (".length, msg.length - 1)
+            if (detail === "timeout") return tr("API error") + " (timeout)"
+            if (detail === "network error") return tr("API error") + " (network error)"
+            return tr("API error") + " (" + detail + ")"
+        }
+        return msg || tr("API error")
+    }
+
+    /**
+     * Mechanical store adapter for ProfileRefresh transitions.
+     * Resolves by stable profile ID + generation (never by mutable array index across async).
+     */
+    function applyRefreshTransition(transition) {
+        if (!transition || !transition.profileId)
+            return
+        var idx = findProfileIndex(transition.profileId)
+        if (idx < 0)
+            return
+        var p = profiles[idx]
+        if (!p)
+            return
+
+        if (transition.type === "started") {
+            var started = {}
+            var sp = transition.patch || {}
+            for (var sk in sp) {
+                if (sp.hasOwnProperty(sk))
+                    started[sk] = sp[sk]
+            }
+            started.refreshGeneration = transition.generation
+            updateProfile(idx, started)
+            return
+        }
+
+        // credentials + all terminal outcomes require a current generation
+        if (p.refreshGeneration !== transition.generation) {
+            console.log("Claude Usage: drop stale transition", transition.type,
+                        transition.profileId, "gen=", transition.generation,
+                        "cur=", p.refreshGeneration)
+            return
+        }
+
+        if (transition.type === "credentials") {
+            updateProfile(idx, transition.patch || {})
+            return
+        }
+
+        if (transition.type === "success") {
+            if (transition.usageResult)
+                applyUsageResult(idx, transition.usageResult, transition.patch)
+            else {
+                // Defensive: never leave loading stuck if a success lacks a body
+                var emptyPatch = {}
+                var es = transition.patch || {}
+                for (var ek in es) {
+                    if (es.hasOwnProperty(ek))
+                        emptyPatch[ek] = es[ek]
+                }
+                if (emptyPatch.loading === undefined)
+                    emptyPatch.loading = false
+                updateProfile(idx, emptyPatch)
+            }
+            return
+        }
+
+        // Terminal failure / suspension: apply patch with translated error strings
+        var patch = {}
+        var src = transition.patch || {}
+        for (var pk in src) {
+            if (src.hasOwnProperty(pk))
+                patch[pk] = src[pk]
+        }
+        if (patch.error !== undefined)
+            patch.error = translateRefreshError(transition, patch.error)
+        updateProfile(idx, patch)
+
+        if (transition.type === "auth_error")
+            console.log("Claude Usage: auth failure via transaction", transition.profileId,
+                        "count=", patch.authFailCount, "suspended=", !!patch.authSuspended)
+        else if (transition.type === "rate_limited")
+            console.log("Claude Usage: 429 backoff via transaction", transition.profileId,
+                        "mult=", patch.backoffMultiplier)
+        else if (transition.type === "auth_suspended")
+            console.log("Claude Usage: auth still suspended, skip API", transition.profileId)
+        else
+            console.log("Claude Usage: terminal", transition.type, transition.profileId,
+                        "error=", patch.error)
+    }
+
+    // Legacy alias kept until Task 4/6 delete loadCredentials; delegates to transaction.
+    // Returns true if a credential read was started (or skipped as held).
+    // Returns false if caller should re-queue (busy / home not ready / already loading).
+    function loadCredentials(idx, opts) {
+        opts = opts || {}
+        return startProfileRefresh(idx, !!opts.manual)
     }
 
     function noteAuthFailure(idx, errorText, tokenSnapshot) {
@@ -1338,30 +1555,48 @@ Item {
         return "https://api.anthropic.com/api/oauth/usage"
     }
 
-    function applyUsageResult(idx, result) {
+    /**
+     * Apply normalised usage + live visibility. Optional `patch` from the
+     * ProfileRefresh success transition carries loading/error/auth/backoff fields.
+     * Legacy callers (fetchUsage/fetchGrok until Task 4/5) omit patch.
+     */
+    function applyUsageResult(idx, result, patch) {
+        if (idx < 0 || idx >= profiles.length || !result) return
         var p = profiles[idx]
+        if (!p) return
         // Always re-read live visibleWindowsJson before specFor (B034 / I004).
         // Production adapter composes VQ visibility + QC.updateTimePercent.
         var adapter = registryVisibilityAdapter()
         var rawVis = cfgValue("visibleWindowsJson", "[]")
         var vis = adapter.specFor(p, rawVis)
         var windows = adapter.apply(result.windows || [], vis, nowMs)
-        var clear = clearFailureStatePatch()
-        updateProfile(idx, {
-            loading: false,
-            error: "",
-            planName: result.planName || p.planName,
-            bankedResets: result.bankedResets || 0,
-            windows: windows,
-            visibleWindowSpec: vis,
-            lastUpdate: Qt.formatTime(new Date(), "hh:mm:ss"),
-            lastFetchMs: Date.now(),
-            backoffMultiplier: clear.backoffMultiplier,
-            authFailCount: clear.authFailCount,
-            authSuspended: clear.authSuspended,
-            autoRefreshHoldUntilMs: clear.autoRefreshHoldUntilMs,
-            lastFailedToken: clear.lastFailedToken
-        })
+
+        var out = {}
+        if (patch) {
+            for (var k in patch) {
+                if (patch.hasOwnProperty(k))
+                    out[k] = patch[k]
+            }
+        } else {
+            var clear = clearFailureStatePatch()
+            out.loading = false
+            out.error = ""
+            out.lastFetchMs = Date.now()
+            out.backoffMultiplier = clear.backoffMultiplier
+            out.authFailCount = clear.authFailCount
+            out.authSuspended = clear.authSuspended
+            out.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
+            out.lastFailedToken = clear.lastFailedToken
+        }
+        out.planName = result.planName || p.planName
+        out.bankedResets = result.bankedResets || 0
+        out.windows = windows
+        out.visibleWindowSpec = vis
+        out.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+        if (out.lastFetchMs === undefined)
+            out.lastFetchMs = Date.now()
+
+        updateProfile(idx, out)
         lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
         var primaryCount = 0
         for (var pi = 0; pi < windows.length; pi++) {
@@ -1781,16 +2016,19 @@ Item {
         id: credReader
         engine: "executable"
         connectedSources: []
-        // B001: sourceName → profileId (never array index)
+        // B001: sourceName → { profileId, generation, callback } (never array index)
         property var _pendingBySource: ({})
 
+        // Thin credential port completion: disconnect, deliver raw stdout, kick queue.
+        // Provider/auth/retry/fetch decisions live in ProfileRefresh (I002).
         onNewData: function(sourceName, data) {
             var stdout = data["stdout"] || ""
+            var stderr = data["stderr"] || ""
             var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
             disconnectSource(sourceName)
 
             var map = credReader._pendingBySource || {}
-            var pendingId = map[sourceName] || ""
+            var pending = map[sourceName] || null
             // Remove this source from the pending map
             var nextMap = {}
             for (var k in map) {
@@ -1799,89 +2037,25 @@ Item {
             }
             credReader._pendingBySource = nextMap
 
-            // Fallback: parse cu-id from tagged command if map missed (should not happen)
-            if (!pendingId && sourceName.indexOf("cu-id=") >= 0) {
-                var m = sourceName.match(/cu-id=([^']+)/)
-                if (m) pendingId = m[1]
-            }
-
-            var idx = findProfileIndex(pendingId)
-            if (idx < 0 || idx >= profiles.length) {
-                // Stale after rediscover/merge — drop, do not apply to wrong row
-                console.log("Claude Usage: drop stale cred reply for", pendingId || sourceName)
+            if (!pending || typeof pending !== "object" || typeof pending.callback !== "function") {
+                console.log("Claude Usage: drop unmatched cred reply for", sourceName)
                 kickRefreshQueue()
                 return
             }
 
-            console.log("Claude Usage: credentials stdout len=", stdout.length, "exit=", exitCode, "id=", pendingId)
-
-            if (stdout.length < 2) {
-                noteAuthFailure(idx, tr("Not logged in"), "")
-                kickRefreshQueue()
-                return
-            }
+            console.log("Claude Usage: credentials stdout len=", stdout.length,
+                        "exit=", exitCode, "id=", pending.profileId, "gen=", pending.generation)
             try {
-                var creds
-                var prof = profiles[idx]
-                var trimmed = stdout.trim()
-                if (prof.isFlatFile && trimmed.indexOf("{") !== 0) {
-                    creds = trimmed
-                } else {
-                    creds = JSON.parse(trimmed)
-                }
-                var auth = extractAuth(prof.provider, creds, prof)
-                console.log("Claude Usage: auth token len=", (auth.token || "").length, "provider=", prof.provider, "plan=", auth.planName)
-                var authPatch = {
-                    accessToken: auth.token,
-                    accountId: auth.accountId || "",
-                    resourceUrl: auth.resourceUrl,
-                    opencodeSlot: auth.opencodeSlot || prof.opencodeSlot,
-                    planName: auth.planName || prof.planName
-                }
-                // Clear auth failure when token rotated, or on any successful manual
-                // credential reload so dual-fetch always re-runs after re-login (B029/B033)
-                var wasManual = !!prof.credLoadManual
-                var clearAuth = false
-                if (auth.token) {
-                    if (wasManual || auth.token !== prof.lastFailedToken)
-                        clearAuth = true
-                }
-                if (clearAuth) {
-                    var clear = clearFailureStatePatch()
-                    authPatch.authFailCount = clear.authFailCount
-                    authPatch.authSuspended = clear.authSuspended
-                    authPatch.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
-                    authPatch.lastFailedToken = clear.lastFailedToken
-                    authPatch.backoffMultiplier = clear.backoffMultiplier
-                }
-                authPatch.credLoadManual = false
-                updateProfile(idx, authPatch)
-                if (!auth.token) {
-                    noteAuthFailure(idx, tr("Not logged in"), "")
-                    kickRefreshQueue()
-                    return
-                }
-                // Suspended with unchanged token: re-probe creds only, skip usage API (B029)
-                // Manual path already cleared suspension/lastFailedToken above when token present.
-                prof = profiles[idx]
-                if (prof.authSuspended && auth.token === prof.lastFailedToken) {
-                    updateProfile(idx, {
-                        loading: false,
-                        lastFetchMs: Date.now(),
-                        error: prof.error || tr("Token expired")
-                    })
-                    console.log("Claude Usage: auth still suspended, skip API", prof.id)
-                    kickRefreshQueue()
-                    return
-                }
-                fetchUsage(idx)
-                // Next profile can start cat while XHR runs (loading still true on this row)
-                kickRefreshQueue()
+                pending.callback({
+                    stdout: stdout,
+                    stderr: stderr,
+                    exitCode: exitCode
+                })
             } catch (e) {
-                console.log("Claude Usage: credential parse error", e)
-                noteAuthFailure(idx, tr("Not logged in"), "")
-                kickRefreshQueue()
+                console.log("Claude Usage: credential callback error", e)
             }
+            // Next profile can start cat while XHR runs (loading still true on this row)
+            kickRefreshQueue()
         }
     }
 
