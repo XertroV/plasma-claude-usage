@@ -51,7 +51,7 @@ Rectangle {
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
 
-        // Header: name · inline error · refresh/spinner · banked · detail
+        // Header: name · inline error · banked · refresh/spinner · detail
         RowLayout {
             id: headerRow
             Layout.fillWidth: true
@@ -119,6 +119,18 @@ Rectangle {
                 }
             }
 
+            PlasmaComponents.Label {
+                visible: showBankedBadge && profile && profile.bankedResets > 0
+                text: "↻" + profile.bankedResets
+                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                color: Kirigami.Theme.highlightColor
+                HoverHandler { id: bankedHover }
+                QQC2.ToolTip {
+                    visible: bankedHover.hovered
+                    text: profile.bankedResets + " banked reset(s)"
+                }
+            }
+
             // Always-allocated slot: refresh control idle, spinner while this profile loads
             Item {
                 id: refreshSlot
@@ -160,18 +172,6 @@ Rectangle {
                 QQC2.ToolTip {
                     visible: refreshMouse.containsMouse && !cardRoot.refreshing
                     text: "Refresh"
-                }
-            }
-
-            PlasmaComponents.Label {
-                visible: showBankedBadge && profile && profile.bankedResets > 0
-                text: "↻" + profile.bankedResets
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: Kirigami.Theme.highlightColor
-                HoverHandler { id: bankedHover }
-                QQC2.ToolTip {
-                    visible: bankedHover.hovered
-                    text: profile.bankedResets + " banked reset(s)"
                 }
             }
 

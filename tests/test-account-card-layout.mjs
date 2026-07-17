@@ -47,6 +47,13 @@ function directChildTypes(objectBlock) {
     return types
 }
 
+function headerControlsInOrder(headerBlock) {
+    const banked = headerBlock.indexOf('text: "↻" + profile.bankedResets')
+    const refresh = headerBlock.indexOf("id: refreshSlot")
+    const details = headerBlock.indexOf("id: detailBtn")
+    return banked >= 0 && banked < refresh && refresh < details
+}
+
 const contentStart = src.indexOf("ColumnLayout {")
 const contentCol = objectBlockAt(src, contentStart)
 const headerStart = contentCol.indexOf("RowLayout {")
@@ -57,6 +64,11 @@ const errorStart = header.indexOf("id: errorLabel")
 const refreshStart = header.indexOf("id: refreshSlot")
 const errorObjectStart = header.lastIndexOf("PlasmaComponents.Label {", errorStart)
 const errorLabel = objectBlockAt(header, errorObjectStart)
+const bankedTextStart = header.indexOf('text: "↻" + profile.bankedResets')
+const bankedObjectStart = header.lastIndexOf("PlasmaComponents.Label {", bankedTextStart)
+const bankedLabel = objectBlockAt(header, bankedObjectStart)
+const refreshObjectStart = header.lastIndexOf("Item {", refreshStart)
+const refreshSlot = objectBlockAt(header, refreshObjectStart)
 
 assert(contentCol !== "", "account card content column exists")
 assert(directChildTypes(contentCol).join("|") === "RowLayout|ColumnLayout",
@@ -82,6 +94,16 @@ assert(header.includes("id: refreshSlot")
        && header.includes("id: detailBtn")
        && header.includes("Layout.preferredWidth: implicitWidth"),
     "refresh/loading and overflow controls retain fixed layout slots")
+assert(headerControlsInOrder(header),
+    "banked resets precede Refresh, which precedes Details")
+
+const swapMarker = "__B039_BANKED_BADGE__"
+const headerWithOldOrder = header
+    .replace(bankedLabel, swapMarker)
+    .replace(refreshSlot, bankedLabel)
+    .replace(swapMarker, refreshSlot)
+assert(!headerControlsInOrder(headerWithOldOrder),
+    "header-order check detects Refresh and banked resets being swapped")
 
 if (failed) {
     console.error(`\n${failed} failure(s)`)
