@@ -273,7 +273,31 @@ function create(runtime) {
     }
 
     function watchdogFired() {
-        // Task 2 owns retry/drop policy; Task 1 only needs the seam.
+        if (!busy) return
+        var command = inFlightCommand
+        var source = inFlightSource
+        var stalledAttempt = attempt
+        runtime.log("Claude Usage: cache write stalled (onNewData never fired), attempt="
+                    + stalledAttempt + " seq=" + launchSequence)
+        // Clear in-flight identity before disconnect so late completion cannot double-drain.
+        inFlightSource = ""
+        inFlightCommand = ""
+        busy = false
+        if (source) {
+            try { runtime.disconnectCommand(source) }
+            catch (error) { /* current disconnect failures are ignored */ }
+        }
+        var maxAttempts = runtime.settings().maxAttempts || 2
+        if (command && stalledAttempt < maxAttempts) {
+            attempt = stalledAttempt + 1
+            launch(command)
+            return
+        }
+        if (command)
+            runtime.log("Claude Usage: cache write dropped after stall, attempts="
+                        + stalledAttempt)
+        attempt = 0
+        drain()
     }
 
     function stateForTests() {

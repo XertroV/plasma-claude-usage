@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Characterisation tests for ResponseCachePipeline — pure preparation,
- * envelope/path/staging, and normal FIFO advancement via the fake adapter.
- * No Plasma, filesystem, shell, or network.
+ * envelope/path/staging, FIFO advancement, serial watchdog retry/drop, and
+ * queue recovery via the fake adapter. No Plasma, filesystem, shell, or network.
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadQmlJs } from "./helpers/load-qml-js.mjs"
@@ -665,6 +666,236 @@ function countFirstChunks(commandStrings) {
     const s2 = fake.state()
     assert.equal(s2.busy, true)
     assert.ok(!s2.queue.includes("mutated"))
+}
+
+// --- Task 2: serial watchdog, late-completion rejection, queue recovery ----
+
+{
+    // idle watchdog is a no-op
+    const idle = createFakeResponseCache(Pipeline, {}, [])
+    idle.fireWatchdog()
+    assert.deepEqual(idle.effects.commands, [])
+    assert.deepEqual(idle.effects.disconnects, [])
+    assert.deepEqual(idle.effects.logs, [])
+    assert.equal(idle.effects.watchdogStops, 0)
+    assert.deepEqual(idle.state(), {
+        queue: [], busy: false, inFlightCommand: "", inFlightSource: "",
+        attempt: 0, launchSequence: 0, pendingSequence: 0
+    })
+}
+
+{
+    // core: one retry, late first-source rejection, second-stall drop, advance
+    const stalled = createFakeResponseCache(Pipeline, {}, [
+        PATH_TIME, SAVE_TIME, PENDING_TIME,
+        PATH_TIME + 1000, SAVE_TIME + 1000, PENDING_TIME + 1000
+    ])
+    stalled.recordExchange({ ...exchange, profileId: "first" })
+    stalled.recordExchange({ ...exchange, profileId: "second" })
+    const firstSource = stalled.effects.commands[0].sourceName
+    const firstCommand = stalled.effects.commands[0].command
+    assert.equal(stalled.effects.commands.length, 1)
+    assert.equal(stalled.state().attempt, 1)
+    assert.equal(stalled.effects.watchdogStarts[0], 12000)
+
+    stalled.fireWatchdog()
+    assert.equal(stalled.effects.disconnects.at(-1), firstSource)
+    assert.equal(stalled.effects.commands.length, 2)
+    assert.equal(stalled.effects.commands[1].command, firstCommand)
+    assert.notEqual(stalled.effects.commands[1].sourceName, firstSource)
+    assert.equal(stalled.state().attempt, 2)
+    // each retried launch restarts at exactly 12,000 ms
+    assert.equal(stalled.effects.watchdogStarts[1], 12000)
+    assert.equal(stalled.effects.watchdogStarts.length, 2)
+    assert.match(stalled.effects.logs.join("\n"),
+        /cache write stalled \(onNewData never fired\), attempt=1 seq=1/)
+
+    // late completion of the original stalled launch cannot double-drain
+    const stateAfterRetry = stalled.state()
+    const cmdsAfterRetry = stalled.effects.commands.length
+    const stopsAfterRetry = stalled.effects.watchdogStops
+    stalled.finish(firstSource)
+    assert.equal(stalled.effects.commands.length, cmdsAfterRetry)
+    assert.equal(stalled.state().attempt, 2)
+    assert.equal(stalled.state().busy, true)
+    assert.equal(stalled.state().inFlightSource, stateAfterRetry.inFlightSource)
+    assert.equal(stalled.state().inFlightCommand, stateAfterRetry.inFlightCommand)
+    assert.deepEqual(stalled.state().queue, stateAfterRetry.queue)
+    assert.equal(stalled.effects.watchdogStops, stopsAfterRetry)
+    assert.equal(stalled.effects.disconnects.at(-1), firstSource)
+
+    stalled.fireWatchdog()
+    assert.equal(stalled.state().attempt, 1)
+    assert.match(stalled.effects.logs.join("\n"), /dropped after stall, attempts=2/)
+    assert.notEqual(stalled.effects.commands.at(-1).command, firstCommand)
+    // two launches maximum for the stalled command (original + one retry)
+    const launchesOfFirst = stalled.effects.commands
+        .filter(c => c.command === firstCommand).length
+    assert.equal(launchesOfFirst, 2)
+    // second-stall drop restarts watchdog for the next dequeued command
+    assert.equal(stalled.effects.watchdogStarts.at(-1), 12000)
+    assert.ok(stalled.effects.watchdogStarts.length >= 3)
+}
+
+{
+    // after second-stall drop, every later queued command can complete → idle/empty
+    const rec = createFakeResponseCache(Pipeline, {}, [
+        PATH_TIME, SAVE_TIME, PENDING_TIME,
+        PATH_TIME + 1000, SAVE_TIME + 1000, PENDING_TIME + 1000
+    ])
+    rec.recordExchange({ ...exchange, profileId: "first" })
+    rec.recordExchange({ ...exchange, profileId: "second" })
+    const firstCommand = rec.effects.commands[0].command
+    rec.fireWatchdog() // retry
+    rec.fireWatchdog() // drop first command, drain next
+    assert.equal(rec.state().busy, true)
+    assert.notEqual(rec.state().inFlightCommand, firstCommand)
+
+    finishAll(rec)
+    const end = rec.state()
+    assert.equal(end.busy, false)
+    assert.equal(end.queue.length, 0)
+    assert.equal(end.inFlightCommand, "")
+    assert.equal(end.inFlightSource, "")
+    assert.equal(end.attempt, 0)
+    // second exchange group still ran (no queue-length cap/drop of later work)
+    const launched = rec.effects.commands.map(c => c.command).join("\n")
+    assert.match(launched, /first/)
+    assert.match(launched, /second/)
+    assert.ok(!rec.effects.logs.some(l => /queue.*(cap|overflow|full|drop.*length)/i.test(l)))
+}
+
+{
+    // normal completion stops watchdog once and advances exactly one command
+    const fake = createFakeResponseCache(Pipeline, {}, clocks(2))
+    fake.recordExchange(baseExchange({ profileId: "a", responseText: '{"n":1}' }))
+    fake.recordExchange(baseExchange({ profileId: "b", responseText: '{"n":2}' }))
+    const src0 = fake.effects.commands[0].sourceName
+    const cmd0 = fake.effects.commands[0].command
+    const queueLen0 = fake.state().queue.length
+    assert.equal(fake.effects.commands.length, 1)
+    assert.equal(fake.effects.watchdogStarts.length, 1)
+    assert.equal(fake.effects.watchdogStarts[0], 12000)
+
+    fake.finish(src0)
+    assert.equal(fake.effects.watchdogStops, 1)
+    assert.equal(fake.effects.disconnects[0], src0)
+    assert.equal(fake.effects.commands.length, 2)
+    assert.notEqual(fake.effects.commands[1].command, cmd0)
+    assert.equal(fake.state().queue.length, queueLen0 - 1)
+    assert.equal(fake.state().attempt, 1)
+    assert.equal(fake.effects.watchdogStarts.length, 2)
+    assert.equal(fake.effects.watchdogStarts[1], 12000)
+    // no retry of the completed command
+    assert.equal(
+        fake.effects.commands.filter(c => c.command === cmd0).length, 1)
+}
+
+{
+    // non-zero completion logs and advances without retry
+    const fake = createFakeResponseCache(Pipeline, {}, clocks(1))
+    fake.recordExchange(baseExchange({ profileId: "nz", responseText: '{"ok":true}' }))
+    const src = fake.effects.commands[0].sourceName
+    const cmd = fake.effects.commands[0].command
+    const beforeLen = fake.effects.commands.length
+    fake.finish(src, { exitCode: 7, stderr: "nope" })
+    assert.ok(fake.effects.logs.some(l =>
+        l === "Claude Usage: cache write failed exit=7 nope"
+        || /cache write failed exit=7/.test(l)))
+    // advanced to next in group (or idle if last); never re-launched same cmd
+    assert.equal(
+        fake.effects.commands.filter(c => c.command === cmd).length, 1)
+    assert.ok(fake.effects.commands.length >= beforeLen)
+    if (fake.state().busy) {
+        assert.notEqual(fake.state().inFlightCommand, cmd)
+        assert.equal(fake.state().attempt, 1)
+    }
+    finishAll(fake)
+    assert.equal(fake.state().busy, false)
+    assert.equal(
+        fake.effects.commands.filter(c => c.command === cmd).length, 1)
+}
+
+{
+    // stale arbitrary source: disconnect only; current source/watchdog/queue unchanged
+    const fake = createFakeResponseCache(Pipeline, {}, clocks(1))
+    fake.recordExchange(exchange)
+    const before = fake.state()
+    const cmdsBefore = fake.effects.commands.length
+    const startsBefore = fake.effects.watchdogStarts.length
+    const stopsBefore = fake.effects.watchdogStops
+    const logsBefore = fake.effects.logs.slice()
+    fake.finish("CACHE_WRITE_SEQ=42 totally-stale", { exitCode: 1, stderr: "x" })
+    assert.equal(fake.effects.disconnects.at(-1), "CACHE_WRITE_SEQ=42 totally-stale")
+    assert.equal(fake.effects.commands.length, cmdsBefore)
+    assert.equal(fake.effects.watchdogStarts.length, startsBefore)
+    assert.equal(fake.effects.watchdogStops, stopsBefore)
+    assert.equal(fake.state().busy, before.busy)
+    assert.equal(fake.state().inFlightSource, before.inFlightSource)
+    assert.equal(fake.state().inFlightCommand, before.inFlightCommand)
+    assert.equal(fake.state().attempt, before.attempt)
+    assert.deepEqual(fake.state().queue, before.queue)
+    assert.deepEqual(fake.effects.logs, logsBefore)
+}
+
+{
+    // launch/pending sequences increment from zero; modulo constants via source
+    const fake = createFakeResponseCache(Pipeline, {}, clocks(3))
+    assert.equal(fake.state().launchSequence, 0)
+    assert.equal(fake.state().pendingSequence, 0)
+
+    fake.recordExchange(baseExchange({ profileId: "s1" }))
+    assert.equal(fake.state().pendingSequence, 1)
+    assert.equal(fake.state().launchSequence, 1)
+    assert.match(fake.state().inFlightSource, /^CACHE_WRITE_SEQ=1 /)
+
+    fake.recordExchange(baseExchange({ profileId: "s2" }))
+    assert.equal(fake.state().pendingSequence, 2)
+    // still only first command in flight until completion
+    assert.equal(fake.state().launchSequence, 1)
+
+    // contiguous FIFO groups: at enqueue time, full s1 group precedes s2
+    const enqueued = [fake.effects.commands[0].command, ...fake.state().queue]
+    const enqText = enqueued.join("\n")
+    const iFirst = enqText.indexOf("s1")
+    const iSecond = enqText.indexOf("s2")
+    assert.ok(iFirst >= 0 && iSecond > iFirst)
+    // no s2 command may appear before the last s1 command in the group
+    const lastS1 = enqText.lastIndexOf("s1")
+    assert.ok(lastS1 < iSecond)
+
+    fake.finish(fake.effects.commands[0].sourceName)
+    assert.equal(fake.state().launchSequence, 2)
+    assert.match(fake.state().inFlightSource, /^CACHE_WRITE_SEQ=2 /)
+
+    // source-level assertion of modulo constants without executing 1e5/1e6 commands
+    const pipelineSrc = readFileSync(
+        join(root, "contents/ui/js/ResponseCachePipeline.js"), "utf8")
+    assert.match(pipelineSrc,
+        /launchSequence\s*=\s*\(\s*launchSequence\s*\+\s*1\s*\)\s*%\s*100000/)
+    assert.match(pipelineSrc,
+        /pendingSequence\s*=\s*\(\s*pendingSequence\s*\+\s*1\s*\)\s*%\s*1000000/)
+
+    finishAll(fake)
+    // two exchanges only — pending seq ends at 2
+    assert.equal(fake.state().pendingSequence, 2)
+    // unique source identity across all launches
+    const sources = fake.effects.commands.map(c => c.sourceName)
+    assert.equal(new Set(sources).size, sources.length)
+    for (const s of sources)
+        assert.match(s, /^CACHE_WRITE_SEQ=\d+ /)
+}
+
+{
+    // one in-flight command: second recordExchange must not launch while busy
+    const fake = createFakeResponseCache(Pipeline, {}, clocks(2))
+    fake.recordExchange(baseExchange({ profileId: "only-one" }))
+    assert.equal(fake.effects.commands.length, 1)
+    const qAfterFirst = fake.state().queue.length
+    fake.recordExchange(baseExchange({ profileId: "queued-later" }))
+    assert.equal(fake.effects.commands.length, 1)
+    assert.ok(fake.state().queue.length > qAfterFirst)
+    assert.equal(fake.state().busy, true)
 }
 
 console.log("All response cache pipeline tests passed.")
