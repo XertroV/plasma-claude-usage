@@ -1,0 +1,25 @@
+---
+complexity: high
+created_at: "2026-07-17T11:01:49Z"
+depends_on:
+    - P1.M4.E1.T001
+estimate_hours: 2
+id: P1.M4.E1.T002
+priority: high
+status: pending
+tags:
+    - i004
+    - architecture
+    - visibility
+    - kcm
+    - migration
+    - persistence
+    - tdd
+title: Add KCM projection editing and idempotent persistence
+updated_at: "2026-07-17T11:01:49Z"
+---
+Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`, Task 2.
+
+Add the private built-in catalogue/editor document and public `configuration({persisted,event})` projection for set, provider reset, and reset-all events. Reuse the runtime decoder/identity/default model; preserve no-write inspection, current edit-time legacy/global materialisation, unknown per-provider keys, and compatible deterministic JSON.
+
+Acceptance: exact provider/window labels, order, and defaults are tested; first edits seed/materialise current semantics; invalid advanced text remains untouched on inspection; provider/reset-all behaviour is explicit; unknown keys survive unrelated edits; event output is deterministic and repeating the same event is idempotent.

@@ -1,7 +1,7 @@
 # Visible Quota Configuration Design
 
-**Backlog source:** I004 — Deepen visible-quota configuration  
-**Date:** 17 July 2026  
+**Backlog source:** I004 — Deepen visible-quota configuration
+**Date:** 17 July 2026
 **Status:** Approved for autonomous implementation planning; no product implementation is included in this document.
 
 ## Problem

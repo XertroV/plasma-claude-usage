@@ -1,0 +1,24 @@
+---
+complexity: high
+created_at: "2026-07-17T11:01:49Z"
+depends_on: []
+estimate_hours: 3
+id: P1.M4.E1.T001
+priority: high
+status: pending
+tags:
+    - i004
+    - architecture
+    - visibility
+    - compatibility
+    - identity
+    - runtime
+    - tdd
+title: Establish visible quota compatibility and runtime policy
+updated_at: "2026-07-17T11:01:49Z"
+---
+Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`, Task 1.
+
+Create the pure `VisibleQuotaConfig` compatibility core with opaque `specFor(profile, persisted)` and immutable `apply(windows, spec)`. Move exact persisted-shape, strict/sparse default, dynamic-window, and OpenCode identity semantics behind the seam; refocus `tests/test-visibility.mjs` on that interface.
+
+Acceptance: every valid legacy/global/per-provider format retains runtime meaning; every provider/OpenCode identity path is characterised; dynamic unknown IDs honour exact overrides or `defaultVisible`; application clones without mutation, preserves order/duplicates, ignores stale incoming `visible`, handles malformed input safely, and the baseline visibility behaviours pass.
