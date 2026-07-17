@@ -4,7 +4,7 @@ import QtQuick.Window
 import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "js/QuotaCommon.js" as QC
+import "js/QuotaPresentation.js" as QP
 
 // Floating detail window for one account (paths, all quotas, configure).
 Window {
@@ -18,6 +18,11 @@ Window {
     property var i18n: null
     // Local mirror so the checkbox stays interactive after hide (panel filters enabled)
     property bool hiddenChecked: false
+
+    readonly property var quotaPresentation: QP.presentProfile(profile, {
+        sessionColorMode: sessionColorMode,
+        weeklyColorMode: weeklyColorMode
+    })
 
     signal refreshRequested()
     signal configureRequested()
@@ -200,53 +205,30 @@ Window {
         }
 
         PlasmaComponents.Label {
-            text: tr("Primary")
+            text: tr("Quotas")
             font.bold: true
         }
 
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
+
             Repeater {
-                model: QC.primaryWindows(profile)
+                model: detailWin.quotaPresentation.rows
                 QuotaRow {
                     required property var modelData
                     Layout.fillWidth: true
-                    windowData: modelData
+                    presentationRow: modelData
                     nowMs: detailWin.nowMs
                     mode: "data"
                     compact: false
-                    colorMode: QC.colorModeForWindow(modelData, sessionColorMode, weeklyColorMode)
                 }
             }
+
             PlasmaComponents.Label {
-                visible: QC.primaryWindows(profile).length === 0
+                visible: detailWin.quotaPresentation.rows.length === 0
                 text: profile && profile.loading ? tr("Loading...") : "—"
                 color: Kirigami.Theme.disabledTextColor
-            }
-        }
-
-        PlasmaComponents.Label {
-            visible: QC.extraWindows(profile).length > 0
-            text: tr("Extra limits")
-            font.bold: true
-        }
-
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: Kirigami.Units.smallSpacing
-            visible: QC.extraWindows(profile).length > 0
-            Repeater {
-                model: QC.extraWindows(profile)
-                QuotaRow {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    windowData: modelData
-                    nowMs: detailWin.nowMs
-                    mode: "data"
-                    compact: false
-                    colorMode: weeklyColorMode
-                }
             }
         }
 
