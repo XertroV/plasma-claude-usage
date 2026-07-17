@@ -1,0 +1,10 @@
+complexity: high
+depends_on:
+    - P1.M2.E1.T006
+    - P1.M3.E1.T006
+epics: []
+estimate_hours: 10
+id: P1.M5
+locked: false
+name: Response Cache Pipeline
+status: pending

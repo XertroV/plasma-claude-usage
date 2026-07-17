@@ -32,6 +32,28 @@ milestones:
       name: Profile Registry
       path: 03-profile-registry
       status: pending
+    - complexity: high
+      depends_on:
+        - P1.M1.E1.T005
+        - P1.M3.E1.T006
+      description: Centralize visible-quota configuration semantics and migration behind one deep seam after presentation and registry work land.
+      estimate_hours: 10
+      id: M4
+      locked: false
+      name: Visible Quota Configuration
+      path: 04-visible-quota-configuration
+      status: pending
+    - complexity: high
+      depends_on:
+        - P1.M2.E1.T006
+        - P1.M3.E1.T006
+      description: Isolate response-cache ownership and command lifecycle after refresh transaction and registry work land.
+      estimate_hours: 10
+      id: M5
+      locked: false
+      name: Response Cache Pipeline
+      path: 05-response-cache-pipeline
+      status: pending
 name: Architecture Deepening
 status: pending
 weeks: 1
