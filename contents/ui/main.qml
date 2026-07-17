@@ -52,7 +52,10 @@ PlasmoidItem {
                 discoverProfiles()
             root.syncCompactFromController()
             // Defer watching until after initial config property binds settle
-            Qt.callLater(function() { root.configWatchReady = true })
+            Qt.callLater(function() {
+                controller.configWatchReady = true
+                root.configWatchReady = true
+            })
         }
         onProfilesChanged: {
             root.syncCompactFromController()
@@ -71,54 +74,20 @@ PlasmoidItem {
     }
 
     // B003: Apply in KCM must re-bind multi-profile settings without plasmashell restart.
-    // Coalesce multi-key Apply storms: rediscover > membership > soft.
-    property bool configDirtyRediscover: false
-    property bool configDirtyMembership: false
-    property bool configDirtySoft: false
-
+    // Main only reports changed kcfg keys; controller/registry coalesce and classify.
     Connections {
         target: Plasmoid.configuration
         enabled: root.configWatchReady
 
-        function onMultiProfileModeChanged() { root.markConfigDirty("rediscover") }
-        function onCredentialsPathChanged() { root.markConfigDirty("rediscover") }
-        function onProviderChanged() { root.markConfigDirty("rediscover") }
-        function onOpencodeSubProviderChanged() { root.markConfigDirty("rediscover") }
-        function onCustomProfilesJsonChanged() { root.markConfigDirty("rediscover") }
-        function onEnabledProfilesJsonChanged() { root.markConfigDirty("membership") }
-        function onProfileDisplayNamesJsonChanged() { root.markConfigDirty("soft") }
-        function onVisibleWindowsJsonChanged() { root.markConfigDirty("soft") }
-        function onDisplayNameChanged() { root.markConfigDirty("soft") }
-    }
-
-    Timer {
-        id: configCoalesceTimer
-        interval: 50
-        repeat: false
-        onTriggered: root.flushConfigDirty()
-    }
-
-    function markConfigDirty(kind) {
-        if (!configWatchReady) return
-        if (kind === "rediscover") configDirtyRediscover = true
-        else if (kind === "membership") configDirtyMembership = true
-        else configDirtySoft = true
-        configCoalesceTimer.restart()
-    }
-
-    function flushConfigDirty() {
-        if (!controller || !configWatchReady) return
-        var opts = {}
-        if (configDirtyRediscover)
-            opts = { rediscover: true }
-        else if (configDirtyMembership)
-            opts = { membership: true }
-        // else soft {}
-        configDirtyRediscover = false
-        configDirtyMembership = false
-        configDirtySoft = false
-        controller.reapplyConfig(opts)
-        root.syncCompactFromController()
+        function onMultiProfileModeChanged() { controller.noteRegistryConfigChanged("multiProfileMode") }
+        function onCredentialsPathChanged() { controller.noteRegistryConfigChanged("credentialsPath") }
+        function onProviderChanged() { controller.noteRegistryConfigChanged("provider") }
+        function onOpencodeSubProviderChanged() { controller.noteRegistryConfigChanged("opencodeSubProvider") }
+        function onCustomProfilesJsonChanged() { controller.noteRegistryConfigChanged("customProfilesJson") }
+        function onEnabledProfilesJsonChanged() { controller.noteRegistryConfigChanged("enabledProfilesJson") }
+        function onProfileDisplayNamesJsonChanged() { controller.noteRegistryConfigChanged("profileDisplayNamesJson") }
+        function onVisibleWindowsJsonChanged() { controller.noteRegistryConfigChanged("visibleWindowsJson") }
+        function onDisplayNameChanged() { controller.noteRegistryConfigChanged("displayName") }
     }
 
     // Belt-and-suspenders: poll while anything is still loading so panel never sticks
