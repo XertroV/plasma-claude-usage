@@ -95,7 +95,7 @@ import { loadQmlJs } from "./helpers/load-qml-js.mjs"
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
 const QC = loadQmlJs(join(root, "contents/ui/js/QuotaCommon.js"), {}, [
-    "makeWindow", "parseResetMs"
+    "formatWindowDuration", "makeWindow", "parseResetMs"
 ])
 const QP = loadQmlJs(join(root, "contents/ui/js/QuotaParsers.js"), { QC }, [
     "parseClaude", "parseCodex", "parseGrok", "parseMinimax", "parseZai", "parseKimi"
