@@ -116,6 +116,22 @@ ports = {
 }
 ```
 
+The exact credential port request and callback shapes are:
+
+```js
+credentialRequest = {
+    profileId,
+    generation,
+    path,
+    isFlatFile
+}
+credentialCallback({ stdout, stderr, exitCode })
+```
+
+`readCredentials()` must return `false` without invoking the callback when HOME resolution or concurrency prevents an immediate start. After returning `true`, it must invoke the callback exactly once.
+
+`requestHttp()` receives the request specification defined below and invokes its callback exactly once with the corresponding exchange object. `recordExchange()` is fire-and-forget; refresh completion never waits for cache persistence. `now()` is the only transaction clock.
+
 The production ports adapt current QML facilities. Tests provide a deterministic mock object with the same four methods.
 
 `emit(transition)` receives:
