@@ -1,19 +1,20 @@
 ---
 claimed_at: "2026-07-17T15:38:26Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:42:52Z"
 complexity: medium
 created_at: "2026-07-17T10:18:39Z"
 depends_on:
     - P1.M3.E1.T005
+duration_minutes: 4.433479241416666
 estimate_hours: 1
 id: P1.M3.E1.T006
 priority: high
 started_at: "2026-07-17T15:38:26Z"
-status: in_progress
+status: done
 tags: []
 title: Enforce the registry seam and verify profile lifecycle
-updated_at: "2026-07-17T15:38:26Z"
+updated_at: "2026-07-17T15:42:52Z"
 ---
 Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 6.
 

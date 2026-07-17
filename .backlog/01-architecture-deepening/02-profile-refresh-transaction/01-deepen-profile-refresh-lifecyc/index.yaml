@@ -4,7 +4,7 @@ estimate_hours: 10
 id: P1.M2.E1
 locked: false
 name: Deepen Profile Refresh Lifecycle
-status: pending
+status: done
 tasks:
     - complexity: high
       depends_on: []
@@ -62,6 +62,6 @@ tasks:
       file: T006-enforce-the-refresh-seam-and-v.todo
       id: T006
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Enforce the refresh seam and verify lifecycle behaviour

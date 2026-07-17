@@ -6,11 +6,11 @@ phases:
       description: Establish deep modules for the architecture-review recommendations, beginning with I001 quota presentation policy.
       estimate_hours: 10
       id: P1
-      locked: false
+      locked: true
       name: Architecture Deepening
       path: 01-architecture-deepening
       priority: critical
-      status: pending
+      status: done
       weeks: 1
 project: plasma-claude-usage
 stats:

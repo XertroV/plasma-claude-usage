@@ -10,9 +10,9 @@ epics:
       locked: false
       name: Centralize Profile Lifecycle
       path: 01-centralize-profile-lifecycle
-      status: pending
+      status: done
 estimate_hours: 10
 id: P1.M3
 locked: false
 name: Profile Registry
-status: pending
+status: done

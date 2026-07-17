@@ -2,7 +2,7 @@ complexity: medium
 depends_on: []
 estimate_hours: 10
 id: P1
-locked: false
+locked: true
 milestones:
     - complexity: high
       depends_on: []
@@ -21,7 +21,7 @@ milestones:
       locked: false
       name: Profile Refresh Transaction
       path: 02-profile-refresh-transaction
-      status: pending
+      status: done
     - complexity: high
       depends_on:
         - P1.M2.E1.T006
@@ -31,7 +31,7 @@ milestones:
       locked: false
       name: Profile Registry
       path: 03-profile-registry
-      status: pending
+      status: done
     - complexity: high
       depends_on:
         - P1.M1.E1.T005
@@ -55,5 +55,5 @@ milestones:
       path: 05-response-cache-pipeline
       status: done
 name: Architecture Deepening
-status: pending
+status: done
 weeks: 1

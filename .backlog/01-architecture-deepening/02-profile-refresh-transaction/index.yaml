@@ -9,9 +9,9 @@ epics:
       locked: false
       name: Deepen Profile Refresh Lifecycle
       path: 01-deepen-profile-refresh-lifecyc
-      status: pending
+      status: done
 estimate_hours: 10
 id: P1.M2
 locked: false
 name: Profile Refresh Transaction
-status: pending
+status: done
