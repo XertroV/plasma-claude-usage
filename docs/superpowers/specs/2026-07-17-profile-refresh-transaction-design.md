@@ -169,7 +169,7 @@ Re-reading visibility at success time preserves current B034 behaviour without m
 Provider branching is private to `ProfileRefreshProviders.js`.
 
 ```js
-prepare(profile, credentials, nowMs) -> {
+prepare(profile, credentialText, nowMs) -> {
     auth,
     requests,
     finalize(exchanges) -> providerOutcome
