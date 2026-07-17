@@ -13,6 +13,14 @@ TestCase {
         }
     }
 
+    Component {
+        id: detailComponent
+        DetailWindow {
+            visible: false
+            nowMs: 1773709200000
+        }
+    }
+
     function profileWithExtra() {
         return {
             id: "claude",
@@ -64,5 +72,20 @@ TestCase {
         compare(labelsWithText(card, "Fable").length, 1)
         compare(labelsWithText(card, "37%").length, 1)
         compare(labelsWithText(card, "42%").length, 1)
+    }
+
+    function test_detailUsesOneEqualQuotaList() {
+        var profile = profileWithExtra()
+        var detail = createTemporaryObject(detailComponent, null,
+                                           { profile: profile, profiles: [profile] })
+        verify(detail !== null)
+        wait(0)
+        compare(labelsWithText(detail, "Quotas").length, 1)
+        compare(labelsWithText(detail, "Primary").length, 0)
+        compare(labelsWithText(detail, "Extra limits").length, 0)
+        compare(labelsWithText(detail, "5h").length, 1)
+        compare(labelsWithText(detail, "Fable").length, 1)
+        compare(labelsWithText(detail, "37%").length, 1)
+        compare(labelsWithText(detail, "42%").length, 1)
     }
 }
