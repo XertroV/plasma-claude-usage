@@ -12,7 +12,8 @@ tasks:
       file: T001-centralize-registry-schema-sna.todo
       id: T001
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Centralize registry schema snapshots and stable patching
     - complexity: high
       depends_on:

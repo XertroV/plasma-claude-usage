@@ -1,20 +1,18 @@
 ---
+claimed_at: "2026-07-17T15:03:09Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T06:16:29Z"
 depends_on: []
 estimate_hours: 2
 id: P1.M2.E1.T001
 priority: high
-status: pending
-tags:
-    - i002
-    - architecture
-    - refresh
-    - providers
-    - fixtures
-    - tdd
+started_at: "2026-07-17T15:03:09Z"
+status: in_progress
+tags: []
 title: Characterise refresh provider adapters with fixtures
-updated_at: "2026-07-17T06:16:29Z"
+updated_at: "2026-07-17T15:03:09Z"
 ---
 Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 1.
 

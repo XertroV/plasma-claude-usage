@@ -12,7 +12,8 @@ tasks:
       file: T001-establish-visible-quota-compat.todo
       id: T001
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Establish visible quota compatibility and runtime policy
     - complexity: high
       depends_on:

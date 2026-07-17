@@ -12,7 +12,8 @@ tasks:
       file: T001-characterise-refresh-provider.todo
       id: T001
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Characterise refresh provider adapters with fixtures
     - complexity: high
       depends_on:

@@ -12,7 +12,8 @@ tasks:
       file: T001-characterise-and-build-determi.todo
       id: T001
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Characterise and build deterministic cache preparation
     - complexity: high
       depends_on:

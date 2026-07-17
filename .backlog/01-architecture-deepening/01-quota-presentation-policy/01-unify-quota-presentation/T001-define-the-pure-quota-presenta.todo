@@ -1,18 +1,18 @@
 ---
+claimed_at: "2026-07-17T15:03:09Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T04:55:59Z"
 depends_on: []
 estimate_hours: 2
 id: P1.M1.E1.T001
 priority: critical
-status: pending
-tags:
-    - i001
-    - architecture
-    - quota-presentation
-    - tdd
+started_at: "2026-07-17T15:03:09Z"
+status: in_progress
+tags: []
 title: Define the pure quota-presentation interface
-updated_at: "2026-07-17T04:55:59Z"
+updated_at: "2026-07-17T15:03:09Z"
 ---
 Source: I001 and `docs/superpowers/plans/2026-07-17-quota-presentation-policy.md`, Task 1.
 
