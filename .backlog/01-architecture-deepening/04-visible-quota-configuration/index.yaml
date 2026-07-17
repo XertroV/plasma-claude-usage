@@ -2,7 +2,16 @@ complexity: high
 depends_on:
     - P1.M1.E1.T005
     - P1.M3.E1.T006
-epics: []
+epics:
+    - complexity: high
+      depends_on: []
+      description: Implement I004 from docs/superpowers/plans/2026-07-17-visible-quota-configuration.md through one pure compatibility, identity, catalogue, editing, persistence, and runtime visibility seam.
+      estimate_hours: 10
+      id: E1
+      locked: false
+      name: Centralize Visible Quota Configuration
+      path: 01-centralize-visible-quota-configuration
+      status: pending
 estimate_hours: 10
 id: P1.M4
 locked: false

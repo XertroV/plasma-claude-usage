@@ -1,0 +1,25 @@
+---
+complexity: medium
+created_at: "2026-07-17T11:01:49Z"
+depends_on:
+    - P1.M4.E1.T003
+    - P1.M4.E1.T004
+estimate_hours: 1
+id: P1.M4.E1.T005
+priority: high
+status: pending
+tags:
+    - i004
+    - architecture
+    - visibility
+    - deletion-test
+    - verification
+    - tdd
+title: Enforce the visible quota seam and verify migration
+updated_at: "2026-07-17T11:01:49Z"
+---
+Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`, Task 5.
+
+Delete old visible-quota parsing, provider-key, spec, application, KCM catalogue/edit/reset/serialisation, and controller format-mode helpers. Tighten the deletion test and run the complete serial Node, shell, I001, I003, refresh, cache, layout, and explicit Qt gates.
+
+Acceptance: `VisibleQuotaConfig` is the sole persisted-visibility policy seam; the deletion/source searches find no old choreography; all format/identity/default/migration/unknown/idempotence behaviours pass; I001 presentation and I003 registry responsibilities remain separate; `git diff --check` and the complete suite pass with explicit Qt results.

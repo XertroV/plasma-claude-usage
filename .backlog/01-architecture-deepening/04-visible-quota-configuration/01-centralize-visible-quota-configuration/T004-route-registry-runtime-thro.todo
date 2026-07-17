@@ -1,0 +1,25 @@
+---
+complexity: high
+created_at: "2026-07-17T11:01:49Z"
+depends_on:
+    - P1.M4.E1.T001
+estimate_hours: 2
+id: P1.M4.E1.T004
+priority: high
+status: pending
+tags:
+    - i004
+    - architecture
+    - visibility
+    - registry
+    - runtime
+    - integration
+    - tdd
+title: Route registry runtime visibility through the seam
+updated_at: "2026-07-17T11:01:49Z"
+---
+Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`, Task 4.
+
+Replace the post-I003 production visibility adapter internals with `VisibleQuotaConfig.specFor()` and `apply()`. Keep current-config reads, time-percentage calculation, adapter failure safety, generation-checked transition timing, profile state, and effects in the I003 registry/controller integration.
+
+Acceptance: work begins only on the post-I003 tree, locating and extracting/renaming its one concrete injected adapter rather than adding a second; runtime source contracts prove delegation and ban every external opaque-spec property read; accepted usage results still re-read live visibility; registry fake-adapter and failure tests remain green; time percentages stay outside the configuration module; I001 presentation, I003 registry, and refresh regressions pass.

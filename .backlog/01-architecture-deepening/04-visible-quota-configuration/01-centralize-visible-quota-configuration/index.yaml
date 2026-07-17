@@ -1,0 +1,53 @@
+complexity: high
+depends_on: []
+estimate_hours: 10
+id: P1.M4.E1
+locked: false
+name: Centralize Visible Quota Configuration
+status: pending
+tasks:
+    - complexity: high
+      depends_on: []
+      estimate_hours: 3
+      file: T001-establish-visible-quota-compat.todo
+      id: T001
+      priority: high
+      status: pending
+      title: Establish visible quota compatibility and runtime policy
+    - complexity: high
+      depends_on:
+        - P1.M4.E1.T001
+      estimate_hours: 2
+      file: T002-add-kcm-projection-edit-and.todo
+      id: T002
+      priority: high
+      status: pending
+      title: Add KCM projection editing and idempotent persistence
+    - complexity: medium
+      depends_on:
+        - P1.M4.E1.T002
+      estimate_hours: 2
+      file: T003-route-kcm-through-visible-qu.todo
+      id: T003
+      priority: high
+      status: pending
+      title: Route KCM controls through the visible quota seam
+    - complexity: high
+      depends_on:
+        - P1.M4.E1.T001
+      estimate_hours: 2
+      file: T004-route-registry-runtime-thro.todo
+      id: T004
+      priority: high
+      status: pending
+      title: Route registry runtime visibility through the seam
+    - complexity: medium
+      depends_on:
+        - P1.M4.E1.T003
+        - P1.M4.E1.T004
+      estimate_hours: 1
+      file: T005-enforce-visible-quota-seam.todo
+      id: T005
+      priority: high
+      status: pending
+      title: Enforce the visible quota seam and verify migration
