@@ -11,6 +11,8 @@ Rectangle {
 
     property var profile: null
     property double nowMs: Date.now()
+    /** Bumped with controller dataEpoch so nested windows re-present after fetch. */
+    property int dataEpoch: 0
     property string sessionColorMode: "capacity"
     property string weeklyColorMode: "efficiency"
     property bool showBankedBadge: true
@@ -22,16 +24,27 @@ Rectangle {
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
 
-    readonly property var quotaPresentation: QP.presentProfile(profile, {
-        sessionColorMode: sessionColorMode,
-        weeklyColorMode: weeklyColorMode
-    })
-    readonly property var quotaRows: quotaPresentation.rows
+    // Explicit deps: QML does not deep-track profile.windows for .pragma library calls.
+    readonly property var quotaPresentation: {
+        var _epoch = dataEpoch
+        var p = profile
+        var _winLen = p && p.windows ? p.windows.length : 0
+        var _last = p ? p.lastFetchMs : 0
+        var _loading = p ? p.loading : false
+        return QP.presentProfile(p, {
+            sessionColorMode: sessionColorMode,
+            weeklyColorMode: weeklyColorMode
+        })
+    }
+    readonly property var quotaRows: {
+        var presentation = quotaPresentation
+        return presentation && presentation.rows ? presentation.rows : []
+    }
     // Any in-flight fetch (refresh or first load)
     readonly property bool refreshing: !!(profile && profile.loading)
     // First load only — no windows yet. Never collapse existing rows while refreshing.
     readonly property bool initialLoad: refreshing
-            && !(profile.windows && profile.windows.length)
+            && !(profile && profile.windows && profile.windows.length)
     readonly property bool hasError: !!(profile && profile.error)
     readonly property string title: profile
             ? (profile.displayName || profile.id || "?") : "…"
@@ -223,25 +236,37 @@ Rectangle {
             spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
             visible: !hasError || (quotaRows && quotaRows.length)
 
+            // Index model (not a JS object array): more reliable under Flow/Repeater
+            // than modelData-from-array, which can lose nested windowData in some Qt builds.
             Repeater {
                 model: {
-                    if (quotaRows && quotaRows.length > 0)
-                        return quotaRows
+                    var rows = cardRoot.quotaRows
+                    if (rows && rows.length > 0)
+                        return rows.length
                     // First load / empty: two skeleton rows (not on mid-refresh with data)
                     if (cardRoot.initialLoad || (profile && !profile.lastFetchMs && !hasError))
-                        return [null, null]
-                    return []
+                        return 2
+                    return 0
                 }
                 QuotaRow {
-                    required property var modelData
+                    required property int index
                     Layout.fillWidth: true
-                    presentationRow: modelData
+                    presentationRow: {
+                        var rows = cardRoot.quotaRows
+                        return (rows && index < rows.length) ? rows[index] : null
+                    }
                     nowMs: cardRoot.nowMs
-                    mode: modelData ? "data" : "skeleton"
+                    mode: {
+                        var rows = cardRoot.quotaRows
+                        return (rows && index < rows.length && rows[index]) ? "data" : "skeleton"
+                    }
                     compact: true
                     textPixelSize: cardRoot.contentFontPixelSize
                     // Slight dim while refreshing existing data
-                    opacity: (modelData && cardRoot.refreshing) ? 0.75 : 1
+                    opacity: {
+                        var rows = cardRoot.quotaRows
+                        return (rows && index < rows.length && cardRoot.refreshing) ? 0.75 : 1
+                    }
                 }
             }
         }

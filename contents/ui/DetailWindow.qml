@@ -19,10 +19,18 @@ Window {
     // Local mirror so the checkbox stays interactive after hide (panel filters enabled)
     property bool hiddenChecked: false
 
-    readonly property var quotaPresentation: QP.presentProfile(profile, {
-        sessionColorMode: sessionColorMode,
-        weeklyColorMode: weeklyColorMode
-    })
+    // Re-present when profile identity or nested windows change (dataEpoch from parent sync).
+    property int dataEpoch: 0
+    readonly property var quotaPresentation: {
+        var _epoch = dataEpoch
+        var p = profile
+        var _winLen = p && p.windows ? p.windows.length : 0
+        var _last = p ? p.lastFetchMs : 0
+        return QP.presentProfile(p, {
+            sessionColorMode: sessionColorMode,
+            weeklyColorMode: weeklyColorMode
+        })
+    }
 
     signal refreshRequested()
     signal configureRequested()
@@ -191,13 +199,15 @@ Window {
         }
 
         PlasmaComponents.Label {
-            visible: profile && profile.bankedResets > 0
-            text: "↻ " + profile.bankedResets + " " + tr("banked reset(s)")
+            visible: !!(profile && profile.bankedResets > 0)
+            text: profile
+                  ? ("↻ " + profile.bankedResets + " " + tr("banked reset(s)"))
+                  : ""
             color: Kirigami.Theme.highlightColor
         }
 
         PlasmaComponents.Label {
-            visible: profile && profile.error
+            visible: !!(profile && profile.error)
             Layout.fillWidth: true
             text: "⚠ " + (profile ? profile.error : "")
             color: Kirigami.Theme.negativeTextColor
@@ -214,11 +224,19 @@ Window {
             spacing: Kirigami.Units.smallSpacing
 
             Repeater {
-                model: detailWin.quotaPresentation.rows
+                model: {
+                    var rows = detailWin.quotaPresentation
+                               && detailWin.quotaPresentation.rows
+                    return rows ? rows.length : 0
+                }
                 QuotaRow {
-                    required property var modelData
+                    required property int index
                     Layout.fillWidth: true
-                    presentationRow: modelData
+                    presentationRow: {
+                        var rows = detailWin.quotaPresentation
+                                   && detailWin.quotaPresentation.rows
+                        return (rows && index < rows.length) ? rows[index] : null
+                    }
                     nowMs: detailWin.nowMs
                     mode: "data"
                     compact: false
@@ -226,7 +244,11 @@ Window {
             }
 
             PlasmaComponents.Label {
-                visible: detailWin.quotaPresentation.rows.length === 0
+                visible: {
+                    var rows = detailWin.quotaPresentation
+                               && detailWin.quotaPresentation.rows
+                    return !rows || rows.length === 0
+                }
                 text: profile && profile.loading ? tr("Loading...") : "—"
                 color: Kirigami.Theme.disabledTextColor
             }

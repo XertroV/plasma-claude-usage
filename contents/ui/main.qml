@@ -169,9 +169,21 @@ PlasmoidItem {
 
         if (controller.dataEpoch !== lastSyncedEpoch) {
             lastSyncedEpoch = controller.dataEpoch
+            // Diagnostic: compare internal vs public windows (empty public rows => blank cards)
+            var pubWins = 0
+            if (uiList && uiList.length) {
+                for (var ui = 0; ui < uiList.length; ui++) {
+                    if (uiList[ui] && uiList[ui].id === p.id) {
+                        pubWins = (uiList[ui].windows && uiList[ui].windows.length) || 0
+                        break
+                    }
+                }
+            }
             console.log("Claude Usage: sync compact name=", compactName,
                         "loading=", isLoading, "count=", loadingCountText,
                         "rows=", quotaRowCount,
+                        "pubWins=", pubWins,
+                        "uiProfiles=", uiList ? uiList.length : 0,
                         "err=", errorMsg)
         }
     }
@@ -211,6 +223,7 @@ PlasmoidItem {
         if (!profile) return
         detailWindow.profiles = root.profileList
         detailWindow.nowMs = root.nowMs
+        detailWindow.dataEpoch = root.dataEpoch
         detailWindow.sessionColorMode = Plasmoid.configuration.sessionColorMode || "capacity"
         detailWindow.weeklyColorMode = Plasmoid.configuration.weeklyColorMode || "efficiency"
         detailWindow.i18n = root.i18nObj
@@ -246,6 +259,7 @@ PlasmoidItem {
         id: detailWindow
         profiles: root.profileList
         nowMs: root.nowMs
+        dataEpoch: root.dataEpoch
         sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity"
         weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
         i18n: root.i18nObj

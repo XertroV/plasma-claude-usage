@@ -66,6 +66,7 @@ Item {
                 visible: index < cardsRoot.maxCards
                 height: visible ? implicitHeight : 0
                 profile: modelData
+                dataEpoch: cardsRoot.dataEpoch
                 nowMs: cardsRoot.nowMs
                 sessionColorMode: cardsRoot.sessionColorMode
                 weeklyColorMode: cardsRoot.weeklyColorMode

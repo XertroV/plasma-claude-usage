@@ -64,10 +64,12 @@ function cloneObject(src) {
 }
 
 function cloneWindows(windows) {
-    if (!windows || !Array.isArray(windows))
+    // Accept real arrays and QML array-like lists (length + index access)
+    if (!windows || typeof windows.length !== "number" || windows.length < 0)
         return []
     var out = []
-    for (var i = 0; i < windows.length; i++) {
+    var n = windows.length
+    for (var i = 0; i < n; i++) {
         var w = windows[i]
         out.push(w && typeof w === "object" ? cloneObject(w) : w)
     }

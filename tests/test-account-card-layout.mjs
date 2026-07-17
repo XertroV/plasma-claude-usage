@@ -108,11 +108,15 @@ assert(!headerControlsInOrder(headerWithOldOrder),
 // I001 Task 2: presentation seam — every selected quota (including extras) is a normal row
 assert(src.includes('import "js/QuotaPresentation.js" as QP'),
     "account card imports the quota presentation module")
-assert(src.includes("readonly property var quotaPresentation: QP.presentProfile(profile,"),
+assert(src.includes("QP.presentProfile(p,")
+       || src.includes("QP.presentProfile(profile,"),
     "account card exposes the shared presentation snapshot")
-assert(src.includes("readonly property var quotaRows: quotaPresentation.rows"),
+assert(src.includes("quotaPresentation")
+       && src.includes("presentation.rows")
+       && src.includes("quotaRows"),
     "account card repeats presentation rows rather than role-filtered windows")
-assert(src.includes("presentationRow: modelData"),
+assert(src.includes("presentationRow:")
+       && (src.includes("rows[index]") || src.includes("modelData")),
     "account card feeds each presentation row into QuotaRow")
 assert(!src.includes("QC.visibleWindows(")
        && !src.includes("QC.colorModeForWindow(")

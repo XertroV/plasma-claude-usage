@@ -133,7 +133,9 @@ function specFor(profile, persisted) {
  * Foreign / invalid specs are treated as defaults without property inspection.
  */
 function apply(windows, spec) {
-    if (!Array.isArray(windows)) return []
+    // Accept real arrays and QML array-like lists; reject strings (also have length)
+    if (!windows || typeof windows === "string" || typeof windows.length !== "number")
+        return []
     var usable = validSpec(spec) ? spec : {
         provider: "",
         policy: defaultsPolicy()

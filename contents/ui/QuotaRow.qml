@@ -48,7 +48,9 @@ RowLayout {
         text: rowRoot.periodLabel
         font.pixelSize: rowRoot.textPixelSize
         font.bold: true
-        color: isSkeleton ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.disabledTextColor
+        color: isSkeleton
+               ? Kirigami.Theme.disabledTextColor
+               : Kirigami.Theme.textColor
         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
         Layout.maximumWidth: Kirigami.Units.gridUnit * 4
         elide: Text.ElideRight
