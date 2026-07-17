@@ -89,7 +89,7 @@ Create two pure JavaScript modules:
 ProfileRefresh.run(input, ports, emit) -> accepted
 ```
 
-`accepted` is `false` only when the credential port cannot start immediately, allowing the existing queue to rotate/retry the item. When accepted, `emit()` receives one synchronous `started` transition and exactly one terminal transition.
+`accepted` is `false` only when the credential port cannot start immediately, allowing the existing queue to rotate/retry the item. When accepted, `emit()` receives one synchronous `started` transition, at most one `credentials` transition after a valid credential body, and exactly one terminal transition.
 
 ```js
 input = {
@@ -138,8 +138,9 @@ The production ports adapt current QML facilities. Tests provide a deterministic
 
 ```js
 transition = {
-    type: "started" | "success" | "auth_error" | "auth_suspended"
-          | "rate_limited" | "transport_error" | "parse_error",
+    type: "started" | "credentials" | "success" | "auth_error"
+          | "auth_suspended" | "rate_limited"
+          | "transport_error" | "parse_error",
     profileId,
     generation,
     patch,
@@ -148,7 +149,7 @@ transition = {
 }
 ```
 
-Every transition includes `profileId` and `generation`. `patch` is mutation intent owned by the transaction: loading/error state plus auth hold/suspension or rate-limit backoff fields. A success also includes the normalised parser result.
+Every transition includes `profileId` and `generation`. `patch` is mutation intent owned by the transaction: loading/error state, resolved auth metadata, auth hold/suspension, or rate-limit backoff fields. `credentials` carries the resolved access token/account/resource/slot/plan fields and clears prior auth failure state after a valid manual read or token rotation, before HTTP starts. A success also includes the normalised parser result.
 
 ### Controller application seam
 
@@ -180,6 +181,10 @@ Each request is data, not an XHR object:
 ```js
 {
     key,
+    profileId,
+    generation,
+    provider,
+    opencodeSlot,
     endpoint,
     url,
     method: "GET",
@@ -188,11 +193,17 @@ Each request is data, not an XHR object:
 }
 ```
 
-Each exchange returned by the HTTP port is:
+Provider adapters define `key`, endpoint, URL, method, headers, and timeout. Before transport, the transaction decorates every request with stable identity/generation and cache-relevant profile metadata.
+
+Each exchange returned by the HTTP port preserves that metadata:
 
 ```js
 {
     key,
+    profileId,
+    generation,
+    provider,
+    opencodeSlot,
     endpoint,
     url,
     status,
@@ -217,7 +228,7 @@ Unknown/effective-provider failure produces an explicit parse/configuration outc
 
 1. A mutable profile array index never crosses an asynchronous seam.
 2. Every credential request, HTTP request, exchange, and transition carries one stable profile ID and generation.
-3. A transaction emits at most one terminal transition.
+3. A transaction emits one `started`, at most one valid-credential transition, and at most one terminal transition.
 4. Duplicate XHR callbacks cannot duplicate cache recording or completion for that request.
 5. Every settled HTTP exchange is passed once to `recordExchange()`, even if the controller later rejects the generation as stale.
 6. Standard providers make one request; Grok always attempts both request legs on every accepted refresh.
@@ -307,8 +318,8 @@ Add a Node VM loader for QML JavaScript modules and a deterministic mock port. T
 - arbitrary HTTP completion order;
 - timeout versus network status 0;
 - duplicate callbacks;
-- captured request headers/tokens;
-- captured cache exchanges;
+- captured request identity/generation, provider metadata, headers, and token snapshots;
+- captured cache exchanges with the same identity/generation metadata;
 - controlled clock values.
 
 ### Fixture-driven provider coverage
@@ -320,7 +331,7 @@ Run the existing fixture files through the public transaction interface:
 - Grok default plus credits fixtures, in both completion orders;
 - MiniMax remains fixture.
 
-Use minimal inline bodies for Z.ai and Kimi until dedicated sanitised fixtures exist. Verify normalised usage outcomes, request shape, and exactly-once completion.
+Use minimal inline bodies for Z.ai and Kimi until dedicated sanitised fixtures exist. Verify normalised usage outcomes, request shape, and exactly-once credential/terminal transitions.
 
 ### Failure and invariant coverage
 
@@ -328,6 +339,7 @@ Test:
 
 - missing credential body;
 - malformed credential JSON;
+- valid credential stdout accompanied by a non-zero executable exit code (preserve current parse behaviour);
 - missing token;
 - first automatic auth failure hold;
 - auth suspension threshold;
@@ -363,10 +375,10 @@ Existing discovery, visibility, cache-shell, layout, and QML tests remain regres
 1. Characterise current provider request/outcome behaviour through fixture and failure tests.
 2. Add provider adapters and their pure tests without changing the controller path.
 3. Add the transaction coordinator and mock ports; test identity, once-only settlement, auth, backoff, and Grok aggregation.
-4. Adapt existing credential reader, XHR, cache, clock, and transition commit as production ports.
-5. Route standard-provider refreshes through the transaction.
-6. Route Grok through the same transaction and delete live-profile `grok*` state.
-7. Remove old lifecycle functions and provider branches from `ProfileController` while retaining global scheduling.
+4. Adapt the existing credential reader, XHR, cache, clock, and transition commit as production ports, then switch all accepted profile refreshes to the transaction.
+5. Delete the now-unused standard-provider controller lifecycle.
+6. Delete the now-unused Grok lifecycle and live-profile `grok*` state.
+7. Remove remaining dead lifecycle helpers and provider branches from `ProfileController` while retaining global scheduling.
 8. Run the complete serial regression suite and review against this design.
 
 ## Acceptance Criteria
@@ -392,11 +404,11 @@ Create a second milestone under `P1 — Architecture Deepening`, with one epic a
 1. provider-adapter characterisation and fixtures;
 2. transaction core plus mock ports and failure policy;
 3. production credential/HTTP/cache port adaptation;
-4. standard-provider controller migration;
-5. Grok migration and transient-state deletion;
+4. standard-provider legacy-lifecycle deletion;
+5. Grok legacy-lifecycle and transient-state deletion;
 6. lifecycle cleanup, controller seam regression, and full verification.
 
-Tasks 4 and 5 may proceed independently after the transaction and production ports exist. The final cleanup depends on both.
+Tasks 4 and 5 are sequential because both delete substantial regions of `ProfileController.qml`; sequencing avoids conflicting worktree merges. The final cleanup follows both.
 
 --- SUMMARY ---
 
