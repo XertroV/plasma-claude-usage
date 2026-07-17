@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * P1.M4.E1.T004 — production visibility adapter + registry usageResult contracts.
+ * P1.M3.E1.T004 — ProfileController registry store/outcome seam.
  *
- * Residual: ProfileController does not yet call ProfileRegistry.transition()
- * (full I003 controller integration incomplete). This suite:
- *  1) Source-contracts the controller adapter body and live-config re-read.
- *  2) Proves the production adapter shape (VQ.specFor/apply + QC.updateTimePercent)
- *     works as the injected registry visibility adapter with live config snapshots.
+ * Source contracts: one registry result adapter, public snapshots, config
+ * snapshot, I002 success → usageResult, other I002 outcomes → patch by
+ * stable profile ID + generation. Raw windows must not bypass visibility.
+ *
+ * Also retains production visibility-adapter behaviour checks (I004 seam).
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -19,8 +19,100 @@ const root = join(here, "..")
 
 const controllerSrc = readFileSync(
     join(root, "contents/ui/ProfileController.qml"), "utf8")
+const mainSrc = readFileSync(join(root, "contents/ui/main.qml"), "utf8")
 
-// --- source contracts: production adapter + live config on usageResult path ---
+/** Extract `{ ... }` body starting at the opening brace index. */
+function extractBalanced(text, openBraceIdx) {
+    if (text.charAt(openBraceIdx) !== "{")
+        throw new Error("expected '{' at " + openBraceIdx)
+    let depth = 0
+    for (let i = openBraceIdx; i < text.length; i++) {
+        const c = text.charAt(i)
+        if (c === "{") depth++
+        else if (c === "}") {
+            depth--
+            if (depth === 0)
+                return text.slice(openBraceIdx, i + 1)
+        }
+    }
+    throw new Error("unbalanced braces from " + openBraceIdx)
+}
+
+function functionBody(src, name) {
+    const m = src.match(new RegExp(`function\\s+${name}\\s*\\([^)]*\\)\\s*\\{`))
+    assert.ok(m, `${name} present`)
+    return extractBalanced(src, m.index + m[0].length - 1)
+}
+
+// --- Task 4 source contracts ---
+{
+    assert.match(controllerSrc, /import "js\/ProfileRegistry\.js" as Registry/)
+    assert.match(controllerSrc, /property var publicProfileList:/)
+    assert.match(controllerSrc, /function applyRegistryResult\s*\(/)
+    assert.match(controllerSrc, /function registryConfigSnapshot\s*\(/)
+    assert.match(controllerSrc, /type:\s*"usageResult"/)
+    console.log("ok: registry import, publicProfileList, adapters, usageResult event")
+}
+
+// applyRegistryResult: single adapter assigns internal/public + effects
+{
+    const body = functionBody(controllerSrc, "applyRegistryResult")
+    assert.match(body, /profiles\s*=/)
+    assert.match(body, /publicProfileList\s*=/)
+    assert.match(body, /dataEpoch/)
+    assert.match(body, /effect\.type|effects\[/)
+    assert.match(body, /["']discover["']/)
+    assert.match(body, /["']refreshAll["']/)
+    assert.match(body, /["']refresh["']/)
+    assert.match(body, /["']persist["']/)
+    assert.match(body, /["']warning["']/)
+    console.log("ok: applyRegistryResult assigns state/public and interprets effects")
+}
+
+// registryConfigSnapshot exposes exact kcfg keys used by the registry
+{
+    const body = functionBody(controllerSrc, "registryConfigSnapshot")
+    for (const key of [
+        "multiProfileMode", "provider", "opencodeSubProvider", "credentialsPath",
+        "displayName", "discoverOnLoad", "enabledProfilesJson",
+        "profileDisplayNamesJson", "customProfilesJson", "customProfileNextId",
+        "visibleWindowsJson"
+    ]) {
+        assert.match(body, new RegExp(key), `config snapshot includes ${key}`)
+    }
+    console.log("ok: registryConfigSnapshot covers registry config keys")
+}
+
+// I002 applyRefreshTransition routes success through usageResult, others through patch
+{
+    const body = functionBody(controllerSrc, "applyRefreshTransition")
+    assert.match(body, /Registry\.transition\s*\(/)
+    assert.match(body, /type:\s*"usageResult"/)
+    assert.match(body, /type:\s*"patch"/)
+    assert.match(body, /expectedGeneration/)
+    assert.match(body, /profileId:\s*transition\.profileId/)
+    assert.match(body, /applyRegistryResult\s*\(/)
+
+    // Success path must not apply raw windows onto the row outside the registry
+    assert.doesNotMatch(body, /\.windows\s*=\s*transition\.usageResult/)
+    assert.doesNotMatch(body, /adapter\.apply\(\s*transition\.usageResult/)
+    // Direct applyUsageResult bypass removed from I002 transition adapter
+    assert.doesNotMatch(body, /applyUsageResult\s*\(/)
+    console.log("ok: applyRefreshTransition routes I002 via registry usageResult/patch")
+}
+
+// UI sync consumes prebuilt publicProfileList (not ad-hoc secret denylist rebuild)
+{
+    assert.match(mainSrc, /publicProfileList/)
+    assert.doesNotMatch(
+        mainSrc,
+        /controller\.publicProfiles\s*\(/,
+        "main must consume publicProfileList, not recompute via publicProfiles()"
+    )
+    console.log("ok: main.qml consumes publicProfileList")
+}
+
+// Production visibility adapter still present for injection into registry
 {
     assert.match(controllerSrc, /function\s+registryVisibilityAdapter\s*\(/)
     assert.match(controllerSrc, /return VQ\.specFor\(profile,\s*persisted\)/)
@@ -28,20 +120,10 @@ const controllerSrc = readFileSync(
     assert.match(controllerSrc, /QC\.updateTimePercent\(projected\[i\],\s*nowMs\)/)
     assert.doesNotMatch(controllerSrc,
         /QC\.(parseVisibleWindowsConfig|visibilityProviderKey|visibilitySpecForProvider|applyVisibility)\s*\(/)
-
-    // applyUsageResult must build a live config snapshot before adapter.specFor
-    const applyIdx = controllerSrc.indexOf("function applyUsageResult")
-    assert.ok(applyIdx >= 0, "applyUsageResult present")
-    const applyBody = controllerSrc.slice(applyIdx, applyIdx + 900)
-    assert.match(applyBody, /registryVisibilityAdapter\s*\(/)
-    assert.match(applyBody, /cfgValue\(\s*["']visibleWindowsJson["']/)
-    assert.match(applyBody, /\.specFor\(/)
-    assert.match(applyBody, /\.apply\(/)
-    // Live raw config is read in applyUsageResult, not a stale row field alone
-    assert.match(applyBody, /rawVis/)
-    console.log("ok: controller production adapter + live config source contracts")
+    console.log("ok: production visibility adapter injects VQ + time percent")
 }
 
+// --- Behaviour: production adapter + registry usageResult (live config) ---
 const VQ = loadQmlJs(
     join(root, "contents/ui/js/VisibleQuotaConfig.js"), {},
     ["specFor", "apply"]
@@ -94,7 +176,7 @@ function makeInternal(overrides) {
     }, overrides || {})
 }
 
-// --- accepted usageResult: live config snapshot drives VQ, not stale allowlist ---
+// Accepted usageResult: live config snapshot drives VQ (cannot bypass visibility)
 {
     const prior = makeInternal()
     const adapter = productionVisibilityAdapter()
@@ -103,7 +185,6 @@ function makeInternal(overrides) {
         { id: "weekly", usagePercent: 40, defaultVisible: true, periodMs: 0 },
         { id: "weekly_fable", usagePercent: 5, defaultVisible: false, periodMs: 0 }
     ]
-    // Live config: only weekly visible (strict per-provider allowlist)
     const liveJson = JSON.stringify({ claude: ["weekly"] })
 
     const result = Registry.transition({
@@ -132,67 +213,40 @@ function makeInternal(overrides) {
     assert.equal(byId["5h"].visible, false, "live allowlist hides 5h")
     assert.equal(byId.weekly.visible, true, "live allowlist shows weekly")
     assert.equal(byId.weekly_fable.visible, false, "unlisted hidden under strict")
-    // Time percent is composed by the production adapter (may be 0 without reset data)
     assert.equal(typeof byId.weekly.timePercent, "number")
     assert.equal(result.publicProfiles[0].accessToken, undefined)
-    console.log("ok: registry usageResult re-reads live visibility via production adapter")
+    // Public projection is the 12-field allowlist
+    assert.deepEqual(Object.keys(result.publicProfiles[0]).sort(), [
+        "bankedResets", "configDir", "credPath", "displayName", "enabled", "error",
+        "id", "lastFetchMs", "loading", "planName", "provider", "windows"
+    ].sort())
+    console.log("ok: registry usageResult applies live visibility; public is safe")
 }
 
-// --- second commit with different live config must re-evaluate (no cached policy) ---
+// Generic patch cannot smuggle raw windows past the registry
 {
-    const prior = makeInternal({
-        windows: [
-            { id: "5h", usagePercent: 1, visible: false, defaultVisible: true },
-            { id: "weekly", usagePercent: 2, visible: true, defaultVisible: true }
-        ],
-        loading: false,
-        refreshGeneration: 8
-    })
-    const adapter = productionVisibilityAdapter()
-    const winsIn = [
-        { id: "5h", usagePercent: 30, defaultVisible: true },
-        { id: "weekly", usagePercent: 50, defaultVisible: true }
-    ]
-
-    const r1 = Registry.transition({
+    const prior = makeInternal()
+    const result = Registry.transition({
         state: { profiles: [prior] },
         event: {
-            type: "usageResult",
+            type: "patch",
             profileId: "claude-work",
-            expectedGeneration: 8,
-            usageResult: { windows: winsIn, planName: "Pro" },
-            patch: { loading: false }
+            expectedGeneration: 7,
+            patch: {
+                loading: false,
+                windows: [{ id: "evil", usagePercent: 99, visible: true }]
+            }
         },
-        config: { visibleWindowsJson: '["5h"]' },
-        visibility: adapter,
-        nowMs: 1000
+        config: { visibleWindowsJson: "[]" },
+        visibility: productionVisibilityAdapter(),
+        nowMs: 1
     })
-    assert.equal(r1.accepted, true)
-    assert.equal(r1.state.profiles[0].windows.find(w => w.id === "5h").visible, true)
-    assert.equal(r1.state.profiles[0].windows.find(w => w.id === "weekly").visible, false)
-
-    // Bump generation as a real refresh would; new live config flips visibility
-    r1.state.profiles[0].refreshGeneration = 9
-    const r2 = Registry.transition({
-        state: r1.state,
-        event: {
-            type: "usageResult",
-            profileId: "claude-work",
-            expectedGeneration: 9,
-            usageResult: { windows: winsIn, planName: "Pro" },
-            patch: { loading: false }
-        },
-        config: { visibleWindowsJson: '["weekly"]' },
-        visibility: adapter,
-        nowMs: 2000
-    })
-    assert.equal(r2.accepted, true)
-    assert.equal(r2.state.profiles[0].windows.find(w => w.id === "5h").visible, false)
-    assert.equal(r2.state.profiles[0].windows.find(w => w.id === "weekly").visible, true)
-    console.log("ok: successive usageResults honour latest live visibleWindowsJson")
+    assert.equal(result.accepted, false)
+    assert.equal(result.state.profiles[0].windows[0].id, "5h")
+    console.log("ok: patch with windows rejected (no visibility bypass)")
 }
 
-// --- adapter failure still preserves prior windows (registry safety unchanged) ---
+// Adapter failure preserves prior windows
 {
     const prior = makeInternal({
         windows: [{ id: "5h", usagePercent: 10, visible: true, defaultVisible: true }]
@@ -223,28 +277,4 @@ function makeInternal(overrides) {
     console.log("ok: adapter failure safety retained")
 }
 
-// --- opaque production specs: registry must not need to inspect properties ---
-{
-    const adapter = productionVisibilityAdapter()
-    const profile = { provider: "claude" }
-    const opaque = adapter.specFor(profile, '{"claude":{"weekly":false}}')
-    // Callers may only pass the result through; apply must work without external reads
-    const out = adapter.apply(
-        [
-            { id: "5h", defaultVisible: true },
-            { id: "weekly", defaultVisible: true }
-        ],
-        opaque,
-        0
-    )
-    assert.equal(out.find(w => w.id === "5h").visible, true)
-    assert.equal(out.find(w => w.id === "weekly").visible, false)
-    console.log("ok: opaque production specs apply without caller inspection")
-}
-
-// Residual documentation for parent merge notes
-console.log(
-    "residual: ProfileController still applies usage via applyUsageResult " +
-    "rather than ProfileRegistry.transition(); adapter factory is ready to inject."
-)
-console.log("\nAll profile-registry-controller visibility seam tests passed.")
+console.log("\nAll profile-registry-controller seam tests passed.")

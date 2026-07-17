@@ -71,26 +71,28 @@ for (const name of [
     console.log("ok: requestRefreshHttp is thin (XHR only)")
 }
 
-// Transition application re-reads visibility on success
+// Transition application routes through registry (I003 Task 4)
 {
     const m = src.match(/function applyRefreshTransition\s*\([^)]*\)\s*\{/)
     assert.ok(m, "applyRefreshTransition present")
     const body = extractBalanced(src, m.index + m[0].length - 1)
     assert.match(body, /type\s*===\s*["']started["']|transition\.type\s*===\s*["']started["']/)
     assert.match(body, /["']success["']/)
-    assert.match(body, /applyUsageResult/)
-    console.log("ok: applyRefreshTransition handles started/success + applyUsageResult")
+    assert.match(body, /Registry\.transition\s*\(/)
+    assert.match(body, /type:\s*"usageResult"/)
+    assert.match(body, /type:\s*"patch"/)
+    assert.match(body, /applyRegistryResult\s*\(/)
+    assert.doesNotMatch(body, /applyUsageResult\s*\(/)
+    console.log("ok: applyRefreshTransition routes started/success via registry")
 }
 
-// applyUsageResult still re-reads live visibility (B034)
+// Success path injects production visibility adapter + live config snapshot
 {
-    const applyIdx = src.indexOf("function applyUsageResult")
-    assert.ok(applyIdx >= 0, "applyUsageResult present")
-    const applyBody = src.slice(applyIdx, applyIdx + 1200)
-    assert.match(applyBody, /registryVisibilityAdapter\s*\(/)
-    assert.match(applyBody, /visibleWindowsJson/)
-    assert.match(applyBody, /\.specFor\(/)
-    console.log("ok: applyUsageResult re-reads live visibility")
+    assert.match(src, /function applyRegistryResult\s*\(/)
+    assert.match(src, /function registryConfigSnapshot\s*\(/)
+    assert.match(src, /function registryVisibilityAdapter\s*\(/)
+    assert.match(src, /visibleWindowsJson/)
+    console.log("ok: registry adapter + live config snapshot present")
 }
 
 // refreshGeneration is a live profile field

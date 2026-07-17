@@ -55,12 +55,14 @@ assert.doesNotMatch(controller,
 assert.match(registry, /visibility\.specFor\s*\(/)
 assert.match(registry, /visibility\.apply\s*\(/)
 
-// Live config re-read on accepted usage path
+// Live config re-read on accepted usage path (via registry usageResult + config snapshot)
 assert.match(controller, /function\s+applyUsageResult\s*\(/)
+assert.match(controller, /function\s+registryConfigSnapshot\s*\(/)
+assert.match(controller, /type:\s*"usageResult"/)
 assert.match(controller,
-    /cfgValue\(\s*["']visibleWindowsJson["']\s*,\s*["']\[]["']\s*\)/)
-assert.match(controller, /adapter\.specFor\(\s*p\s*,\s*rawVis\s*\)/)
-assert.match(controller, /adapter\.apply\(\s*result\.windows/)
+    /visibleWindowsJson:\s*cfgValue\(\s*["']visibleWindowsJson["']\s*,\s*["']\[]["']\s*\)/)
+assert.match(controller, /registryVisibilityAdapter\s*\(/)
+assert.match(controller, /Registry\.transition\s*\(/)
 
 const forbiddenSpecReads = []
 for (const [name, source] of [

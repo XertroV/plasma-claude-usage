@@ -132,10 +132,10 @@ PlasmoidItem {
 
     function syncCompactFromController() {
         if (!controller) return
-        // Controller-internal profiles still hold tokens for XHR; UI list strips secrets (B012).
+        // Controller-internal profiles still hold tokens for XHR; UI list uses
+        // registry-built publicProfileList (12-field allowlist, deep-copied windows).
         var list = controller.profiles || []
-        // publicProfiles()/toUiProfile omit accessToken, accountId, resourceUrl, lastFailedToken, raw bodies
-        var uiList = controller.publicProfiles()
+        var uiList = controller.publicProfileList || []
         profileList = uiList
         dataEpoch = controller.dataEpoch
         nowMs = controller.nowMs
