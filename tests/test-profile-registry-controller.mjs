@@ -320,4 +320,77 @@ function makeInternal(overrides) {
     console.log("ok: controller coalescing/setHidden/discovery success seam")
 }
 
+// --- Task 6: old registry lifecycle choreography deleted ---
+{
+    const forbiddenControllerFns = [
+        "blankProfileRow",
+        "mergeDiscovered",
+        "reapplyConfig",
+        "cloneProfile",
+        "toUiProfile",
+        "publicProfiles",
+        "updateProfile",
+        "isUiSecretKey"
+    ]
+    for (const name of forbiddenControllerFns) {
+        assert.doesNotMatch(
+            controllerSrc,
+            new RegExp(`function\\s+${name}\\s*\\(`),
+            `controller must not define ${name}`
+        )
+        assert.doesNotMatch(
+            controllerSrc,
+            new RegExp(`\\b${name}\\s*\\(`),
+            `controller must not call ${name}`
+        )
+    }
+    // Index-based patching and secret denylist projection must not remain
+    assert.doesNotMatch(controllerSrc, /isUiSecretKey/)
+    assert.doesNotMatch(controllerSrc, /function\s+toUiProfile\s*\(/)
+    // Discovery still crosses the registry discovered transition
+    assert.match(controllerSrc, /type:\s*"discovered"/)
+    assert.match(controllerSrc, /applyRegistryResult\s*\(/)
+    console.log("ok: controller old registry lifecycle helpers deleted")
+}
+
+// --- Task 6: KCM no longer owns enabled/name/custom serialisation policy ---
+{
+    const kcmSrc = readFileSync(join(root, "contents/ui/configGeneral.qml"), "utf8")
+    assert.match(kcmSrc, /import "js\/ProfileRegistry\.js" as Registry/)
+    assert.match(kcmSrc, /Registry\.editConfig\s*\(/)
+    assert.match(kcmSrc, /property int cfg_customProfileNextId/)
+    // Old hand-rolled allowlist / name / custom ID helpers must be gone
+    for (const name of [
+        "pushEnabledJson", "pushNamesJson", "pushCustomJson",
+        "nextCustomId", "allocCustomId", "customIdSeq"
+    ]) {
+        assert.doesNotMatch(
+            kcmSrc,
+            new RegExp(`\\b${name}\\b`),
+            `KCM must not retain ${name}`
+        )
+    }
+    // No duplicated __none__ / custom-id allocator policy outside editConfig
+    assert.doesNotMatch(
+        kcmSrc,
+        /JSON\.stringify\(\s*\[\s*["']__none__["']\s*\]\s*\)/,
+        "KCM must not hand-roll __none__ sentinel"
+    )
+    // Visible-quota helpers remain (I004 owns that seam)
+    assert.match(kcmSrc, /function\s+projectVisibleQuotaConfiguration\s*\(/)
+    assert.match(kcmSrc, /function\s+editVisibleQuotaConfiguration\s*\(/)
+    console.log("ok: KCM delegates enabled/name/custom to Registry.editConfig")
+}
+
+// --- Task 6: discovery executable adapter unchanged ---
+{
+    const discoverSrc = readFileSync(
+        join(root, "contents/scripts/discover-profiles.sh"), "utf8")
+    assert.match(discoverSrc, /#!\/bin\/bash|#!\/usr\/bin\/env bash/)
+    // Stable production discovery contract markers
+    assert.match(discoverSrc, /credInode|cred_inode|inode/i)
+    assert.doesNotMatch(discoverSrc, /ProfileRegistry|editConfig|transition/)
+    console.log("ok: discovery script remains a thin filesystem adapter")
+}
+
 console.log("\nAll profile-registry-controller seam tests passed.")
