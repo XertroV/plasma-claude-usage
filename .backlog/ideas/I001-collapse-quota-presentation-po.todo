@@ -1,0 +1,54 @@
+---
+complexity: high
+created_at: "2026-07-17T01:47:37Z"
+depends_on: []
+estimate_hours: 10
+id: I001
+priority: critical
+status: pending
+tags:
+    - architecture-review
+    - deep-module
+    - quota-presentation
+    - in-process
+title: Collapse quota presentation policy
+updated_at: "2026-07-17T01:47:37Z"
+---
+Source: `file:///tmp/architecture-review-20260715-224729.html` (Candidate 01)
+
+Rating: **Strong**
+Test seam: **in-process**
+
+Relevant files:
+- `contents/ui/js/QuotaCommon.js`
+- `AccountCard.qml`
+- `DetailWindow.qml`
+- `main.qml`
+- `tests/test-visibility.mjs`
+
+## Problem
+
+Rendering modules compose shallow selectors differently; the extra-row bug passed pure visibility tests because the wrong selector lived at the call site. Account card, detail window, compact summary, and tooltip each choose semantics using `primaryWindows`, `extraWindows`, `visibleWindows`, and `colorModeForWindow`. Role and visibility knowledge therefore leaks into each rendering module.
+
+## Proposed direction
+
+Deepen quota presentation so roles, visibility, ordering, labels, colours, and fallbacks have locality behind one seam. Each caller should receive a coherent projection for cards, detail, summary, and tooltips.
+
+## Deletion test
+
+Delete the selector cluster and its knowledge reappears across four callers: the module is needed, but its interface is too shallow.
+
+## Expected wins
+
+- Visibility semantics live once.
+- Four callers share one policy.
+- Tests cross the rendering seam.
+- Shallow selector choreography can be deleted.
+
+## Design note
+
+The 15 July draft placed extras in detail or compact chips; current user direction promotes explicitly selected extras to full card rows. That policy now needs locality instead of another call-site convention.
+
+## Priority rationale
+
+Top recommendation in the review: the extra-row failure directly demonstrates that the current interface has no locality, and this in-process deepening offers immediate leverage across cards, detail, compact summary, tooltips, and their tests.
