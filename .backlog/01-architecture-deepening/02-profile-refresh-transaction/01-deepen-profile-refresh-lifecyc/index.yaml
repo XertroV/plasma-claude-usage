@@ -52,7 +52,8 @@ tasks:
       file: T005-remove-the-grok-legacy-refresh.todo
       id: T005
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Remove the Grok legacy refresh lifecycle and state
     - complexity: medium
       depends_on:

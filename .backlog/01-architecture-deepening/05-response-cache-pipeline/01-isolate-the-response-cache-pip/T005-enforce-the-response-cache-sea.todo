@@ -1,4 +1,7 @@
 ---
+claimed_at: "2026-07-17T15:32:10Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: medium
 created_at: "2026-07-17T10:54:55Z"
 depends_on:
@@ -6,15 +9,10 @@ depends_on:
 estimate_hours: 1.5
 id: P1.M5.E1.T005
 priority: high
-status: pending
-tags:
-    - i005
-    - architecture
-    - response-cache
-    - verification
-    - cleanup
-    - security
+started_at: "2026-07-17T15:32:10Z"
+status: in_progress
+tags: []
 title: Enforce the response-cache seam and verify regressions
-updated_at: "2026-07-17T10:54:55Z"
+updated_at: "2026-07-17T15:32:10Z"
 ---
 Source: I005 and docs/superpowers/plans/2026-07-17-response-cache-pipeline.md, Task 5. Close acceptance gaps, enforce the deletion/source contract, run all present serial Node/shell/Qt gates, verify scope and whitespace, and complete independent review/fix/rereview. Acceptance: fake tests cover disabled, stale, metadata, envelope, paths, staging, FIFO, bounded watchdog, late completion, failure and recovery; shared endpoint fixtures prove exact direct-provider aliases, OpenCode aliases/fallback, and Grok dual-leg slugs at both request and cache seams; three independent clock reads are exact-order/destination tested; shell history/latest atomic ownership passes unchanged; controller has no cache implementation; product diff is limited to ProfileController.qml, LocalResponseCache.qml, and ResponseCachePipeline.js; no accepted blocker/major remains; Qt is claimed only with explicit zero-failure output.

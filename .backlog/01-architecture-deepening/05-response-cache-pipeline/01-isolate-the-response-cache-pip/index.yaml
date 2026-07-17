@@ -52,5 +52,6 @@ tasks:
       file: T005-enforce-the-response-cache-sea.todo
       id: T005
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Enforce the response-cache seam and verify regressions
