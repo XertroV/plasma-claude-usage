@@ -29,6 +29,35 @@ function count(source, needle) {
     return source.split(needle).length - 1
 }
 
+function objectBlocks(source, typeName) {
+    const blocks = []
+    const marker = `${typeName} {`
+    let searchFrom = 0
+
+    while (true) {
+        const start = source.indexOf(marker, searchFrom)
+        if (start === -1) return blocks
+
+        const braceStart = source.indexOf("{", start)
+        let depth = 0
+        let end = braceStart
+        for (; end < source.length; end++) {
+            if (source[end] === "{") depth++
+            if (source[end] === "}") {
+                depth--
+                if (depth === 0) break
+            }
+        }
+        blocks.push(source.slice(start, end + 1))
+        searchFrom = end + 1
+    }
+}
+
+function findObjectBlock(source, typeName, semanticNeedle) {
+    return objectBlocks(source, typeName)
+        .find(block => block.includes(semanticNeedle)) || ""
+}
+
 const themeMidpoint = /Math\.round\(\s*\(\s*Kirigami\.Theme\.smallFont\.pixelSize\s*\+\s*Kirigami\.Theme\.defaultFont\.pixelSize\s*\)\s*\/\s*2\s*\)/
 
 assert(/readonly property int contentFontPixelSize:/.test(accountCard)
@@ -48,10 +77,30 @@ assert(/property int textPixelSize:/.test(quotaRow)
     "quota rows use the theme midpoint when compact and default font otherwise")
 assert(count(quotaRow, "font.pixelSize: rowRoot.textPixelSize") === 3,
     "all quota row labels share the readable text size")
-assert(quotaRow.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 2")
-       && quotaRow.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 4")
-       && count(quotaRow, "elide: Text.ElideRight") === 2,
-    "quota columns remain fixed and elided for compact cards")
+const periodLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
+    "text: rowRoot.periodLabel")
+const paceBar = findObjectBlock(quotaRow, "PaceBar",
+    "usagePercent: isSkeleton ? 0 : rowRoot.usagePct")
+const percentageLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
+    "Math.round(rowRoot.usagePct) + \"%\"")
+const countdownLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
+    "QC.formatCountdown(windowData.resetAtMs, nowMs)")
+
+assert(periodLabel.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 2")
+       && periodLabel.includes("elide: Text.ElideRight"),
+    "period column remains fixed and elided")
+assert(paceBar.includes("Layout.fillWidth: true"),
+    "pace bar receives remaining quota-row width")
+assert(percentageLabel.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 2")
+       && percentageLabel.includes("horizontalAlignment: Text.AlignRight"),
+    "percentage column remains fixed and right-aligned")
+assert(countdownLabel.includes("Layout.preferredWidth: implicitWidth")
+       && countdownLabel.includes("Layout.maximumWidth: Kirigami.Units.gridUnit * 5")
+       && countdownLabel.includes("elide: Text.ElideRight")
+       && countdownLabel.includes("horizontalAlignment: Text.AlignRight"),
+    "countdown uses its natural bounded width and remains right-aligned")
+assert(count(quotaRow, "Layout.fillWidth: true") === 2,
+    "only the quota row and pace bar opt into fill width")
 assert(accountCard.includes("textPixelSize: cardRoot.contentFontPixelSize"),
     "account cards pass their compact text size to quota rows")
 

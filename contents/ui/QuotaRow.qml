@@ -86,7 +86,7 @@ RowLayout {
         }
         font.pixelSize: rowRoot.textPixelSize
         color: Kirigami.Theme.disabledTextColor
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+        Layout.preferredWidth: implicitWidth
         Layout.maximumWidth: Kirigami.Units.gridUnit * 5
         elide: Text.ElideRight
         horizontalAlignment: Text.AlignRight

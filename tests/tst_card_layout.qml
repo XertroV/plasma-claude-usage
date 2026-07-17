@@ -148,10 +148,16 @@ TestCase {
         compare(secondPct.length, 1)
         compare(firstTime.length, 1)
         compare(secondTime.length, 1)
-        compare(firstPct[0].mapToItem(view, 0, 0).x,
-                secondPct[0].mapToItem(view, 0, 0).x)
-        compare(firstTime[0].mapToItem(view, 0, 0).x,
-                secondTime[0].mapToItem(view, 0, 0).x)
+        compare(firstPct[0].width, secondPct[0].width)
+        var firstTimeX = firstTime[0].mapToItem(view, 0, 0).x
+        var secondTimeX = secondTime[0].mapToItem(view, 0, 0).x
+        compare(firstTime[0].width, firstTime[0].implicitWidth)
+        compare(secondTime[0].width, secondTime[0].implicitWidth)
+        verify(firstTime[0].width !== secondTime[0].width,
+               "different countdown lengths should consume different natural widths")
+        verify(Math.abs((firstTimeX + firstTime[0].width)
+                        - (secondTimeX + secondTime[0].width)) < 1,
+               "countdown right edges should align within one pixel")
     }
 
     function test_narrowViewPreservesMinimumCardWidth() {
