@@ -14,7 +14,7 @@ ideas:
       file: I002-deepen-the-profile-refresh-tra.todo
       id: I002
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Deepen the profile refresh transaction
     - file: I003-deepen-the-profile-registry.todo
