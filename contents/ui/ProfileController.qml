@@ -1,6 +1,7 @@
 import QtQuick
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
+import "js/QuotaParsers.js" as QP
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
 import "js/ProfileRegistry.js" as Registry
@@ -29,7 +30,7 @@ Item {
 
     // Staggered refresh queue: [{ id, manual }, ...] — used by refresh-all and autoRefresh (B002)
     property var refreshQueue: []
-    // Monotonic generation for ProfileRefresh transactions (stale async outcomes discarded)
+    // Monotonic fetch generation — never reset on merge, so stale XHR cannot collide (B008)
     property int nextFetchGen: 1
     // Resolved $HOME for safe path expansion (B006) — never trust user path in shell
     property string homeDir: ""
@@ -69,29 +70,11 @@ Item {
         return (v === undefined || v === null) ? fallback : v
     }
 
-    function parseJsonConfig(raw, fallback) {
-        if (!raw || raw === "") return fallback
-        try { return JSON.parse(raw) } catch (e) { return fallback }
-    }
-
-    function normalizePath(path) {
-        if (!path) return ""
-        var p = QC.expandUserPath(path)
-        if (p.indexOf("/.claude/") >= 0 || p.indexOf("/.claude-") >= 0
-                || p.indexOf("$HOME/.claude/") >= 0 || p.indexOf("$HOME/.claude-") >= 0) {
-            p = p.replace(/\/\.credentials\.json$/, "")
-        }
-        return p
-    }
-
-    function pathsEqual(a, b) {
-        return QC.pathsEqual(a, b)
-    }
-
     /**
      * Multi-profile dashboard is the default (B004).
      * Legacy single-profile mode only when multiProfileMode is explicitly false.
      * (Old trap: any credentialsPath / displayName / non-claude provider forced legacy.)
+     * Filtering/matching for discovery candidates lives in ProfileRegistry.
      */
     function isLegacySingleInstance() {
         var multi = cfgValue("multiProfileMode", true)
@@ -99,63 +82,6 @@ Item {
         if (multi === false || multi === "false" || multi === 0 || multi === "0")
             return true
         return false
-    }
-
-    function legacyProfileMatches(meta) {
-        var credPath = cfgValue("credentialsPath", "")
-        if (credPath) return pathsEqual(meta.credPath, credPath)
-
-        var provider = cfgValue("provider", "claude")
-        if (provider === "opencode") {
-            var sub = cfgValue("opencodeSubProvider", "anthropic")
-            if (sub === "kimi") return meta.provider === "kimi"
-            if (sub === "zai") return meta.provider === "zai"
-            if (sub === "openai") return meta.provider === "codex"
-            if (sub === "anthropic") {
-                return meta.provider === "claude"
-                    || (meta.provider === "opencode" && meta.profileKey === "anthropic-accounts")
-            }
-            return meta.provider === "opencode"
-        }
-        if (provider === "claude") return meta.provider === "claude"
-        return meta.provider === provider
-    }
-
-    function filterDiscoveredProfiles(discovered) {
-        if (!isLegacySingleInstance()) return discovered
-        var out = []
-        for (var i = 0; i < discovered.length; i++) {
-            if (legacyProfileMatches(discovered[i])) out.push(discovered[i])
-        }
-        // B004: legacy is single-profile — if no credentialsPath, keep one canonical match
-        if (out.length > 1 && !cfgValue("credentialsPath", "")) {
-            out.sort(function(a, b) {
-                var pa = String(a.credPath || a.configDir || "")
-                var pb = String(b.credPath || b.configDir || "")
-                if (pa.length !== pb.length) return pa.length - pb.length
-                return pa < pb ? -1 : (pa > pb ? 1 : 0)
-            })
-            out = [out[0]]
-        }
-        return out
-    }
-
-    function profileDisplayName(meta) {
-        if (isLegacySingleInstance()) {
-            var legacyName = cfgValue("displayName", "")
-            if (legacyName) return legacyName
-        }
-        var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
-        if (names[meta.id]) return names[meta.id]
-        return QC.defaultProfileLabel(meta.provider, meta.profileKey)
-    }
-
-    function isProfileEnabled(meta) {
-        var id = meta && typeof meta === "object" ? meta.id : meta
-        if (!id) return true
-        var enabled = parseJsonConfig(cfgValue("enabledProfilesJson", "[]"), [])
-        if (!enabled || enabled.length === 0) return true
-        return enabled.indexOf(id) >= 0
     }
 
     /**
@@ -310,11 +236,6 @@ Item {
         return !!result.accepted
     }
 
-    /** Rebuild publicProfileList from the current internal profiles store. */
-    function syncPublicProfileList() {
-        publicProfileList = Registry.publicProfiles({ profiles: profiles })
-    }
-
     /**
      * Stable ID patch through the registry (optional generation precondition).
      * Rejects patches that carry windows — those must use usageResult.
@@ -367,7 +288,7 @@ Item {
                 else if (subCfg === "openai") effectiveProvider = "codex"
                 else if (subCfg === "anthropic") effectiveProvider = "claude"
             }
-            mergeDiscovered([{
+            applyDiscoveredCandidates([{
                 id: "legacy-config",
                 provider: effectiveProvider,
                 profileKey: "legacy",
@@ -411,7 +332,7 @@ Item {
             return
         }
 
-        mergeDiscovered([{
+        applyDiscoveredCandidates([{
             id: "legacy-bootstrap",
             provider: effectiveProvider,
             profileKey: "legacy",
@@ -447,91 +368,25 @@ Item {
         console.log("Claude Usage: discovery failed —", discoveryError)
     }
 
-    function resolveCustomCredPath(entry) {
-        if (!entry) return ""
-        if (entry.credPath)
-            return entry.credPath
-        // B009: path is often a config *directory* — resolve auth file by provider
-        return QC.defaultCredPathForProvider(entry.provider, entry.path)
-    }
-
-    function blankProfileRow(meta, visSpec) {
-        return {
-            id: meta.id,
-            provider: meta.provider,
-            profileKey: meta.profileKey || "",
-            configDir: meta.configDir || "",
-            credPath: meta.credPath || "",
-            isFlatFile: !!meta.isFlatFile,
-            displayName: profileDisplayName(meta),
-            enabled: true,
-            loading: false,
-            error: "",
-            planName: "",
-            bankedResets: 0,
-            windows: [],
-            lastUpdate: "",
-            accessToken: "",
-            accountId: "",
-            resourceUrl: "https://api.minimax.io",
-            opencodeSlot: "",
-            // Generic refresh generation for ProfileRefresh transaction (I002)
-            refreshGeneration: 0,
-            backoffMultiplier: 1,
-            lastFetchMs: 0,
-            authFailCount: 0,
-            authSuspended: false,
-            autoRefreshHoldUntilMs: 0,
-            lastFailedToken: "",
-            credLoadManual: false,
-            visibleWindowSpec: visSpec === undefined ? null : visSpec
-        }
-    }
-
     /**
-     * Discovery success path: valid candidate list crosses registry `discovered`.
+     * Thin discovery adapter: valid candidate list crosses registry `discovered`.
      * Failure must not call this (failDiscovery leaves registry state unchanged).
      */
-    function mergeDiscovered(discovered) {
-        var candidates = discovered || []
+    function applyDiscoveredCandidates(candidates) {
         var result = Registry.transition({
             state: { profiles: profiles },
-            event: { type: "discovered", candidates: candidates },
+            event: { type: "discovered", candidates: candidates || [] },
             config: registryConfigSnapshot(),
             visibility: registryVisibilityAdapter(),
             nowMs: nowMs
         })
         discoveryError = ""
         discovering = false
-        console.log("Claude Usage: merged",
+        console.log("Claude Usage: discovered",
                     (result && result.state && result.state.profiles)
                         ? result.state.profiles.length : 0,
                     "profile(s)")
         applyRegistryResult(result)
-    }
-
-    /**
-     * Compatibility wrapper: map legacy rediscover/membership/soft opts onto
-     * registry configurationChanged keys. Prefer noteRegistryConfigChanged().
-     */
-    function reapplyConfig(opts) {
-        opts = opts || {}
-        var keys = []
-        if (opts.rediscover || opts.forceFull) {
-            keys = ["multiProfileMode", "credentialsPath", "provider",
-                    "opencodeSubProvider", "customProfilesJson"]
-        } else if (opts.membership) {
-            keys = ["enabledProfilesJson"]
-        } else {
-            keys = ["profileDisplayNamesJson", "visibleWindowsJson", "displayName"]
-        }
-        applyRegistryResult(Registry.transition({
-            state: { profiles: profiles },
-            event: { type: "configurationChanged", keys: keys },
-            config: registryConfigSnapshot(),
-            visibility: registryVisibilityAdapter(),
-            nowMs: nowMs
-        }))
     }
 
     function findProfileIndex(id) {
@@ -539,84 +394,6 @@ Item {
             if (profiles[i].id === id) return i
         }
         return -1
-    }
-
-    function cloneProfile(src) {
-        var p = {}
-        if (!src) return p
-        for (var k in src) {
-            if (!src.hasOwnProperty(k)) continue
-            // Shallow-copy arrays so windows/list fields get a new reference
-            if (Array.isArray(src[k])) p[k] = src[k].slice()
-            else p[k] = src[k]
-        }
-        return p
-    }
-
-    /**
-     * Keys kept only on controller.profiles for API auth / fetch state (B012).
-     * Never copy these into UI-facing profileList / CardsView / DetailWindow trees.
-     */
-    function isUiSecretKey(k) {
-        return k === "accessToken"
-            || k === "accountId"
-            || k === "resourceUrl"
-            || k === "lastFailedToken"
-            || k ===            || k ===    }
-
-    /**
-     * Deep-enough UI snapshot of one profile: new object + window shells, no secrets.
-     * Fetch still uses controller.profiles (with tokens) via refreshProfile(id).
-     */
-    function toUiProfile(src) {
-        var row = {}
-        if (!src) return row
-        for (var ck in src) {
-            if (!src.hasOwnProperty(ck)) continue
-            if (isUiSecretKey(ck)) continue
-            if (ck === "windows" && Array.isArray(src[ck])) {
-                var wcopy = []
-                for (var wi = 0; wi < src[ck].length; wi++) {
-                    var ww = {}
-                    var sw = src[ck][wi]
-                    if (sw) {
-                        for (var wk in sw) {
-                            if (sw.hasOwnProperty(wk)) ww[wk] = sw[wk]
-                        }
-                    }
-                    wcopy.push(ww)
-                }
-                row[ck] = wcopy
-            } else if (Array.isArray(src[ck])) {
-                row[ck] = src[ck].slice()
-            } else {
-                row[ck] = src[ck]
-            }
-        }
-        return row
-    }
-
-    /**
-     * Full UI-facing list (no tokens / account ids / raw API bodies).
-     * Prefers the prebuilt registry publicProfileList; falls back to allowlist projection.
-     */
-    function publicProfiles() {
-        if (publicProfileList && publicProfileList.length)
-            return publicProfileList
-        return Registry.publicProfiles({ profiles: profiles })
-    }
-
-    /**
-     * Patch one profile by mutable array index → stable ID via registry.
-     * Windows cannot be smuggled through this path (registry rejects them).
-     */
-    function updateProfile(idx, patch) {
-        if (idx < 0 || idx >= profiles.length || !patch) return
-        var p = profiles[idx]
-        if (!p || !p.id) return
-        // Index-only fields (legacy Grok dual-fetch scratch) may not be on the
-        // registry schema; still apply via registry patch (opaque extra keys).
-        registryPatch(p.id, patch)
     }
 
     function loadingStats() {
@@ -772,17 +549,15 @@ Item {
 
     /**
      * Thin cache port: forward settled exchange to LocalResponseCache.
-     * Transaction records each exchange exactly once (including later-stale gens).
      */
     function recordRefreshExchange(exchange) {
         responseCache.recordExchange(exchange)
     }
 
     /**
-     * I002 production entry: clone profile, allocate generation, run transaction.
+     * I002 production entry: snapshot profile, allocate generation, run transaction.
      * Returns false when the credential port cannot start (busy / home / path)
      * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
-     * Provider/auth/HTTP/retry/Grok aggregation live in ProfileRefresh, not here.
      */
     function startProfileRefresh(idx, manual) {
         if (idx < 0 || idx >= profiles.length) return true
@@ -792,7 +567,13 @@ Item {
         if (p.loading) return false
         if (!manual && isAutoRefreshHeld(p, Date.now())) return true
 
-        var snapshot = cloneProfile(p)
+        // Shallow snapshot for the refresh transaction (do not share mutable arrays)
+        var snapshot = {}
+        for (var snapK in p) {
+            if (!p.hasOwnProperty(snapK)) continue
+            if (Array.isArray(p[snapK])) snapshot[snapK] = p[snapK].slice()
+            else snapshot[snapK] = p[snapK]
+        }
         // Providers.prepare uses profile.opencodeAccountIndex (was cfgValue in extractOpencodeAuth)
         var ocIdx = parseInt(cfgValue("opencodeAccountIndex", 0), 10)
         if (isNaN(ocIdx) || ocIdx < 0)
@@ -1099,21 +880,21 @@ Item {
                         "error=", patch.error)
     }
 
-    /**
-     * Cache/metadata helper: map opencode profile rows to their concrete sub-provider.
-     * Retained for any non-transaction callers; I005 pipeline has its own copy for cache.
-     */
-    function effectiveProvider(profile) {
-        if (profile.provider === "opencode") return profile.opencodeSlot || "anthropic"
-        return profile.provider
+    function clearFailureStatePatch() {
+        return {
+            authFailCount: 0,
+            authSuspended: false,
+            autoRefreshHoldUntilMs: 0,
+            lastFailedToken: "",
+            backoffMultiplier: 1
+        }
     }
 
     /**
      * Apply normalised usage through the registry usageResult transition.
      * Optional `patch` carries loading/error/auth/backoff fields (never windows).
      * Visibility/time always run inside ProfileRegistry via the production adapter.
-     * Live refresh success uses applyRefreshTransition → registry usageResult directly;
-     * this helper remains the shared visibility/store adapter for other callers.
+     * Legacy callers (fetchUsage/fetchGrok) omit patch.
      */
     function applyUsageResult(idx, result, patch) {
         if (idx < 0 || idx >= profiles.length || !result) return
@@ -1127,14 +908,15 @@ Item {
                     out[k] = patch[k]
             }
         } else {
+            var clear = clearFailureStatePatch()
             out.loading = false
             out.error = ""
             out.lastFetchMs = Date.now()
-            out.backoffMultiplier = 1
-            out.authFailCount = 0
-            out.authSuspended = false
-            out.autoRefreshHoldUntilMs = 0
-            out.lastFailedToken = ""
+            out.backoffMultiplier = clear.backoffMultiplier
+            out.authFailCount = clear.authFailCount
+            out.authSuspended = clear.authSuspended
+            out.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
+            out.lastFailedToken = clear.lastFailedToken
         }
         out.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
         if (out.lastFetchMs === undefined)
@@ -1167,6 +949,7 @@ Item {
         console.log("Claude Usage: applyUsageResult id=", p.id,
                     "accepted=", accepted, "windows=", winCount)
     }
+
 
     // B027: only advance the clock. Do NOT reassign `profiles` (or bump dataEpoch).
     // Replacing the array every second forced CardsView/Repeaters to rebuild delegates,
@@ -1227,7 +1010,7 @@ Item {
                 }
                 // Empty stdout + success → no profiles found
                 discoveryError = ""
-                mergeDiscovered([])
+                applyDiscoveredCandidates([])
                 return
             }
             try {
@@ -1238,7 +1021,7 @@ Item {
                 }
                 if (exitCode && exitCode !== 0)
                     console.log("Claude Usage: discovery exit=", exitCode, "stderr=", stderr)
-                mergeDiscovered(list)
+                applyDiscoveredCandidates(list)
             } catch (e) {
                 console.log("Claude Usage: discovery parse error", e, stderr)
                 failDiscovery("Discovery failed", exitCode, stderr || String(e))
@@ -1359,7 +1142,7 @@ Item {
         running: profiles.length > 0
         repeat: true
         onTriggered: {
-            // B002: enqueue due profiles and stagger; never burst startProfileRefresh
+            // B002: enqueue due profiles and stagger; never burst refresh starts
             var due = controller.dueProfiles()
             for (var i = 0; i < due.length; i++)
                 controller.queueProfileRefresh(due[i], false)
