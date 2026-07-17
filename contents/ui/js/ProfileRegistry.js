@@ -5,6 +5,7 @@
  * Pure profile registry — identity, schema, snapshots, and transitions.
  * Task 1 (P1.M3.E1.T001): schema, public projection, patch, usageResult.
  * Task 2 (P1.M3.E1.T002): discovery/custom reconciliation.
+ * Task 3 (P1.M3.E1.T003): shared KCM editConfig for enabled/name/custom.
  * Controllers interpret effects; this module never performs I/O.
  */
 
@@ -572,4 +573,345 @@ function transition(input) {
     if (event.type === "discovered")
         return discoveredTransition(state, event, input)
     return resultFor(state, [], false)
+}
+
+// ---------------------------------------------------------------------------
+// KCM configuration editing (P1.M3.E1.T003)
+// ---------------------------------------------------------------------------
+
+/** Config keys owned by editConfig (cloned; never mutate caller input). */
+var EDIT_CONFIG_KEYS = [
+    "multiProfileMode", "provider", "opencodeSubProvider", "credentialsPath",
+    "displayName", "discoverOnLoad", "enabledProfilesJson",
+    "profileDisplayNamesJson", "customProfilesJson", "customProfileNextId",
+    "visibleWindowsJson"
+]
+
+function cloneEditConfig(config) {
+    var out = {}
+    var src = config || {}
+    for (var i = 0; i < EDIT_CONFIG_KEYS.length; i++) {
+        var k = EDIT_CONFIG_KEYS[i]
+        if (src.hasOwnProperty(k))
+            out[k] = src[k]
+    }
+    // Ensure keys used by editors always exist with safe defaults
+    if (out.enabledProfilesJson === undefined)
+        out.enabledProfilesJson = "[]"
+    if (out.profileDisplayNamesJson === undefined)
+        out.profileDisplayNamesJson = "{}"
+    if (out.customProfilesJson === undefined)
+        out.customProfilesJson = "[]"
+    if (out.customProfileNextId === undefined || out.customProfileNextId === null
+            || out.customProfileNextId === "")
+        out.customProfileNextId = 0
+    else
+        out.customProfileNextId = Number(out.customProfileNextId) || 0
+    return out
+}
+
+function normalizeKnownIds(knownProfiles) {
+    var ids = []
+    var seen = {}
+    var list = knownProfiles || []
+    for (var i = 0; i < list.length; i++) {
+        var item = list[i]
+        var id = item && typeof item === "object" ? item.id : item
+        id = id === undefined || id === null ? "" : String(id)
+        if (!id || seen[id] || id === "__none__")
+            continue
+        seen[id] = true
+        ids.push(id)
+    }
+    return ids
+}
+
+function parseEnabledList(raw) {
+    var enabled = parseJsonConfig(raw, [])
+    if (!enabled || !Array.isArray(enabled))
+        return []
+    return enabled
+}
+
+function parseNamesMap(raw) {
+    var names = parseJsonConfig(raw, {})
+    if (!names || typeof names !== "object" || Array.isArray(names))
+        return {}
+    var out = {}
+    for (var k in names) {
+        if (!names.hasOwnProperty(k))
+            continue
+        if (names[k])
+            out[k] = String(names[k])
+    }
+    return out
+}
+
+function parseCustomList(raw) {
+    var customs = parseJsonConfig(raw, [])
+    if (!customs || !Array.isArray(customs))
+        return []
+    var out = []
+    for (var i = 0; i < customs.length; i++) {
+        var e = customs[i]
+        if (!e || typeof e !== "object")
+            continue
+        out.push(cloneObject(e))
+    }
+    return out
+}
+
+/**
+ * Materialize id → enabled from allowlist/sentinel against known IDs.
+ * [] → all on; ["__none__"] (or empty after filtering) with length>0 raw → all off
+ * when the only meaningful sentinel is present; otherwise allowlist membership.
+ */
+function materializeEnabledMap(enabledList, knownIds) {
+    var map = {}
+    var list = enabledList || []
+    // Empty array = all enabled
+    if (!list.length) {
+        for (var i = 0; i < knownIds.length; i++)
+            map[knownIds[i]] = true
+        return map
+    }
+    var hasNone = false
+    var allow = {}
+    for (var j = 0; j < list.length; j++) {
+        var eid = list[j]
+        if (eid === "__none__") {
+            hasNone = true
+            continue
+        }
+        if (eid)
+            allow[eid] = true
+    }
+    // Pure sentinel (or only __none__) → all off
+    var allowCount = 0
+    for (var ak in allow) {
+        if (allow.hasOwnProperty(ak))
+            allowCount++
+    }
+    if (hasNone && allowCount === 0) {
+        for (var k = 0; k < knownIds.length; k++)
+            map[knownIds[k]] = false
+        return map
+    }
+    for (var n = 0; n < knownIds.length; n++)
+        map[knownIds[n]] = !!allow[knownIds[n]]
+    return map
+}
+
+/**
+ * Serialise enabled map → [] / ["__none__"] / allowlist.
+ * knownIds order is preserved in partial allowlists.
+ */
+function serializeEnabledMap(enabledMap, knownIds) {
+    var list = []
+    var allOn = true
+    for (var i = 0; i < knownIds.length; i++) {
+        var id = knownIds[i]
+        if (enabledMap[id])
+            list.push(id)
+        else
+            allOn = false
+    }
+    if (allOn || knownIds.length === 0)
+        return "[]"
+    if (list.length === 0)
+        return JSON.stringify(["__none__"])
+    return JSON.stringify(list)
+}
+
+function highestCustomSuffix(customs) {
+    // Baseline 0 so first allocation with empty list + nextId 0 yields 1
+    // (matches prior KCM customIdSeq default of 1).
+    var max = 0
+    var list = customs || []
+    for (var i = 0; i < list.length; i++) {
+        var id = String((list[i] && list[i].id) || "")
+        var m = id.match(/-custom-(\d+)$/)
+        if (!m)
+            continue
+        var n = parseInt(m[1], 10)
+        if (!isNaN(n) && n > max)
+            max = n
+    }
+    return max
+}
+
+function allocateCustomNextId(persistedNextId, customs) {
+    var persisted = Number(persistedNextId) || 0
+    var highest = highestCustomSuffix(customs)
+    return Math.max(persisted, highest + 1)
+}
+
+function editConfigResult(config, patch) {
+    return {
+        config: config,
+        patch: patch || {}
+    }
+}
+
+function setEnabledEdit(config, knownIds, event) {
+    var profileId = event && event.profileId ? String(event.profileId) : ""
+    if (!profileId)
+        return editConfigResult(config, {})
+
+    var ids = knownIds.slice()
+    var seen = {}
+    for (var i = 0; i < ids.length; i++)
+        seen[ids[i]] = true
+    if (!seen[profileId]) {
+        ids.push(profileId)
+        seen[profileId] = true
+    }
+
+    var enabledList = parseEnabledList(config.enabledProfilesJson)
+    var map = materializeEnabledMap(enabledList, ids)
+    map[profileId] = !!event.enabled
+    var json = serializeEnabledMap(map, ids)
+    config.enabledProfilesJson = json
+    return editConfigResult(config, { enabledProfilesJson: json })
+}
+
+function setNameEdit(config, event) {
+    var profileId = event && event.profileId ? String(event.profileId) : ""
+    if (!profileId)
+        return editConfigResult(config, {})
+
+    var names = parseNamesMap(config.profileDisplayNamesJson)
+    var trimmed = event.name === undefined || event.name === null
+        ? ""
+        : String(event.name).replace(/^\s+|\s+$/g, "")
+    if (trimmed)
+        names[profileId] = trimmed
+    else
+        delete names[profileId]
+    var json = JSON.stringify(names)
+    config.profileDisplayNamesJson = json
+    return editConfigResult(config, { profileDisplayNamesJson: json })
+}
+
+function addCustomEdit(config, knownIds, event) {
+    var provider = event && event.provider ? String(event.provider) : ""
+    var path = event && event.path !== undefined && event.path !== null
+        ? String(event.path).replace(/^\s+|\s+$/g, "")
+        : ""
+    if (!provider || !path)
+        return editConfigResult(config, {})
+
+    var customs = parseCustomList(config.customProfilesJson)
+    var nextId = allocateCustomNextId(config.customProfileNextId, customs)
+    var explicitCred = event.credPath !== undefined && event.credPath !== null
+        ? String(event.credPath).replace(/^\s+|\s+$/g, "")
+        : ""
+    var credPath = explicitCred
+        ? explicitCred
+        : QC.defaultCredPathForProvider(provider, path)
+    var displayName = event.displayName !== undefined && event.displayName !== null
+        ? String(event.displayName).replace(/^\s+|\s+$/g, "")
+        : ""
+
+    var entry = {
+        id: provider + "-custom-" + nextId,
+        provider: provider,
+        path: path,
+        credPath: credPath
+    }
+    if (displayName)
+        entry.displayName = displayName
+
+    customs.push(entry)
+    config.customProfilesJson = JSON.stringify(customs)
+    config.customProfileNextId = nextId + 1
+
+    var patch = {
+        customProfilesJson: config.customProfilesJson,
+        customProfileNextId: config.customProfileNextId
+    }
+
+    // Seed enablement: when not all-on, force the new custom on
+    var ids = knownIds.slice()
+    var seen = {}
+    for (var i = 0; i < ids.length; i++)
+        seen[ids[i]] = true
+    if (!seen[entry.id]) {
+        ids.push(entry.id)
+        seen[entry.id] = true
+    }
+    // Also include any existing custom ids from the list
+    for (var c = 0; c < customs.length; c++) {
+        var cid = customs[c] && customs[c].id
+        if (cid && !seen[cid]) {
+            ids.push(cid)
+            seen[cid] = true
+        }
+    }
+
+    var enabledList = parseEnabledList(config.enabledProfilesJson)
+    if (enabledList.length > 0) {
+        var map = materializeEnabledMap(enabledList, ids)
+        map[entry.id] = true
+        var enJson = serializeEnabledMap(map, ids)
+        config.enabledProfilesJson = enJson
+        patch.enabledProfilesJson = enJson
+    }
+
+    if (displayName) {
+        var names = parseNamesMap(config.profileDisplayNamesJson)
+        names[entry.id] = displayName
+        var namesJson = JSON.stringify(names)
+        config.profileDisplayNamesJson = namesJson
+        patch.profileDisplayNamesJson = namesJson
+    }
+
+    return editConfigResult(config, patch)
+}
+
+function removeCustomEdit(config, event) {
+    var profileId = event && event.profileId ? String(event.profileId) : ""
+    if (!profileId)
+        return editConfigResult(config, {})
+
+    var customs = parseCustomList(config.customProfilesJson)
+    var next = []
+    var found = false
+    for (var i = 0; i < customs.length; i++) {
+        if (customs[i] && customs[i].id === profileId) {
+            found = true
+            continue
+        }
+        next.push(customs[i])
+    }
+    if (!found)
+        return editConfigResult(config, {})
+
+    // Never decrement customProfileNextId
+    var json = JSON.stringify(next)
+    config.customProfilesJson = json
+    return editConfigResult(config, { customProfilesJson: json })
+}
+
+/**
+ * KCM configuration-edit entry point.
+ * input: { config, knownProfiles, event }
+ * result: { config, patch } — callers write only patch keys to cfg.
+ *
+ * Events: setEnabled | setName | addCustom | removeCustom
+ */
+function editConfig(input) {
+    var config = cloneEditConfig(input && input.config)
+    var knownIds = normalizeKnownIds(input && input.knownProfiles)
+    var event = input && input.event ? input.event : {}
+
+    if (event.type === "setEnabled")
+        return setEnabledEdit(config, knownIds, event)
+    if (event.type === "setName")
+        return setNameEdit(config, event)
+    if (event.type === "addCustom")
+        return addCustomEdit(config, knownIds, event)
+    if (event.type === "removeCustom")
+        return removeCustomEdit(config, event)
+    return editConfigResult(config, {})
 }

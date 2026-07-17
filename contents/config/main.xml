@@ -82,6 +82,10 @@
             <label>Custom profile paths JSON array</label>
             <default>[]</default>
         </entry>
+        <entry name="customProfileNextId" type="Int">
+            <label>Next monotonic custom profile id</label>
+            <default>0</default>
+        </entry>
         <entry name="cacheResponses" type="Bool">
             <label>Cache provider API responses to disk</label>
             <default>true</default>
