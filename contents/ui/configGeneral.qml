@@ -34,9 +34,9 @@ KCM.SimpleKCM {
     property bool cfg_multiProfileMode
     property string cfg_profileDisplayNamesJson
     property string cfg_enabledProfilesJson
-    property int cfg_customProfileNextId
     property string cfg_visibleWindowsJson
     property string cfg_customProfilesJson
+    property int cfg_customProfileNextId
     property bool cfg_cacheResponses
     property string cfg_responseCachePath
 
@@ -111,7 +111,192 @@ KCM.SimpleKCM {
             cfg_visibleWindowsJson = result.persisted
     }
 
-    function hydrateFromCfg() {
+    /**
+     * Snapshot of kcfg values consumed by Registry.editConfig().
+     * Visibility remains local until I004.
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfg_multiProfileMode,
+            provider: cfg_provider,
+            opencodeSubProvider: cfg_opencodeSubProvider,
+            credentialsPath: cfg_credentialsPath,
+            displayName: cfg_displayName,
+            discoverOnLoad: cfg_discoverOnLoad,
+            enabledProfilesJson: cfg_enabledProfilesJson || "[]",
+            profileDisplayNamesJson: cfg_profileDisplayNamesJson || "{}",
+            customProfilesJson: cfg_customProfilesJson || "[]",
+            customProfileNextId: cfg_customProfileNextId || 0,
+            visibleWindowsJson: cfg_visibleWindowsJson || "[]"
+        }
+    }
+
+/**
+     * Snapshot of kcfg values consumed by Registry.editConfig().
+     * Visibility remains local until I004.
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfg_multiProfileMode,
+            provider: cfg_provider,
+            opencodeSubProvider: cfg_opencodeSubProvider,
+            credentialsPath: cfg_credentialsPath,
+            displayName: cfg_displayName,
+            discoverOnLoad: cfg_discoverOnLoad,
+            enabledProfilesJson: cfg_enabledProfilesJson || "[]",
+            profileDisplayNamesJson: cfg_profileDisplayNamesJson || "{}",
+            customProfilesJson: cfg_customProfilesJson || "[]",
+            customProfileNextId: cfg_customProfileNextId || 0,
+            visibleWindowsJson: cfg_visibleWindowsJson || "[]"
+        }
+    }
+
+    /** Discovered + custom ids for enablement serialisation. */
+    function knownProfileList() {
+        var list = []
+        var seen = {}
+        var i
+        for (i = 0; i < discoveredProfiles.length; i++) {
+            var did = discoveredProfiles[i] && discoveredProfiles[i].id
+            if (!did || seen[did]) continue
+            seen[did] = true
+            list.push({ id: did })
+        }
+        for (i = 0; i < customProfiles.length; i++) {
+            var c = customProfiles[i]
+            var cid = (c && c.id) || (c && c.provider ? (c.provider + "-custom-" + i) : "")
+            if (!cid || seen[cid]) continue
+            seen[cid] = true
+            list.push({ id: cid })
+        }
+        return list
+    }
+
+/**
+     * Snapshot of kcfg values consumed by Registry.editConfig().
+     * Visibility remains local until I004.
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfg_multiProfileMode,
+            provider: cfg_provider,
+            opencodeSubProvider: cfg_opencodeSubProvider,
+            credentialsPath: cfg_credentialsPath,
+            displayName: cfg_displayName,
+            discoverOnLoad: cfg_discoverOnLoad,
+            enabledProfilesJson: cfg_enabledProfilesJson || "[]",
+            profileDisplayNamesJson: cfg_profileDisplayNamesJson || "{}",
+            customProfilesJson: cfg_customProfilesJson || "[]",
+            customProfileNextId: cfg_customProfileNextId || 0,
+            visibleWindowsJson: cfg_visibleWindowsJson || "[]"
+        }
+    }
+
+    /** Discovered + custom ids for enablement serialisation. */
+    function knownProfileList() {
+        var list = []
+        var seen = {}
+        var i
+        for (i = 0; i < discoveredProfiles.length; i++) {
+            var did = discoveredProfiles[i] && discoveredProfiles[i].id
+            if (!did || seen[did]) continue
+            seen[did] = true
+            list.push({ id: did })
+        }
+        for (i = 0; i < customProfiles.length; i++) {
+            var c = customProfiles[i]
+            var cid = (c && c.id) || (c && c.provider ? (c.provider + "-custom-" + i) : "")
+            if (!cid || seen[cid]) continue
+            seen[cid] = true
+            list.push({ id: cid })
+        }
+        return list
+    }
+
+    /** Apply only patch keys returned by Registry.editConfig(). */
+    function applyRegistryConfigPatch(patch) {
+        if (!patch) return
+        if (patch.hasOwnProperty("enabledProfilesJson"))
+            cfg_enabledProfilesJson = patch.enabledProfilesJson
+        if (patch.hasOwnProperty("profileDisplayNamesJson"))
+            cfg_profileDisplayNamesJson = patch.profileDisplayNamesJson
+        if (patch.hasOwnProperty("customProfilesJson")) {
+            cfg_customProfilesJson = patch.customProfilesJson
+            customProfiles = parseJsonSafe(patch.customProfilesJson, []) || []
+        }
+        if (patch.hasOwnProperty("customProfileNextId"))
+            cfg_customProfileNextId = patch.customProfileNextId
+    }
+
+/**
+     * Snapshot of kcfg values consumed by Registry.editConfig().
+     * Visibility remains local until I004.
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfg_multiProfileMode,
+            provider: cfg_provider,
+            opencodeSubProvider: cfg_opencodeSubProvider,
+            credentialsPath: cfg_credentialsPath,
+            displayName: cfg_displayName,
+            discoverOnLoad: cfg_discoverOnLoad,
+            enabledProfilesJson: cfg_enabledProfilesJson || "[]",
+            profileDisplayNamesJson: cfg_profileDisplayNamesJson || "{}",
+            customProfilesJson: cfg_customProfilesJson || "[]",
+            customProfileNextId: cfg_customProfileNextId || 0,
+            visibleWindowsJson: cfg_visibleWindowsJson || "[]"
+        }
+    }
+
+    /** Discovered + custom ids for enablement serialisation. */
+    function knownProfileList() {
+        var list = []
+        var seen = {}
+        var i
+        for (i = 0; i < discoveredProfiles.length; i++) {
+            var did = discoveredProfiles[i] && discoveredProfiles[i].id
+            if (!did || seen[did]) continue
+            seen[did] = true
+            list.push({ id: did })
+        }
+        for (i = 0; i < customProfiles.length; i++) {
+            var c = customProfiles[i]
+            var cid = (c && c.id) || (c && c.provider ? (c.provider + "-custom-" + i) : "")
+            if (!cid || seen[cid]) continue
+            seen[cid] = true
+            list.push({ id: cid })
+        }
+        return list
+    }
+
+    /** Apply only patch keys returned by Registry.editConfig(). */
+    function applyRegistryConfigPatch(patch) {
+        if (!patch) return
+        if (patch.hasOwnProperty("enabledProfilesJson"))
+            cfg_enabledProfilesJson = patch.enabledProfilesJson
+        if (patch.hasOwnProperty("profileDisplayNamesJson"))
+            cfg_profileDisplayNamesJson = patch.profileDisplayNamesJson
+        if (patch.hasOwnProperty("customProfilesJson")) {
+            cfg_customProfilesJson = patch.customProfilesJson
+            customProfiles = parseJsonSafe(patch.customProfilesJson, []) || []
+        }
+        if (patch.hasOwnProperty("customProfileNextId"))
+            cfg_customProfileNextId = patch.customProfileNextId
+    }
+
+    /** Refresh working maps from current cfg strings after a registry edit. */
+    function refreshWorkingMapsFromCfg() {
+        nameMap = parseJsonSafe(cfg_profileDisplayNamesJson, {}) || {}
+        var en = parseJsonSafe(cfg_enabledProfilesJson, [])
+        var em = {}
+        if (en && en.length) {
+            for (var i = 0; i < en.length; i++)
+                em[en[i]] = true
+        }
+        enabledMap = em
+    }
+
+function hydrateFromCfg() {
         _hydrating = true
         // multiProfileMode: treat unset as true in UI only — do not write cfg on open
 
@@ -223,30 +408,28 @@ KCM.SimpleKCM {
     }
 
     function setProfileEnabled(id, on) {
-        var m = cloneMap(enabledMap)
-        // Materialize full map from discovered + custom if empty
-        if (mapKeyCount(m) === 0) {
-            for (var i = 0; i < discoveredProfiles.length; i++)
-                m[discoveredProfiles[i].id] = true
-            for (var c = 0; c < customProfiles.length; c++) {
-                var cid = customProfiles[c].id || (customProfiles[c].provider + "-custom-" + c)
-                m[cid] = true
-            }
-        }
-        m[id] = !!on
-        enabledMap = m
-        pushEnabledJson()
+        if (_hydrating || !id) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "setEnabled", profileId: id, enabled: !!on }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
 
+
     function setProfileName(id, name) {
-        var m = cloneMap(nameMap)
-        if (name && String(name).trim())
-            m[id] = String(name).trim()
-        else
-            delete m[id]
-        nameMap = m
-        pushNamesJson()
+        if (_hydrating || !id) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "setName", profileId: id, name: name }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
+
 
     function runDiscover() {
         discoverStatus = tr("Discovering…")
@@ -289,44 +472,41 @@ KCM.SimpleKCM {
             customFormError = tr("Provider is required")
             return
         }
-        var entry = {
-            provider: provider,
-            path: path
-        }
-        if (displayName) entry.displayName = displayName
-        if (credPath) {
-            entry.credPath = credPath
-        } else {
-            // B009: store resolved default so advanced JSON / controller agree
-            entry.credPath = QC.defaultCredPathForProvider(provider, path)
-        }
-        // Stable unique id — never reuse length after removals
-        entry.id = provider + "-custom-" + customIdSeq
-        customIdSeq = customIdSeq + 1
-        var next = customProfiles.slice()
-        next.push(entry)
-        customProfiles = next
-        // Seed enable map so customs survive partial allowlists
-        var em = cloneMap(enabledMap)
-        if (mapKeyCount(em) > 0)
-            em[entry.id] = true
-        enabledMap = em
-        pushCustomJson()
-        pushEnabledJson()
-        if (displayName)
-            setProfileName(entry.id, displayName)
+        if (_hydrating) return
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: {
+                type: "addCustom",
+                provider: provider,
+                path: path,
+                credPath: credPath,
+                displayName: displayName
+            }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
         customPathField.text = ""
         customNameField.text = ""
         customCredField.text = ""
         customFormError = ""
     }
 
+
     function removeCustomAt(index) {
-        var next = customProfiles.slice()
-        next.splice(index, 1)
-        customProfiles = next
-        pushCustomJson()
+        if (_hydrating) return
+        var entry = customProfiles[index]
+        if (!entry) return
+        var profileId = entry.id || (entry.provider + "-custom-" + index)
+        var result = Registry.editConfig({
+            config: registryConfigSnapshot(),
+            knownProfiles: knownProfileList(),
+            event: { type: "removeCustom", profileId: profileId }
+        })
+        applyRegistryConfigPatch(result.patch)
+        refreshWorkingMapsFromCfg()
     }
+
 
     function enableMultiMode(on) {
         cfg_multiProfileMode = !!on
