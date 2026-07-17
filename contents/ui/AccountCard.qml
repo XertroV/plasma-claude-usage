@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
-import "js/QuotaCommon.js" as QC
+import "js/QuotaPresentation.js" as QP
 
 // One profile/account card for the panel flow layout.
 Rectangle {
@@ -22,7 +22,11 @@ Rectangle {
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
 
-    readonly property var quotaRows: QC.visibleWindows(profile)
+    readonly property var quotaPresentation: QP.presentProfile(profile, {
+        sessionColorMode: sessionColorMode,
+        weeklyColorMode: weeklyColorMode
+    })
+    readonly property var quotaRows: quotaPresentation.rows
     // Any in-flight fetch (refresh or first load)
     readonly property bool refreshing: !!(profile && profile.loading)
     // First load only — no windows yet. Never collapse existing rows while refreshing.
@@ -231,16 +235,13 @@ Rectangle {
                 QuotaRow {
                     required property var modelData
                     Layout.fillWidth: true
-                    windowData: modelData
+                    presentationRow: modelData
                     nowMs: cardRoot.nowMs
                     mode: modelData ? "data" : "skeleton"
                     compact: true
                     textPixelSize: cardRoot.contentFontPixelSize
                     // Slight dim while refreshing existing data
                     opacity: (modelData && cardRoot.refreshing) ? 0.75 : 1
-                    colorMode: modelData
-                        ? QC.colorModeForWindow(modelData, sessionColorMode, weeklyColorMode)
-                        : sessionColorMode
                 }
             }
         }

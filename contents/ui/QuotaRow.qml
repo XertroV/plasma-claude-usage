@@ -6,12 +6,13 @@ import "js/QuotaCommon.js" as QC
 
 // Single quota line: label | bar | % | countdown
 // modes: "data" | "skeleton"
+// Presentation policy (label, colorMode) comes from presentationRow;
+// this row owns only time/theme rendering.
 RowLayout {
     id: rowRoot
 
-    property var windowData: null
+    property var presentationRow: null
     property double nowMs: Date.now()
-    property string colorMode: "capacity"
     property string mode: "data"   // data | skeleton
     property bool compact: true
     property int textPixelSize: compact
@@ -19,11 +20,17 @@ RowLayout {
                       + Kirigami.Theme.defaultFont.pixelSize) / 2)
         : Kirigami.Theme.defaultFont.pixelSize
 
+    readonly property var windowData: presentationRow
+            ? presentationRow.windowData : null
+    readonly property string colorMode: presentationRow
+            ? presentationRow.colorMode : "capacity"
+    readonly property bool isSkeleton: mode === "skeleton" || !windowData
+    readonly property string periodLabel: isSkeleton
+            ? "··" : (presentationRow.label || "")
+
     spacing: Kirigami.Units.smallSpacing
     Layout.fillWidth: true
 
-    readonly property bool isSkeleton: mode === "skeleton" || !windowData
-    readonly property string periodLabel: isSkeleton ? "··" : QC.displayWindowLabel(windowData)
     readonly property real usagePct: windowData ? (windowData.usagePercent || 0) : 0
     // B027: derive from nowMs so pace bars tick without rebuilding window/profile models
     readonly property real timePct: {
@@ -89,7 +96,7 @@ RowLayout {
         delay: Kirigami.Units.toolTipDelay
         text: {
             if (!windowData) return ""
-            var parts = [QC.displayWindowLabel(windowData),
+            var parts = [rowRoot.periodLabel,
                          Math.round(windowData.usagePercent || 0) + "%"]
             var cd = QC.formatCountdown(windowData.resetAtMs, nowMs)
             if (cd) parts.push(cd)
