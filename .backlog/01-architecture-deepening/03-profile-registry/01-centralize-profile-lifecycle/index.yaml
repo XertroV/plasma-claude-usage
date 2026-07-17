@@ -62,5 +62,6 @@ tasks:
       file: T006-enforce-the-registry-seam-and.todo
       id: T006
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Enforce the registry seam and verify profile lifecycle

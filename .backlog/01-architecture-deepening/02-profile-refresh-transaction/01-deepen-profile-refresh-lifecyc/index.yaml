@@ -62,5 +62,6 @@ tasks:
       file: T006-enforce-the-refresh-seam-and-v.todo
       id: T006
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Enforce the refresh seam and verify lifecycle behaviour
