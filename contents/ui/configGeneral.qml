@@ -10,6 +10,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
+import "js/VisibleQuotaConfig.js" as VQ
 
 KCM.SimpleKCM {
     id: configPage
@@ -43,69 +44,8 @@ KCM.SimpleKCM {
         "OpenCode", "MiniMax", "Kimi"
     ]
 
-    // Per-provider window ids for column visibility (B034).
-    // Ids must match parser window ids (QuotaParsers.js), not display labels only.
-    // defaultVisible mirrors makeWindow(..., defaultVisible) / parser defaults.
-    readonly property var providerWindowCatalog: [
-        {
-            provider: "claude",
-            title: "Claude",
-            windows: [
-                { id: "5h", label: "5h", defaultVisible: true },
-                { id: "weekly", label: "7d", defaultVisible: true },
-                { id: "weekly_fable", label: "Fable", defaultVisible: false },
-                { id: "weekly_oracle", label: "Oracle", defaultVisible: false },
-                { id: "weekly_opus", label: "Opus", defaultVisible: false },
-                { id: "weekly_sonnet", label: "Sonnet", defaultVisible: false },
-                { id: "weekly_oauth_apps", label: "OAuth apps", defaultVisible: false }
-            ]
-        },
-        {
-            provider: "codex",
-            title: "Codex",
-            windows: [
-                { id: "session", label: "session", defaultVisible: true },
-                { id: "weekly", label: "weekly", defaultVisible: true },
-                { id: "credits", label: "credits $", defaultVisible: false },
-                // Codex Spark additional limit id from parser: extra_spk_7d (not "spk/7d")
-                { id: "extra_spk_7d", label: "Spark / 7d", defaultVisible: false }
-            ]
-        },
-        {
-            provider: "grok",
-            title: "Grok",
-            windows: [
-                { id: "session", label: "session (product %)", defaultVisible: true },
-                { id: "weekly", label: "mo ($ allowance)", defaultVisible: true },
-                { id: "on_demand", label: "on-demand", defaultVisible: false }
-            ]
-        },
-        {
-            provider: "zai",
-            title: "Z.ai",
-            windows: [
-                { id: "session", label: "5h", defaultVisible: true },
-                { id: "weekly", label: "mo", defaultVisible: true }
-            ]
-        },
-        {
-            provider: "minimax",
-            title: "MiniMax",
-            windows: [
-                { id: "5h/general", label: "5h/general", defaultVisible: true },
-                { id: "wk/general", label: "7d/general", defaultVisible: true }
-            ]
-        },
-        {
-            provider: "kimi",
-            title: "Kimi",
-            windows: [
-                { id: "session", label: "5h", defaultVisible: true },
-                { id: "weekly", label: "7d", defaultVisible: true },
-                { id: "total_quota", label: "total quota", defaultVisible: false }
-            ]
-        }
-    ]
+    // Visible-quota projection from VQ.configuration() — catalogue/edit/serialize live in the seam.
+    property var visibleQuotaConfiguration: ({ providers: [] })
 
     Translations {
         id: trans
@@ -134,10 +74,6 @@ KCM.SimpleKCM {
     property string discoverStatus: ""
     property var enabledMap: ({})       // id → bool (true if enabled)
     property var nameMap: ({})          // id → display name override
-    // B034: per-provider window visibility overrides
-    // shape: { claude: { "5h": true, "weekly": false }, grok: { ... }, ... }
-    // empty / missing provider → that provider uses parser defaultVisible
-    property var visibleByProvider: ({})
     property var customProfiles: []
     property bool _hydrating: true
     property string customFormError: ""
@@ -158,6 +94,21 @@ KCM.SimpleKCM {
         try { return JSON.parse(raw) } catch (e) { return fallback }
     }
 
+    function projectVisibleQuotaConfiguration(raw) {
+        visibleQuotaConfiguration = VQ.configuration({ persisted: raw })
+    }
+
+    function editVisibleQuotaConfiguration(event) {
+        if (_hydrating) return
+        var result = VQ.configuration({
+            persisted: cfg_visibleWindowsJson,
+            event: event
+        })
+        visibleQuotaConfiguration = result
+        if (result.changed)
+            cfg_visibleWindowsJson = result.persisted
+    }
+
     function hydrateFromCfg() {
         _hydrating = true
         // multiProfileMode: treat unset as true in UI only — do not write cfg on open
@@ -171,97 +122,10 @@ KCM.SimpleKCM {
         }
         enabledMap = em
 
-        visibleByProvider = hydrateVisibleByProvider(cfg_visibleWindowsJson)
+        projectVisibleQuotaConfiguration(cfg_visibleWindowsJson)
 
         customProfiles = parseJsonSafe(cfg_customProfilesJson, []) || []
         _hydrating = false
-    }
-
-    /**
-     * Load cfg into per-provider maps. Migrates legacy array allowlist into
-     * per-provider bool maps so each provider only gets ids it actually uses.
-     */
-    function hydrateVisibleByProvider(raw) {
-        var cfg = QC.parseVisibleWindowsConfig(raw)
-        var out = {}
-        if (cfg.mode === "defaults")
-            return out
-
-        if (cfg.mode === "globalAllowlist") {
-            // Legacy: ["5h","weekly"] → apply only ids known for each provider
-            var list = cfg.globalAllowlist || []
-            for (var pi = 0; pi < providerWindowCatalog.length; pi++) {
-                var cat = providerWindowCatalog[pi]
-                var pm = {}
-                var any = false
-                for (var wi = 0; wi < cat.windows.length; wi++) {
-                    var wid = cat.windows[wi].id
-                    var on = list.indexOf(wid) >= 0
-                    pm[wid] = on
-                    if (on) any = true
-                }
-                // Only store if at least one listed id matched this provider
-                // (otherwise leave defaults — avoid blanking every provider)
-                if (any)
-                    out[cat.provider] = pm
-            }
-            return out
-        }
-
-        if (cfg.mode === "globalMap") {
-            var gm = cfg.globalMap || {}
-            for (var gi = 0; gi < providerWindowCatalog.length; gi++) {
-                var gcat = providerWindowCatalog[gi]
-                var gpm = {}
-                var gany = false
-                for (var gwi = 0; gwi < gcat.windows.length; gwi++) {
-                    var gid = gcat.windows[gwi].id
-                    if (gm.hasOwnProperty(gid)) {
-                        gpm[gid] = !!gm[gid]
-                        gany = true
-                    }
-                }
-                if (gany)
-                    out[gcat.provider] = gpm
-            }
-            return out
-        }
-
-        // perProvider
-        var bp = cfg.byProvider || {}
-        for (var prov in bp) {
-            if (!bp.hasOwnProperty(prov)) continue
-            var entry = bp[prov]
-            if (!entry || typeof entry !== "object") continue
-            var m = {}
-            for (var k in entry) {
-                if (!entry.hasOwnProperty(k) || k === "__allowlist") continue
-                m[k] = !!entry[k]
-            }
-            // Strict allowlist arrays were expanded with only trues — materialize
-            // full catalog so unchecked defaults (hidden extras) stay explicit.
-            if (entry.__allowlist) {
-                var cat2 = catalogForProvider(prov)
-                if (cat2) {
-                    for (var ci = 0; ci < cat2.windows.length; ci++) {
-                        var cid = cat2.windows[ci].id
-                        if (!m.hasOwnProperty(cid))
-                            m[cid] = false
-                    }
-                }
-            }
-            if (mapKeyCount(m) > 0)
-                out[prov] = m
-        }
-        return out
-    }
-
-    function catalogForProvider(provider) {
-        for (var i = 0; i < providerWindowCatalog.length; i++) {
-            if (providerWindowCatalog[i].provider === provider)
-                return providerWindowCatalog[i]
-        }
-        return null
     }
 
     function reloadEnabledMapFromCfg() {
@@ -326,31 +190,6 @@ KCM.SimpleKCM {
         cfg_profileDisplayNamesJson = JSON.stringify(out)
     }
 
-    function pushVisibleJson() {
-        if (_hydrating) return
-        // Serialize only providers that have overrides; empty object → "[]" (defaults)
-        var out = {}
-        var anyProv = false
-        for (var prov in visibleByProvider) {
-            if (!visibleByProvider.hasOwnProperty(prov)) continue
-            var m = visibleByProvider[prov]
-            if (!m || typeof m !== "object") continue
-            var pm = {}
-            var anyKey = false
-            for (var k in m) {
-                if (!m.hasOwnProperty(k)) continue
-                pm[k] = !!m[k]
-                anyKey = true
-            }
-            if (anyKey) {
-                out[prov] = pm
-                anyProv = true
-            }
-        }
-        // Keep "[]" for fully-default so older readers stay happy; also "{}" is fine
-        cfg_visibleWindowsJson = anyProv ? JSON.stringify(out) : "[]"
-    }
-
     function pushCustomJson() {
         if (_hydrating) return
         cfg_customProfilesJson = JSON.stringify(customProfiles || [])
@@ -405,76 +244,6 @@ KCM.SimpleKCM {
             delete m[id]
         nameMap = m
         pushNamesJson()
-    }
-
-    /**
-     * Effective checkbox state for a provider window:
-     * override if present, else catalog defaultVisible.
-     */
-    function isWindowChecked(provider, wid, defaultVisible) {
-        var m = visibleByProvider[provider]
-        if (m && m.hasOwnProperty(wid))
-            return !!m[wid]
-        return defaultVisible !== false
-    }
-
-    /**
-     * Toggle one window for one provider. Materializes a full override map for
-     * that provider (defaults + change) so other columns keep their defaults.
-     */
-    function setWindowVisible(provider, wid, on) {
-        var root = cloneMap(visibleByProvider)
-        var cat = catalogForProvider(provider)
-        var m = root[provider] ? cloneMap(root[provider]) : {}
-        // First edit: seed all catalog defaults so unchecking one doesn't rely on
-        // sparse override semantics alone (and advanced JSON is self-describing).
-        if (mapKeyCount(m) === 0 && cat) {
-            for (var i = 0; i < cat.windows.length; i++) {
-                var w = cat.windows[i]
-                m[w.id] = w.defaultVisible !== false
-            }
-        }
-        m[wid] = !!on
-        // If every value matches catalog defaults, drop the provider key (back to defaults)
-        if (cat && providerMapMatchesDefaults(m, cat))
-            delete root[provider]
-        else
-            root[provider] = m
-        visibleByProvider = root
-        pushVisibleJson()
-    }
-
-    function providerMapMatchesDefaults(m, cat) {
-        if (!cat || !m) return true
-        for (var i = 0; i < cat.windows.length; i++) {
-            var w = cat.windows[i]
-            var def = w.defaultVisible !== false
-            if (m.hasOwnProperty(w.id)) {
-                if (!!m[w.id] !== def) return false
-            }
-        }
-        // Extra keys not in catalog count as customization
-        for (var k in m) {
-            if (!m.hasOwnProperty(k)) continue
-            var known = false
-            for (var j = 0; j < cat.windows.length; j++) {
-                if (cat.windows[j].id === k) { known = true; break }
-            }
-            if (!known) return false
-        }
-        return true
-    }
-
-    function resetWindowDefaults() {
-        visibleByProvider = {}
-        pushVisibleJson()
-    }
-
-    function resetProviderWindowDefaults(provider) {
-        var root = cloneMap(visibleByProvider)
-        delete root[provider]
-        visibleByProvider = root
-        pushVisibleJson()
     }
 
     function runDiscover() {
@@ -754,12 +523,11 @@ KCM.SimpleKCM {
             }
 
             Repeater {
-                model: configPage.providerWindowCatalog
+                model: configPage.visibleQuotaConfiguration.providers
                 delegate: ColumnLayout {
                     id: provBlock
                     required property var modelData
                     readonly property string providerId: modelData.provider
-                    readonly property var windowList: modelData.windows
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
 
@@ -774,8 +542,11 @@ KCM.SimpleKCM {
                             text: tr("Defaults")
                             flat: true
                             font: Kirigami.Theme.smallFont
-                            enabled: !!configPage.visibleByProvider[provBlock.providerId]
-                            onClicked: configPage.resetProviderWindowDefaults(provBlock.providerId)
+                            enabled: modelData.canReset
+                            onClicked: configPage.editVisibleQuotaConfiguration({
+                                type: "resetProvider",
+                                provider: modelData.provider
+                            })
                         }
                     }
 
@@ -783,18 +554,17 @@ KCM.SimpleKCM {
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.smallSpacing
                         Repeater {
-                            model: provBlock.windowList
+                            model: provBlock.modelData.windows
                             delegate: QQC2.CheckBox {
                                 required property var modelData
                                 text: modelData.label
-                                // Reference visibleByProvider so the binding re-evaluates on edit
-                                checked: {
-                                    var _ = configPage.visibleByProvider
-                                    return configPage.isWindowChecked(
-                                        provBlock.providerId, modelData.id, modelData.defaultVisible)
-                                }
-                                onToggled: configPage.setWindowVisible(
-                                    provBlock.providerId, modelData.id, checked)
+                                checked: modelData.checked
+                                onToggled: configPage.editVisibleQuotaConfiguration({
+                                    type: "set",
+                                    provider: provBlock.providerId,
+                                    windowId: modelData.id,
+                                    visible: checked
+                                })
                             }
                         }
                     }
@@ -804,7 +574,7 @@ KCM.SimpleKCM {
             QQC2.Button {
                 text: tr("Reset all providers to defaults")
                 flat: true
-                onClicked: resetWindowDefaults()
+                onClicked: configPage.editVisibleQuotaConfiguration({ type: "resetAll" })
             }
 
             Kirigami.Separator { Layout.fillWidth: true }
@@ -1130,7 +900,7 @@ KCM.SimpleKCM {
                 onTextChanged: {
                     cfg_visibleWindowsJson = text
                     if (!_hydrating)
-                        visibleByProvider = hydrateVisibleByProvider(text)
+                        configPage.projectVisibleQuotaConfiguration(text)
                 }
             }
 
