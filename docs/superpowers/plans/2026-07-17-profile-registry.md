@@ -75,6 +75,7 @@ Assert:
 
 - patch by ID/generation clones state and leaves input unchanged;
 - mismatched generation and unknown ID return `accepted:false` unchanged;
+- generic `patch` carrying `windows` or `usageResult` is rejected and cannot change internal/public windows;
 - public snapshot keys equal exactly:
 
 ```js
@@ -85,7 +86,8 @@ Assert:
 ```
 
 - public window array/object do not alias internal data;
-- a `usageResult` event invokes `visibility.specFor()` and `visibility.apply()`, applies terminal patch/result, and rejects stale generation;
+- `usageResult` without `expectedGeneration`, or with a stale generation, is rejected before either visibility adapter method is called;
+- only a current-generation `usageResult` invokes `visibility.specFor()`/`visibility.apply()` and commits fresh visibility/time-adjusted windows;
 - visibility adapter failure preserves previous windows, applies non-window terminal state, and emits warning.
 
 - [ ] **Step 2: Verify the test fails for the missing module**
@@ -126,7 +128,7 @@ function transition(input) {
 }
 ```
 
-Implement pure `cloneObject`, `cloneWindows`, `cloneState`, `publicProfile`, `publicProfiles`, `resultFor`, ID lookup, patch, and usage-result helpers. Generic `patch` must not accept `usageResult`/raw windows as a substitute for the dedicated event.
+Implement pure `cloneObject`, `cloneWindows`, `cloneState`, `publicProfile`, `publicProfiles`, `resultFor`, ID lookup, patch, and usage-result helpers. Generic `patch` must return `accepted:false` when its patch contains `windows` or the event contains `usageResult`. `usageResult` must require an explicit matching `expectedGeneration` before calling visibility; missing generation is not an unconditional patch.
 
 The production visibility adapter contract used by the test is:
 
@@ -261,11 +263,16 @@ In `contents/config/main.xml`, after `customProfilesJson`, add:
 </entry>
 ```
 
-In `configGeneral.qml`, add:
+In `configGeneral.qml`, add the registry import beside the existing top-level imports, before `KCM.SimpleKCM`:
+
+```qml
+import "js/ProfileRegistry.js" as Registry
+```
+
+Inside the `KCM.SimpleKCM` root, beside the other `cfg_` properties, add:
 
 ```qml
 property int cfg_customProfileNextId
-import "js/ProfileRegistry.js" as Registry
 ```
 
 - [ ] **Step 4: Implement and wire `editConfig()`**
