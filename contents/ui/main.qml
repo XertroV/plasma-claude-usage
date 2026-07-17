@@ -5,6 +5,7 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
 import "js/QuotaCommon.js" as QC
+import "js/QuotaPresentation.js" as QP
 
 PlasmoidItem {
     id: root
@@ -18,12 +19,6 @@ PlasmoidItem {
     // the PlasmoidItem child tree; sibling ids like `controller` are unreliable).
     property string compactName: ""
     property string errorMsg: ""
-    property real sessionUsagePercent: 0
-    property real weeklyUsagePercent: 0
-    property real sessionTimePercent: 0
-    property real weeklyTimePercent: 0
-    property bool hasSessionWindow: false
-    property bool hasWeeklyWindow: false
     property int bankedResets: 0
     property bool isLoading: true
     property int profilesTotal: 0
@@ -172,12 +167,6 @@ PlasmoidItem {
                     : (discErr ? i18n.tr("Discovery failed")
                         : (controller.discovering ? i18n.tr("Loading...") : i18n.tr("No profiles"))))
             errorMsg = discErr
-            sessionUsagePercent = 0
-            weeklyUsagePercent = 0
-            sessionTimePercent = 0
-            weeklyTimePercent = 0
-            hasSessionWindow = false
-            hasWeeklyWindow = false
             bankedResets = 0
             isLoading = !!controller.discovering
             loadingCountText = controller.discovering
@@ -190,37 +179,18 @@ PlasmoidItem {
         errorMsg = p.error || ""
         bankedResets = p.bankedResets || 0
 
-        // Single source of truth: QC.primaryWindows uses visible !== false (B019)
-        var primaries = QC.primaryWindows(p)
-
-        if (primaries.length >= 2) {
-            hasSessionWindow = true
-            hasWeeklyWindow = true
-            sessionUsagePercent = Number(primaries[0].usagePercent) || 0
-            sessionTimePercent = Number(primaries[0].timePercent) || 0
-            weeklyUsagePercent = Number(primaries[1].usagePercent) || 0
-            weeklyTimePercent = Number(primaries[1].timePercent) || 0
-        } else if (primaries.length === 1) {
-            hasSessionWindow = true
-            hasWeeklyWindow = false
-            sessionUsagePercent = Number(primaries[0].usagePercent) || 0
-            sessionTimePercent = Number(primaries[0].timePercent) || 0
-            weeklyUsagePercent = 0
-            weeklyTimePercent = 0
-        } else {
-            hasSessionWindow = false
-            hasWeeklyWindow = false
-            sessionUsagePercent = 0
-            weeklyUsagePercent = 0
-            sessionTimePercent = 0
-            weeklyTimePercent = 0
-        }
+        // Presentation-row count drives loading diagnostics (visible windows, any role).
+        var presentation = QP.presentProfile(p, {
+            sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity",
+            weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+        })
+        var quotaRowCount = presentation.rows.length
 
         var stillLoading = !!controller.discovering
             || profilesLoading > 0
             || (profilesTotal > 0 && profilesDone < profilesTotal)
             || (!!p.loading)
-            || (errorMsg === "" && !hasSessionWindow && !hasWeeklyWindow && !p.lastFetchMs)
+            || (errorMsg === "" && quotaRowCount === 0 && !p.lastFetchMs)
 
         isLoading = stillLoading
         if (stillLoading || (profilesTotal > 1 && profilesDone < profilesTotal))
@@ -232,8 +202,7 @@ PlasmoidItem {
             lastSyncedEpoch = controller.dataEpoch
             console.log("Claude Usage: sync compact name=", compactName,
                         "loading=", isLoading, "count=", loadingCountText,
-                        "wins=", wins.length, "primary=", primaries.length,
-                        "sess=", sessionUsagePercent, "week=", weeklyUsagePercent,
+                        "rows=", quotaRowCount,
                         "err=", errorMsg)
         }
     }
@@ -249,53 +218,6 @@ PlasmoidItem {
             return names[sub] || sub
         }
         return Plasmoid.configuration.displayName || "Claude"
-    }
-
-    function getUsageColor(percent) {
-        if (percent < 50) return Kirigami.Theme.positiveTextColor
-        if (percent < 80) return Kirigami.Theme.neutralTextColor
-        return Kirigami.Theme.negativeTextColor
-    }
-
-    function capacityPaceColor(pace) {
-        if (pace <= 1.0) return Kirigami.Theme.positiveTextColor
-        if (pace < 2.0) return Kirigami.Theme.neutralTextColor
-        return Kirigami.Theme.negativeTextColor
-    }
-
-    function efficiencyPaceColor(pace, timePercent) {
-        var remaining = 1.0 - Math.min(timePercent, 100) / 100
-        var upperGreen = 1.0 + remaining * 1.0
-        var upperOrange = 1.0 + remaining * 3.0
-        var lowerBlue = 0.25 * remaining
-        if (pace < lowerBlue) return Kirigami.Theme.activeTextColor
-        if (pace <= upperGreen) return Kirigami.Theme.positiveTextColor
-        if (pace < upperOrange) return Kirigami.Theme.neutralTextColor
-        return Kirigami.Theme.negativeTextColor
-    }
-
-    function getSessionColor() {
-        if (root.sessionTimePercent > 0) {
-            var timeP = Math.max(1, root.sessionTimePercent)
-            var pace = root.sessionUsagePercent / timeP
-            var mode = Plasmoid.configuration.sessionColorMode || "capacity"
-            return mode === "efficiency" ? efficiencyPaceColor(pace, timeP) : capacityPaceColor(pace)
-        }
-        return getUsageColor(root.sessionUsagePercent)
-    }
-
-    function getWeeklyColor() {
-        if (root.weeklyTimePercent > 0) {
-            var timeP = Math.max(1, root.weeklyTimePercent)
-            var pace = root.weeklyUsagePercent / timeP
-            var mode = Plasmoid.configuration.weeklyColorMode || "efficiency"
-            return mode === "efficiency" ? efficiencyPaceColor(pace, timeP) : capacityPaceColor(pace)
-        }
-        return getUsageColor(root.weeklyUsagePercent)
-    }
-
-    function primaryWindowsFor(profile) {
-        return QC.primaryWindows(profile)
     }
 
     function openDetailFor(profile) {
@@ -533,10 +455,16 @@ PlasmoidItem {
             var p = list[i]
             if (!p || p.enabled === false) continue
             var parts = []
-            var wins = QC.primaryWindows(p)
-            for (var j = 0; j < wins.length; j++) {
-                var cd = QC.formatCountdown(wins[j].resetAtMs, root.nowMs)
-                parts.push(QC.displayWindowLabel(wins[j]) + " " + Math.round(wins[j].usagePercent) + "%"
+            var presentation = QP.presentProfile(p, {
+                sessionColorMode: Plasmoid.configuration.sessionColorMode || "capacity",
+                weeklyColorMode: Plasmoid.configuration.weeklyColorMode || "efficiency"
+            })
+            var rows = presentation.rows
+            for (var j = 0; j < rows.length; j++) {
+                var row = rows[j]
+                var windowData = row.windowData
+                var cd = QC.formatCountdown(windowData.resetAtMs, root.nowMs)
+                parts.push(row.label + " " + Math.round(windowData.usagePercent || 0) + "%"
                     + (cd ? " (" + cd + ")" : ""))
             }
             if (p.bankedResets > 0) parts.push("↻" + p.bankedResets)
