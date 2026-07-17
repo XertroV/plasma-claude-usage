@@ -105,6 +105,74 @@ const headerWithOldOrder = header
 assert(!headerControlsInOrder(headerWithOldOrder),
     "header-order check detects Refresh and banked resets being swapped")
 
+// I001 Task 2: presentation seam — every selected quota (including extras) is a normal row
+assert(src.includes('import "js/QuotaPresentation.js" as QP'),
+    "account card imports the quota presentation module")
+assert(src.includes("readonly property var quotaPresentation: QP.presentProfile(profile,"),
+    "account card exposes the shared presentation snapshot")
+assert(src.includes("readonly property var quotaRows: quotaPresentation.rows"),
+    "account card repeats presentation rows rather than role-filtered windows")
+assert(src.includes("presentationRow: modelData"),
+    "account card feeds each presentation row into QuotaRow")
+assert(!src.includes("QC.visibleWindows(")
+       && !src.includes("QC.colorModeForWindow(")
+       && !src.includes("QC.primaryWindows(")
+       && !src.includes("QC.extraWindows("),
+    "account card does not recreate presentation policy with shallow selectors")
+assert(!src.includes("role: \"extra\"")
+       && !src.includes("role === \"extra\"")
+       && !src.includes('role == "extra"'),
+    "account card does not special-case extra roles when rendering rows")
+
+const quotaRowSrc = readFileSync(join(__dirname, "../contents/ui/QuotaRow.qml"), "utf8")
+assert(quotaRowSrc.includes("property var presentationRow"),
+    "QuotaRow consumes a presentation row")
+assert(quotaRowSrc.includes("presentationRow.label"),
+    "QuotaRow label comes from the presentation interface")
+assert(quotaRowSrc.includes("presentationRow.colorMode"),
+    "QuotaRow colour mode comes from the presentation interface")
+assert(!quotaRowSrc.includes("QC.displayWindowLabel("),
+    "QuotaRow does not resolve labels via QuotaCommon policy")
+
+// Pure-interface proof: selected extra is an equal presentation row (not secondary)
+const presentationSrc = readFileSync(
+    join(__dirname, "../contents/ui/js/QuotaPresentation.js"), "utf8")
+    .replace(/^\s*\.pragma library\s*$/gm, "")
+    .replace(/^\s*\.import[^\n]*$/gm, "")
+const commonSrc = readFileSync(
+    join(__dirname, "../contents/ui/js/QuotaCommon.js"), "utf8")
+    .replace(/^\s*\.pragma library\s*$/gm, "")
+    .replace(/^\s*\.import[^\n]*$/gm, "")
+const QC = {}
+new Function("exports", commonSrc + `
+    exports.displayWindowLabel = displayWindowLabel;
+    exports.colorModeForWindow = colorModeForWindow;
+`)(QC)
+const QP = {}
+new Function("QC", "exports", presentationSrc + `
+    exports.presentProfile = presentProfile;
+`)(QC, QP)
+const extraProfile = {
+    id: "claude",
+    windows: [
+        { id: "5h", label: "5h", role: "primary", visible: true, periodMs: 18_000_000 },
+        { id: "weekly_fable", label: "Fable", role: "extra", visible: true }
+    ]
+}
+const presented = QP.presentProfile(extraProfile, {
+    sessionColorMode: "capacity",
+    weeklyColorMode: "efficiency"
+})
+assert(presented.rows.length === 2, "selected extra is included as a normal presentation row")
+assert(presented.rows[0].label === "5h" && presented.rows[1].label === "Fable",
+    "presentation labels treat primary and extra equally")
+assert(presented.rows[0].colorMode === "capacity"
+       && presented.rows[1].colorMode === "efficiency",
+    "colour modes resolve from presentation interface, not caller role checks")
+assert(presented.rows[0].windowData === extraProfile.windows[0]
+       && presented.rows[1].windowData === extraProfile.windows[1],
+    "presentation rows retain original window data by reference")
+
 if (failed) {
     console.error(`\n${failed} failure(s)`)
     process.exit(1)
