@@ -46,6 +46,12 @@ assert.match(configQml, /property bool cfg_notifyOnQuotaReset/)
 assert.match(configQml, /property bool cfg_logQuotaResets/)
 assert.match(configQml, /cfg_notifyOnQuotaReset/)
 assert.match(configQml, /cfg_logQuotaResets/)
+assert.match(configQml, /import org\.kde\.notification as KNotification/)
+assert.match(configQml, /import "js\/QuotaResetEvents\.js" as QuotaReset/)
+assert.match(configQml, /function sendTestQuotaResetNotification\s*\(/)
+assert.match(configQml, /Send test celebration/)
+assert.match(configQml, /testResetNotificationComponent/)
+assert.match(configQml, /sendTestQuotaResetNotification\(\)/)
 
 // Pure module surface
 assert.match(resetJs, /function detectResets\s*\(/)

@@ -9,9 +9,11 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as Plasma5Support
+import org.kde.notification as KNotification
 import "js/QuotaCommon.js" as QC
 import "js/ProfileRegistry.js" as Registry
 import "js/VisibleQuotaConfig.js" as VQ
+import "js/QuotaResetEvents.js" as QuotaReset
 
 KCM.SimpleKCM {
     id: configPage
@@ -57,6 +59,44 @@ KCM.SimpleKCM {
     }
 
     function tr(text) { return trans.tr(text); }
+
+    /**
+     * Fire the same celebration notification used on real quota resets so
+     * users can verify desktop notifications from settings (KCM is a separate
+     * process from the widget, so this does not go through ProfileController).
+     */
+    function sendTestQuotaResetNotification() {
+        var sample = QuotaReset.formatNotification(
+            [{
+                windowId: "5h",
+                windowLabel: "5h",
+                kind: "natural",
+                unexpected: false,
+                previousUsagePercent: 87,
+                expectedResetAtMs: 0
+            }],
+            { displayName: "Test", provider: "claude", id: "test" }
+        )
+        var title = (sample && sample.title)
+            ? sample.title
+            : "Woo-hoo! Test quota reset 🎉"
+        var text = (sample && sample.text)
+            ? sample.text + " · " + tr("test from settings")
+            : tr("test from settings")
+        try {
+            var n = testResetNotificationComponent.createObject(configPage, {
+                title: String(title),
+                text: String(text),
+                iconName: "face-smile-big",
+                componentName: "plasma_workspace",
+                eventId: "notification"
+            })
+            if (n)
+                n.sendEvent()
+        } catch (e) {
+            console.log("configGeneral: test reset notification failed", e)
+        }
+    }
 
     readonly property var languageValues: [
         "system", "en_US", "hu_HU", "de_DE", "fr_FR", "es_ES",
@@ -870,11 +910,27 @@ KCM.SimpleKCM {
                 onCheckedChanged: cfg_notifyOnQuotaReset = checked
             }
 
+            QQC2.Button {
+                Kirigami.FormData.label: tr("Test notification:")
+                text: tr("Send test celebration")
+                icon.name: "notifications"
+                // Still allow testing when the toggle is off so users can preview
+                // before enabling automatic celebrations.
+                onClicked: configPage.sendTestQuotaResetNotification()
+            }
+
             QQC2.CheckBox {
                 Kirigami.FormData.label: tr("Reset log:")
                 text: tr("Write structured reset events under the cache root")
                 checked: cfg_logQuotaResets !== false
                 onCheckedChanged: cfg_logQuotaResets = checked
+            }
+        }
+
+        Component {
+            id: testResetNotificationComponent
+            KNotification.Notification {
+                autoDelete: true
             }
         }
 
