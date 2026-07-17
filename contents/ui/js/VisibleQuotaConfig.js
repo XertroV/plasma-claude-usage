@@ -538,7 +538,7 @@ function decodePersisted(persisted) {
 
 /**
  * Map profile.provider (+ OpenCode slot / profileKey) to the config key used
- * for column visibility. Order matches existing QuotaCommon.visibilityProviderKey.
+ * for column visibility. Order matches the historical OpenCode slot/profile mapping.
  */
 function canonicalProvider(profile) {
     var provider = ""

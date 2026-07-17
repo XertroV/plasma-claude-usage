@@ -80,3 +80,30 @@ const vq = readFileSync(
 assert.doesNotMatch(vq, /timePercent|updateTimePercent|computeTimePercent/)
 
 console.log("Visible quota runtime wiring passed.")
+
+// --- Deletion / sole-seam enforcement (P1.M4.E1.T005) ---
+const common = readFileSync(
+    join(root, "contents/ui/js/QuotaCommon.js"), "utf8")
+for (const name of [
+    "isWindowBoolMap", "parseVisibleWindowsConfig", "visibilityProviderKey",
+    "visibilitySpecForProvider", "applyVisibility"
+]) {
+    assert.doesNotMatch(common, new RegExp(`function\\s+${name}\\s*\\(`),
+                        `${name} deleted from QuotaCommon`)
+}
+for (const name of [
+    "providerWindowCatalog", "visibleByProvider", "hydrateVisibleByProvider",
+    "catalogForProvider", "pushVisibleJson", "isWindowChecked",
+    "setWindowVisible", "providerMapMatchesDefaults",
+    "resetWindowDefaults", "resetProviderWindowDefaults"
+]) {
+    assert.equal(kcm.includes(name), false, `${name} deleted from KCM`)
+}
+assert.match(controller, /registryVisibilityAdapter\s*\(/)
+assert.match(controller, /VQ\.specFor\s*\(/)
+assert.match(controller, /VQ\.apply\s*\(/)
+assert.doesNotMatch(controller,
+    /\.mode\s*===\s*"(?:defaults|globalAllowlist|globalMap|perProvider)"/)
+assert.doesNotMatch(common, /function\s+objectKeyCount\s*\(/)
+
+console.log("Visible quota deletion seam passed.")
