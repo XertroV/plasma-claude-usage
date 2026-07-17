@@ -1,4 +1,7 @@
 ---
+claimed_at: "2026-07-17T15:07:51Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T10:54:55Z"
 depends_on:
@@ -6,15 +9,10 @@ depends_on:
 estimate_hours: 2.5
 id: P1.M5.E1.T002
 priority: high
-status: pending
-tags:
-    - i005
-    - architecture
-    - response-cache
-    - tdd
-    - watchdog
-    - queue
+started_at: "2026-07-17T15:07:51Z"
+status: in_progress
+tags: []
 title: Preserve serial watchdog and queue recovery
-updated_at: "2026-07-17T10:54:55Z"
+updated_at: "2026-07-17T15:07:51Z"
 ---
 Source: I005 and docs/superpowers/plans/2026-07-17-response-cache-pipeline.md, Task 2. Extend the pure pipeline and fake tests for one in-flight command, contiguous FIFO groups, unique source identity, normal/nonzero completion, 12000 ms watchdog, one same-command retry, second-stall drop, late-completion rejection, and later-work recovery. Acceptance: red watchdog tests fail first; green tests prove two launches maximum per stalled command, nonzero completion is logged without retry, stale completion cannot double-drain, no queue-length cap/drop policy is added, and all Task 1 cases remain green.

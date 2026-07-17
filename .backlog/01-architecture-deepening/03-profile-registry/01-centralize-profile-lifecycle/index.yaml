@@ -22,7 +22,8 @@ tasks:
       file: T002-implement-profile-discovery-an.todo
       id: T002
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Implement profile discovery and custom reconciliation
     - complexity: high
       depends_on:

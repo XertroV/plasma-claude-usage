@@ -22,7 +22,8 @@ tasks:
       file: T002-build-the-mockable-profile-ref.todo
       id: T002
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Build the mockable profile refresh transaction
     - complexity: high
       depends_on:

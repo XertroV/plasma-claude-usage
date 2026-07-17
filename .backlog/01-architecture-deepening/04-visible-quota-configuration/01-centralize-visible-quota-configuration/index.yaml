@@ -22,7 +22,8 @@ tasks:
       file: T002-add-kcm-projection-edit-and.todo
       id: T002
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Add KCM projection editing and idempotent persistence
     - complexity: medium
       depends_on:
@@ -40,7 +41,8 @@ tasks:
       file: T004-route-registry-runtime-thro.todo
       id: T004
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Route registry runtime visibility through the seam
     - complexity: medium
       depends_on:

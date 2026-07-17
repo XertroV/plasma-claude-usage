@@ -22,7 +22,8 @@ tasks:
       file: T002-migrate-quota-rows-and-account.todo
       id: T002
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Migrate quota rows and account cards
     - complexity: medium
       depends_on:
@@ -40,7 +41,8 @@ tasks:
       file: T004-clean-compact-sync-and-migrate.todo
       id: T004
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Clean compact sync and migrate applet tooltips
     - complexity: medium
       depends_on:
