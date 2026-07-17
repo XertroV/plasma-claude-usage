@@ -130,7 +130,7 @@ credentialCallback({ stdout, stderr, exitCode })
 
 `readCredentials()` must return `false` without invoking the callback when HOME resolution or concurrency prevents an immediate start. After returning `true`, it must invoke the callback exactly once.
 
-`requestHttp()` receives the request specification defined below and invokes its callback exactly once with the corresponding exchange object. `recordExchange()` is fire-and-forget; refresh completion never waits for cache persistence. `now()` is the only transaction clock.
+`requestHttp()` receives the request specification defined below and invokes its callback exactly once with the corresponding exchange object. `recordExchange()` is fire-and-forget; refresh completion never waits for cache persistence. `now()` is the only transaction clock; its value is passed into provider preparation so Grok token freshness never calls `Date.now()` internally.
 
 The production ports adapt current QML facilities. Tests provide a deterministic mock object with the same four methods.
 
@@ -149,7 +149,7 @@ transition = {
 }
 ```
 
-Every transition includes `profileId` and `generation`. `patch` is mutation intent owned by the transaction: loading/error state, resolved auth metadata, auth hold/suspension, or rate-limit backoff fields. `credentials` carries the resolved access token/account/resource/slot/plan fields and clears prior auth failure state after a valid manual read or token rotation, before HTTP starts. A success also includes the normalised parser result.
+Every transition includes `profileId` and `generation`. `patch` is mutation intent owned by the transaction: loading/error state, resolved auth metadata, auth hold/suspension, or rate-limit backoff fields. Every valid credential body emits `credentials` before any terminal outcome, carrying access token/account/resource/slot/plan fields and clearing `credLoadManual`. A valid manual read or token rotation also clears prior auth failure state. A success includes the normalised parser result.
 
 ### Controller application seam
 
@@ -169,7 +169,7 @@ Re-reading visibility at success time preserves current B034 behaviour without m
 Provider branching is private to `ProfileRefreshProviders.js`.
 
 ```js
-adapterFor(profile, credentials) -> {
+prepare(profile, credentials, nowMs) -> {
     auth,
     requests,
     finalize(exchanges) -> providerOutcome
@@ -220,7 +220,7 @@ Adapters preserve current behaviour:
 - **Z.ai:** raw authorization header, `parseZai`.
 - **Kimi:** bearer token, `parseKimi`.
 - **OpenCode:** existing account selection and slot priority, then delegate to the effective provider adapter.
-- **Grok:** select one fresh token, build default and credits requests with identical token/header snapshots, settle in any order, parse monthly-only partial success when credits fail, and call `parseGrok` exactly once.
+- **Grok:** select one fresh token against injected `nowMs`, build default and credits requests with identical token/header snapshots, settle in any order, parse monthly-only partial success when credits fail, and call `parseGrok` exactly once.
 
 Unknown/effective-provider failure produces an explicit parse/configuration outcome rather than falling through caller branches.
 
@@ -240,7 +240,7 @@ Unknown/effective-provider failure produces an explicit parse/configuration outc
 12. Status 429 preserves current exponential multiplier, provider base interval, ceiling, and hold-until calculation.
 13. A successful outcome resets auth failure, suspension, hold, failed-token, and backoff state.
 14. A manual transaction clears auth suspension/hold before credential evaluation, matching current forced-retry behaviour.
-15. An automatically suspended profile with the unchanged failed token performs credential re-read but skips HTTP.
+15. An automatically suspended profile with the unchanged failed token emits updated credential metadata and clears `credLoadManual`, then skips HTTP without clearing its auth failure/suspension state.
 16. The transaction does not mutate the input profile or parser fixture objects.
 17. `emit()` receives a coherent terminal outcome only after all required provider exchanges settle.
 
@@ -303,7 +303,10 @@ The refactor preserves current visible strings and timing. The transaction retur
 - status 0 + timeout event → “API error (timeout)”;
 - status 0 without timeout event → “API error (network error)”;
 - other status → “API error (<status>)”;
-- invalid JSON/provider result → “Parse error”.
+- invalid JSON/provider result for standard providers → “Parse error”;
+- Grok default-leg malformed JSON at HTTP 200 → existing “API error (200)” behaviour;
+- Grok credits-leg malformed JSON with a valid default body → existing monthly-only partial success;
+- a `parseGrok` exception after valid JSON aggregation → “Parse error”.
 
 Auth retry and rate-limit calculations use the injected clock and policy constants, so tests are deterministic.
 
@@ -319,6 +322,7 @@ Add a Node VM loader for QML JavaScript modules and a deterministic mock port. T
 - timeout versus network status 0;
 - duplicate callbacks;
 - captured request identity/generation, provider metadata, headers, and token snapshots;
+- fixed clock values for Grok expired-versus-fresh token selection;
 - captured cache exchanges with the same identity/generation metadata;
 - controlled clock values.
 
@@ -343,12 +347,13 @@ Test:
 - missing token;
 - first automatic auth failure hold;
 - auth suspension threshold;
-- unchanged suspended token skips HTTP;
+- unchanged suspended token emits credential metadata/`credLoadManual: false`, preserves suspension, then skips HTTP;
 - rotated token resumes and clears failure state;
 - manual refresh clears suspension and retries;
 - 429 multiplier and ceiling;
 - timeout/network distinction;
-- malformed response JSON;
+- malformed standard response JSON;
+- Grok malformed default JSON → API error 200, malformed credits JSON → monthly-only success, and post-JSON parser exception → parse error;
 - stale generation rejected by the controller transition seam;
 - duplicate HTTP callback settles/caches once;
 - Grok same-token dual request;

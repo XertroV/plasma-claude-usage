@@ -56,7 +56,7 @@
 
 **Interfaces:**
 - Consumes: current `QuotaParsers` and `QuotaCommon` functions.
-- Produces: `Providers.prepare(profile, credentialText)` returning `{ auth, requests, finalize(exchanges) }`.
+- Produces: `Providers.prepare(profile, credentialText, nowMs)` returning `{ auth, requests, finalize(exchanges) }`; `nowMs` is required for deterministic Grok token freshness.
 
 - [ ] **Step 1: Add a reusable QML-JS loader**
 
@@ -94,6 +94,7 @@ import { loadQmlJs } from "./helpers/load-qml-js.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
+const NOW = Date.parse("2026-07-17T00:00:00Z")
 const QC = loadQmlJs(join(root, "contents/ui/js/QuotaCommon.js"), {}, [
     "formatWindowDuration", "makeWindow", "parseResetMs"
 ])
@@ -118,7 +119,8 @@ function okExchange(request, body) {
 const claude = Providers.prepare(
     { id: "c", provider: "claude" },
     JSON.stringify({ claudeAiOauth: { accessToken: "claude-token",
-                                      rateLimitTier: "default_claude_pro" } })
+                                      rateLimitTier: "default_claude_pro" } }),
+    NOW
 )
 assert.equal(claude.auth.token, "claude-token")
 assert.equal(claude.requests.length, 1)
@@ -130,7 +132,8 @@ assert.equal(claude.finalize([
 
 const codex = Providers.prepare(
     { id: "o", provider: "codex" },
-    JSON.stringify({ tokens: { access_token: "codex-token", account_id: "acct" } })
+    JSON.stringify({ tokens: { access_token: "codex-token", account_id: "acct" } }),
+    NOW
 )
 assert.equal(codex.requests[0].headers["ChatGPT-Account-Id"], "acct")
 assert.equal(codex.finalize([
@@ -140,7 +143,8 @@ assert.equal(codex.finalize([
 const grok = Providers.prepare(
     { id: "g", provider: "grok" },
     JSON.stringify({ accounts: { main: { key: "grok-token",
-        expires_at: "2099-01-01T00:00:00Z", create_time: "2026-01-01T00:00:00Z" } } })
+        expires_at: "2099-01-01T00:00:00Z", create_time: "2026-01-01T00:00:00Z" } } }),
+    NOW
 )
 assert.equal(grok.requests.length, 2)
 assert.deepEqual(grok.requests.map(r => r.headers.Authorization),
@@ -164,7 +168,8 @@ assert.equal(monthlyOnly.kind, "success")
 
 const minimax = Providers.prepare(
     { id: "m", provider: "minimax", resourceUrl: "https://api.minimax.io" },
-    JSON.stringify({ oauth: { access_token: "mini-token" } })
+    JSON.stringify({ oauth: { access_token: "mini-token" } }),
+    NOW
 )
 assert.equal(minimax.finalize([
     okExchange(minimax.requests[0], fixture("2026-07-14-minimax-coding-plan-remains.json"))
@@ -190,9 +195,9 @@ Create `contents/ui/js/ProfileRefreshProviders.js` with:
 .import "QuotaCommon.js" as QC
 .import "QuotaParsers.js" as QP
 
-function prepare(profile, credentialText) {
+function prepare(profile, credentialText, nowMs) {
     var credentials = parseCredentials(profile, credentialText)
-    var auth = extractAuth(profile.provider, credentials, profile)
+    var auth = extractAuth(profile.provider, credentials, profile, nowMs)
     if (!auth.token)
         return failedPreparation("auth_error", auth)
     var effective = effectiveProvider(profile, auth)
@@ -218,7 +223,7 @@ ProfileController.effectiveProvider       lines 1339-1342
 ProfileController.usageUrl                lines 1344-1352
 ```
 
-Replace `cfgValue("opencodeAccountIndex", 0)` with `profile.opencodeAccountIndex || 0`; the controller transaction snapshot supplies that field. `buildRequests()` must reproduce current headers/URLs exactly. `finalizeProvider()` must classify HTTP status before JSON/provider parsing, reproduce Grok dual-response/partial-success rules from `finishGrokPart()`, and preserve `result.planName || auth.planName || profile.planName` before returning success.
+Replace `cfgValue("opencodeAccountIndex", 0)` with `profile.opencodeAccountIndex || 0`; the controller transaction snapshot supplies that field. Replace `Date.now()` inside Grok token selection with the required `nowMs` argument and add a fixed-time test containing one expired newer token and one fresh older token. `buildRequests()` must reproduce current headers/URLs exactly. `finalizeProvider()` must classify HTTP status before JSON/provider parsing, reproduce Grok dual-response/partial-success rules from `finishGrokPart()`, and preserve `result.planName || auth.planName || profile.planName` before returning success.
 
 Return semantic outcomes only:
 
@@ -232,7 +237,7 @@ Return semantic outcomes only:
 
 - [ ] **Step 5: Complete provider coverage**
 
-Add inline Z.ai, Kimi, OpenCode account-selection, missing-token, malformed-credential, non-200, malformed-JSON, and Grok-default-failure cases. Verify request keys/endpoints/headers and parser results; do not call the network.
+Add inline Z.ai, Kimi, OpenCode account-selection, missing-token, malformed-credential, non-200, and malformed-JSON cases. Preserve Grok’s current special cases: malformed default-leg JSON at HTTP 200 produces an API-error outcome carrying status 200; malformed credits JSON with a valid default body produces monthly-only success; only a later `QP.parseGrok` exception after valid JSON produces a parse-error outcome. Verify request keys/endpoints/headers and parser results; do not call the network.
 
 - [ ] **Step 6: Run provider and existing visibility tests**
 
@@ -344,7 +349,7 @@ assert.equal(transitions[0].profileId, "claude-1")
 assert.equal(transitions[0].generation, 7)
 ```
 
-Then drive credential and HTTP callbacks and assert one `credentials` transition precedes exactly one terminal transition. The credential patch must contain the resolved token/account/resource/slot/plan fields; a manual read or rotated token must also clear prior auth failure state before HTTP. Add cases for busy credential port (`accepted === false`, no transition), valid stdout with non-zero executable exit, missing/malformed credentials, first/second auth failures, unchanged suspended token, rotated token, manual retry, 429 ceiling, timeout/network distinction, malformed response, duplicate callback, cache once, both Grok completion orders, and input immutability.
+Then drive credential and HTTP callbacks and assert one `credentials` transition precedes exactly one terminal transition. The credential patch must contain the resolved token/account/resource/slot/plan fields and clear `credLoadManual`; even an unchanged suspended token must emit this patch before its `auth_suspended` terminal outcome and launch no HTTP. A manual read or rotated token must also clear prior auth failure state before HTTP. Add cases for busy credential port (`accepted === false`, no transition), valid stdout with non-zero executable exit, missing/malformed credentials, first/second auth failures, unchanged suspended token, rotated token, manual retry, 429 ceiling, timeout/network distinction, malformed response, duplicate callback, cache once, both Grok completion orders, and input immutability.
 
 - [ ] **Step 3: Verify the transaction test fails for the missing module**
 
@@ -395,18 +400,18 @@ function run(input, ports, emit) {
                 return finish(authFailure(profile, "", input.policy, ports.now()))
             // Preserve current behaviour: valid stdout is parsed even when the
             // executable adapter reports a non-zero exit code.
-            preparation = Providers.prepare(profile, String(readResult.stdout))
+            preparation = Providers.prepare(
+                profile, String(readResult.stdout), ports.now())
         } catch (error) {
             return finish(authFailure(profile, "", input.policy, ports.now()))
         }
         if (preparation.kind === "auth_error")
             return finish(authFailure(profile, "", input.policy, ports.now()))
-        if (!manual && profile.authSuspended
-                && preparation.auth.token === profile.lastFailedToken) {
-            return finish(suspendedOutcome(profile, input.policy, ports.now()))
-        }
-        // A successful manual credential read, or a rotated token, clears the
-        // previous auth failure state before HTTP just as the current callback does.
+        var unchangedSuspendedToken = !manual && profile.authSuspended
+            && preparation.auth.token === profile.lastFailedToken
+        // Every valid credential body updates auth metadata and clears
+        // credLoadManual before any terminal outcome. Manual or rotated tokens
+        // additionally clear the previous auth failure state.
         var retryProfile = credentialStateAfterRead(
             profile, preparation.auth, manual)
         emit({
@@ -415,6 +420,8 @@ function run(input, ports, emit) {
             generation: generation,
             patch: credentialPatch(retryProfile)
         })
+        if (unchangedSuspendedToken)
+            return finish(suspendedOutcome(retryProfile, input.policy, ports.now()))
         dispatch(preparation, retryProfile)
     }
 
