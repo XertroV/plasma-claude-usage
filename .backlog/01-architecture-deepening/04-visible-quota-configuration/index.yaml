@@ -11,9 +11,9 @@ epics:
       locked: false
       name: Centralize Visible Quota Configuration
       path: 01-centralize-visible-quota-configuration
-      status: pending
+      status: done
 estimate_hours: 10
 id: P1.M4
 locked: false
 name: Visible Quota Configuration
-status: pending
+status: done

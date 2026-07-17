@@ -4,7 +4,7 @@ estimate_hours: 10
 id: P1.M1.E1
 locked: false
 name: Unify Quota Presentation
-status: pending
+status: done
 tasks:
     - complexity: high
       depends_on: []
@@ -53,6 +53,6 @@ tasks:
       file: T005-enforce-the-presentation-seam.todo
       id: T005
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Enforce the presentation seam and remove old selectors

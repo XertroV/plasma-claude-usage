@@ -12,7 +12,7 @@ milestones:
       locked: false
       name: Quota Presentation Policy
       path: 01-quota-presentation-policy
-      status: pending
+      status: done
     - complexity: high
       depends_on: []
       description: Deepen one profile's credential-to-outcome refresh lifecycle behind stable identity, provider adapters, and mockable I/O ports.
@@ -42,7 +42,7 @@ milestones:
       locked: false
       name: Visible Quota Configuration
       path: 04-visible-quota-configuration
-      status: pending
+      status: done
     - complexity: high
       depends_on:
         - P1.M2.E1.T006

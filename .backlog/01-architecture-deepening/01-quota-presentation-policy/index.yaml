@@ -9,9 +9,9 @@ epics:
       locked: false
       name: Unify Quota Presentation
       path: 01-unify-quota-presentation
-      status: pending
+      status: done
 estimate_hours: 10
 id: P1.M1
 locked: false
 name: Quota Presentation Policy
-status: pending
+status: done

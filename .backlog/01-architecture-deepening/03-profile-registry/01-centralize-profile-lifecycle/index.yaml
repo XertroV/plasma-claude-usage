@@ -42,7 +42,7 @@ tasks:
       file: T004-integrate-registry-state-into.todo
       id: T004
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Integrate registry state into the post-I002 controller
     - complexity: medium

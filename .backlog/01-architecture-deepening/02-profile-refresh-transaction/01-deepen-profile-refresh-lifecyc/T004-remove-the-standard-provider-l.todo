@@ -1,19 +1,20 @@
 ---
 claimed_at: "2026-07-17T15:23:51Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:32:04Z"
 complexity: medium
 created_at: "2026-07-17T06:16:29Z"
 depends_on:
     - P1.M2.E1.T003
+duration_minutes: 8.228469602333334
 estimate_hours: 1.5
 id: P1.M2.E1.T004
 priority: high
 started_at: "2026-07-17T15:23:51Z"
-status: in_progress
+status: done
 tags: []
 title: Remove the standard-provider legacy refresh lifecycle
-updated_at: "2026-07-17T15:23:51Z"
+updated_at: "2026-07-17T15:32:04Z"
 ---
 Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 4.
 
