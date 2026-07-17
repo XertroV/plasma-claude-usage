@@ -67,14 +67,14 @@ For an enabled exchange, current code:
 
 1. snapshots `{ id, provider, opencodeSlot }` before request settlement;
 2. derives effective provider as `opencodeSlot || "anthropic"` for OpenCode and `provider` otherwise;
-3. sanitises provider, profile ID, and endpoint to ASCII letters/digits plus `.`, `_`, `-`; every other character becomes `-`, repeated hyphens collapse, edge hyphens trim, and empty becomes `unknown`;
-4. reads local time for the history path and creates:
+3. preserves the request adapter's endpoint slug exactly, then sanitises provider, profile ID, and endpoint for filenames to ASCII letters/digits plus `.`, `_`, `-`; every other character becomes `-`, repeated hyphens collapse, edge hyphens trim, and empty becomes `unknown`;
+4. performs the first independent clock read in `buildResponseCachePaths()` (`new Date()`) and uses only that local time for:
    - `responses/YYYY/MM/DD/HHMMSS-mmm-provider-profile-endpoint.json`;
-   - `latest/provider-profile-endpoint.json`;
+   - `latest/provider-profile-endpoint.json` (which contains no timestamp);
 5. converts null/undefined response text to `""` and otherwise to `String(responseText)`;
 6. truncates after 200,000 JavaScript string characters and sets `truncated: true`;
 7. parses non-empty text as JSON; valid JSON is stored in `body` with `raw: null`, while invalid text is stored in `raw` with `body: null`; empty text stores both as `null`;
-8. reads the clock again for `savedAt`/`savedAtMs`;
+8. performs the second independent clock read in `cacheResponse()` (`new Date()`) and uses only it for `savedAt`/`savedAtMs`;
 9. serialises this exact envelope:
 
 ```js
@@ -92,16 +92,32 @@ For an enabled exchange, current code:
 }
 ```
 
-The design preserves the two clock reads: one for path time and one for envelope time. That avoids a hidden format change around a local-date boundary and lets characterisation tests describe current behaviour exactly.
+The current call chain performs one further clock read after serialising the envelope: `enqueuePayloadFileCacheWrite()` calls `nextPendingPayloadPath()`, which increments the pending sequence and then calls `Date.now()` for the pending filename. The exact ownership and order are therefore three independent reads: (1) history-path local date/time, (2) envelope timestamp, then (3) pending-filename epoch milliseconds. I005's pure pipeline owns when those reads occur and invokes `runtime.nowMs()` three times in that order; the local adapter owns the wall-clock effect. The reads must not be coalesced, reused, or reordered, because doing so can change history placement at a local-date boundary, persisted envelope time, or pending-name identity.
+
+### Current endpoint-slug contract
+
+The endpoint value arrives from I002's request adapter and is persisted unchanged in the envelope; its sanitised form is also part of both cache filenames. Current `endpointSlugForProvider()` and `grokEndpointSlug()` source establishes this exhaustive cache-producing contract:
+
+| Provider/effective-provider or request leg | Exact endpoint slug |
+| --- | --- |
+| Claude, Anthropic alias, OpenCode default/missing slot, OpenCode `anthropic`, and `anthropic-accounts` | `oauth-usage` |
+| Codex, OpenAI alias, and OpenCode `openai` | `wham-usage` |
+| Z.ai and OpenCode `zai-coding-plan` → `zai` | `quota-limit` |
+| Kimi and OpenCode `kimi-for-coding` → `kimi` | `coding-usages` |
+| MiniMax and OpenCode `minimax-coding-plan` → `minimax` | `coding-plan-remains` |
+| Grok default `/v1/billing` leg | `billing` |
+| Grok `/v1/billing?format=credits` leg | `billing-credits` |
+
+OpenCode's current credential priority maps `anthropic` (plus the `anthropic-accounts` profile key), `openai`, `minimax-coding-plan`, `zai-coding-plan`, and `kimi-for-coding` to the effective-provider slots shown above; an absent slot falls back to `anthropic`. The direct provider aliases in the endpoint selector are Claude/Anthropic and Codex/OpenAI. Gemini has no current credential extraction/request leg, so it produces no settled exchange and no endpoint slug; this plan must not invent one. Shared exact fixtures must be asserted both where provider requests are built and where cache paths/envelopes are built, so either side changing cannot silently move cache files.
 
 ### Root and pending-path resolution
 
 The configured override is trimmed and passed through `QuotaCommon.expandToAbsolute(override, homeDir)`. If HOME is not ready, `~/x` becomes `$HOME/x`; other overrides remain as supplied. With no override, the root is `<homeDir>/.cache/plasma-claude-usage` or `$HOME/.cache/plasma-claude-usage`.
 
-Pending payload paths require a local absolute root. `$HOME/`, `${HOME}/`, and `~/` resolve against `homeDir`; without HOME they fall back to `/tmp/plasma-claude-usage-cache`. Other roots remain unchanged. Pending names are:
+Pending payload paths require a local absolute root. `$HOME/`, `${HOME}/`, and `~/` resolve against `homeDir`; without HOME they fall back to `/tmp/plasma-claude-usage-cache`. Other roots remain unchanged. Pending names use the third clock value, after the history-path and envelope reads:
 
 ```text
-<pending-root>/pending/p-<Date.now()>-<sequence modulo 1000000>.json
+<pending-root>/pending/p-<third Date.now()>-<sequence modulo 1000000>.json
 ```
 
 ### Staging and command ordering
@@ -234,7 +250,7 @@ runtime = {
 }
 ```
 
-The module owns settings interpretation, slugs, two clock reads, envelope, paths, pending names, command construction, FIFO state, retry policy, source identity, late-completion rejection, and advancement. The runtime performs effects only; it does not decide what to cache or how failures change queue state.
+The module owns settings interpretation, slugs, the ordering and destinations of three clock reads, envelope, paths, pending names, command construction, FIFO state, retry policy, source identity, late-completion rejection, and advancement. The runtime performs clock/process/timer/log effects only; it does not decide when a clock value is consumed, what to cache, or how failures change queue state.
 
 ### Local production adapter
 
@@ -354,16 +370,17 @@ Tests replace `LocalResponseCache` effects with `createFakeResponseCache` while 
 2. Disabled cache performs no clock, path, serialisation, sequence, queue, process, or timer work.
 3. Every request-level settled exchange reaches `recordExchange` at most once because I002 owns the settlement guard.
 4. Every offered exchange, including stale generations and failures, is transformed at most once.
-5. Effective provider, profile ID, endpoint, URL, status, body/raw, truncation, and timestamps retain current envelope meaning.
-6. History/latest paths retain current layout and sanitisation.
-7. One exchange’s staging and script commands remain contiguous and FIFO relative to other exchanges.
-8. Only one command is in flight.
-9. Retry is bounded to two launches per stalled command; non-zero completion is logged and not retried.
-10. A late completion cannot complete or drain a newer in-flight command.
-11. Refresh parsing/mutation never waits for cache persistence.
-12. The shell remains the sole owner of atomic history/latest writes and staged-file removal after success.
-13. The pure pipeline does not read profile registry state, provider parsers, or refresh generation validity.
-14. The fake and local adapters satisfy the same one-method public seam and the same runtime effect interface.
+5. Effective provider, profile ID, exact provider/leg endpoint slug, URL, status, body/raw, truncation, and timestamps retain current envelope meaning.
+6. History/latest paths retain current layout and sanitisation; the endpoint-slug fixture exhaustively locks Claude/Anthropic, Codex/OpenAI, Z.ai, Kimi, MiniMax, both Grok legs, and every current OpenCode credential alias/fallback.
+7. Enabled valid recording consumes exactly three independent clock values in order: history path, envelope timestamp, pending filename; disabled or malformed recording consumes none.
+8. One exchange’s staging and script commands remain contiguous and FIFO relative to other exchanges.
+9. Only one command is in flight.
+10. Retry is bounded to two launches per stalled command; non-zero completion is logged and not retried.
+11. A late completion cannot complete or drain a newer in-flight command.
+12. Refresh parsing/mutation never waits for cache persistence.
+13. The shell remains the sole owner of atomic history/latest writes and staged-file removal after success.
+14. The pure pipeline does not read profile registry state, provider parsers, or refresh generation validity.
+15. The fake and local adapters satisfy the same one-method public seam and the same runtime effect interface.
 
 ## Testing Strategy
 
@@ -373,7 +390,8 @@ Add `tests/test-response-cache-pipeline.mjs` and drive the public `recordExchang
 
 - disabled mode is a complete no-op;
 - default/configured/HOME-unresolved roots;
-- exact slug/path layout with fixed two-read clock values;
+- an exhaustive shared endpoint fixture, asserted against I002 provider requests and I005 cache paths/envelopes, for Claude/Anthropic, Codex/OpenAI, Z.ai, Kimi, MiniMax, Grok default/credits, OpenCode missing-slot fallback, and OpenCode `anthropic`/`openai`/`minimax-coding-plan`/`zai-coding-plan`/`kimi-for-coding` aliases;
+- exact slug/path layout with three distinct injected clock values, asserting the first only in the history path, the second only in `savedAt`/`savedAtMs`, the third only in the pending filename, and exactly three calls in that order;
 - OpenCode effective provider from `opencodeSlot`;
 - valid JSON body, invalid raw body, empty body, JSON primitive, and 200,001-character truncation;
 - envelope metadata and absence of generation/token/header fields;
@@ -416,7 +434,7 @@ Keep and run `bash tests/test-cache-response.sh` for atomic history/latest write
 - Local production and deterministic fake adapters satisfy that same seam.
 - Cache-disabled behaviour is a true no-op and remains enabled by default.
 - Standard, Grok, failed, timeout/network, malformed, and stale-generation exchanges remain eligible for once-only recording in settlement order.
-- Per-profile/effective-provider/endpoint metadata, URL/status, body/raw/truncation envelope semantics, timestamps, and path layout are unchanged.
+- Per-profile/effective-provider/endpoint metadata, URL/status, body/raw/truncation envelope semantics, timestamps, and path layout are unchanged; exact provider/leg endpoint fixtures and the three-read clock order/destinations are test-locked.
 - Payloads are staged in 8,192-character quoted commands under `umask 077`; final script invocation carries paths only.
 - FIFO command ordering, unique executable sources, one in-flight command, 12-second watchdog, two-attempt bound, late-completion rejection, non-zero logging, and queue recovery are test-covered.
 - History and latest remain shell-owned atomic writes; pending payload is removed only after both succeed.

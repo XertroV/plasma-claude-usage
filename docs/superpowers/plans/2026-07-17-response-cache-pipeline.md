@@ -14,7 +14,7 @@
 - Begin only after `P1.M2.E1.T006` and `P1.M3.E1.T006` are complete; adapt to their final `ProfileController.qml` without restoring deleted refresh/registry policy.
 - Preserve I002’s request-level once guard and its call to `recordExchange(exchange)` before provider finalisation and controller/store generation rejection.
 - Keep the caller interface fire-and-forget: `recordExchange(exchange) -> undefined`.
-- Preserve cache-disabled true no-op behaviour, enabled-by-default configuration, two clock reads, envelope schema, 200,000-character truncation, effective-provider metadata, and history/latest layout.
+- Preserve cache-disabled true no-op behaviour, enabled-by-default configuration, exactly three independent clock reads in history-path → envelope → pending-filename order, envelope schema, 200,000-character truncation, effective-provider metadata, exact provider/leg endpoint slugs, and history/latest layout.
 - Preserve 8,192-character staged commands, current shell quoting, FIFO command ordering, one in-flight command, 12,000 ms watchdog, and two launches maximum per stalled command.
 - Do not add a queue-length cap, overflow policy, network access, or dependency.
 - Keep `contents/scripts/cache-response.sh` responsible for atomic history/latest writes and successful-write payload cleanup; no implementation change is planned for that file.
@@ -31,12 +31,14 @@
 - `contents/ui/js/ResponseCachePipeline.js` — pure envelope/path/staging preparation and serial queue/watchdog state machine.
 - `contents/ui/LocalResponseCache.qml` — local Plasma production adapter satisfying `recordExchange(exchange)`.
 - `tests/helpers/fake-response-cache.mjs` — deterministic runtime/public fake adapter.
+- `tests/fixtures/response-cache-endpoints.mjs` — exhaustive provider/effective-provider/leg endpoint-slug contract shared by provider and cache tests.
 - `tests/test-response-cache-pipeline.mjs` — pure behaviour and state-machine tests.
 - `tests/test-response-cache-controller.mjs` — production adapter and controller deletion/source contract.
 
 ### Modify
 
 - `contents/ui/ProfileController.qml` — instantiate the local adapter, forward I002’s cache port, then delete controller-owned cache internals.
+- Prerequisite `tests/test-profile-refresh-providers.mjs` — assert every supported direct/OpenCode/Grok request endpoint against the shared cache-endpoint fixture.
 
 ### Verify without modifying
 
@@ -82,6 +84,7 @@ export function createFakeResponseCache(Pipeline, initialSettings = {}, times = 
     const effects = {
         commands: [],
         disconnects: [],
+        clockReads: [],
         watchdogStarts: [],
         watchdogStops: 0,
         logs: []
@@ -91,7 +94,9 @@ export function createFakeResponseCache(Pipeline, initialSettings = {}, times = 
         settings: () => ({ ...settings }),
         nowMs() {
             if (!clock.length) throw new Error("fake clock exhausted")
-            return clock.shift()
+            const value = clock.shift()
+            effects.clockReads.push(value)
+            return value
         },
         startCommand(sourceName, command) {
             effects.commands.push({ sourceName, command })
@@ -140,10 +145,11 @@ const Pipeline = loadQmlJs(
     join(root, "contents/ui/js/ResponseCachePipeline.js"), {}, ["create"])
 const PATH_TIME = Date.parse("2026-07-17T10:11:12.013Z")
 const SAVE_TIME = Date.parse("2026-07-17T10:11:12.014Z")
+const PENDING_TIME = Date.parse("2026-07-17T10:11:12.015Z")
 const exchange = {
     key: "usage", profileId: "open/code one", generation: 3,
     provider: "opencode", opencodeSlot: "anthropic",
-    endpoint: "oauth/usage", url: "https://example.test/usage",
+    endpoint: "oauth-usage", url: "https://example.test/usage",
     status: 200, responseText: '{"ok":true}', fromTimeout: false
 }
 
@@ -155,7 +161,7 @@ assert.deepEqual(disabled.state(), {
     attempt: 0, launchSequence: 0, pendingSequence: 0
 })
 
-const fake = createFakeResponseCache(Pipeline, {}, [PATH_TIME, SAVE_TIME, SAVE_TIME])
+const fake = createFakeResponseCache(Pipeline, {}, [PATH_TIME, SAVE_TIME, PENDING_TIME])
 fake.recordExchange(exchange)
 assert.equal(fake.effects.commands.length, 1)
 assert.equal(fake.effects.watchdogStarts[0], 12000)
@@ -171,6 +177,8 @@ assert.match(queuedText,
     /responses\/2026\/07\/17\/101112-013-anthropic-open-code-one-oauth-usage\.json/)
 assert.match(queuedText,
     /latest\/anthropic-open-code-one-oauth-usage\.json/)
+assert.match(queuedText, /pending\/p-1784283072015-1\.json/)
+assert.deepEqual(fake.effects.clockReads, [PATH_TIME, SAVE_TIME, PENDING_TIME])
 assert.match(queuedText, /"savedAt":"2026-07-17T10:11:12\.014Z"/)
 assert.match(queuedText, /"savedAtMs":1784283072014/)
 assert.match(queuedText, /"provider":"anthropic"/)
@@ -182,10 +190,35 @@ assert.doesNotMatch(queuedText, /"generation"|"fromTimeout"|"key"/)
 console.log("All response cache pipeline tests passed.")
 ```
 
+Create `tests/fixtures/response-cache-endpoints.mjs` with this exact exhaustive contract (the `credentialAlias` labels document current OpenCode source keys/profile fallback; they are not persisted):
+
+```js
+export const RESPONSE_CACHE_ENDPOINT_CASES = [
+    { name: "claude", provider: "claude", opencodeSlot: "", effectiveProvider: "claude", endpoint: "oauth-usage", requestKey: "usage" },
+    { name: "anthropic alias", provider: "anthropic", opencodeSlot: "", effectiveProvider: "anthropic", endpoint: "oauth-usage", requestKey: "usage" },
+    { name: "codex", provider: "codex", opencodeSlot: "", effectiveProvider: "codex", endpoint: "wham-usage", requestKey: "usage" },
+    { name: "openai alias", provider: "openai", opencodeSlot: "", effectiveProvider: "openai", endpoint: "wham-usage", requestKey: "usage" },
+    { name: "zai", provider: "zai", opencodeSlot: "", effectiveProvider: "zai", endpoint: "quota-limit", requestKey: "usage" },
+    { name: "kimi", provider: "kimi", opencodeSlot: "", effectiveProvider: "kimi", endpoint: "coding-usages", requestKey: "usage" },
+    { name: "minimax", provider: "minimax", opencodeSlot: "", effectiveProvider: "minimax", endpoint: "coding-plan-remains", requestKey: "usage" },
+    { name: "opencode fallback", provider: "opencode", opencodeSlot: "", credentialAlias: "missing/default -> anthropic", effectiveProvider: "anthropic", endpoint: "oauth-usage", requestKey: "usage" },
+    { name: "opencode anthropic", provider: "opencode", opencodeSlot: "anthropic", credentialAlias: "anthropic / anthropic-accounts", effectiveProvider: "anthropic", endpoint: "oauth-usage", requestKey: "usage" },
+    { name: "opencode openai", provider: "opencode", opencodeSlot: "openai", credentialAlias: "openai", effectiveProvider: "openai", endpoint: "wham-usage", requestKey: "usage" },
+    { name: "opencode minimax", provider: "opencode", opencodeSlot: "minimax", credentialAlias: "minimax-coding-plan", effectiveProvider: "minimax", endpoint: "coding-plan-remains", requestKey: "usage" },
+    { name: "opencode zai", provider: "opencode", opencodeSlot: "zai", credentialAlias: "zai-coding-plan", effectiveProvider: "zai", endpoint: "quota-limit", requestKey: "usage" },
+    { name: "opencode kimi", provider: "opencode", opencodeSlot: "kimi", credentialAlias: "kimi-for-coding", effectiveProvider: "kimi", endpoint: "coding-usages", requestKey: "usage" },
+    { name: "grok default", provider: "grok", opencodeSlot: "", effectiveProvider: "grok", endpoint: "billing", requestKey: "default" },
+    { name: "grok credits", provider: "grok", opencodeSlot: "", effectiveProvider: "grok", endpoint: "billing-credits", requestKey: "credits" }
+]
+```
+
+For every fixture row, record an exchange and assert exact envelope `provider`/`endpoint`, exact history and latest provider-endpoint filename components, and `oauth-usage` rather than any slash-derived alternative. In prerequisite `tests/test-profile-refresh-providers.mjs`, import the same fixture and assert the prepared requests' `{ key, endpoint }` for every supported direct provider, both Grok legs, OpenCode missing-slot fallback, `anthropic`/`anthropic-accounts`, `openai`, `minimax-coding-plan`, `zai-coding-plan`, and `kimi-for-coding`. The direct Anthropic/OpenAI alias rows lock the current endpoint selector aliases even when reached as OpenCode effective providers. Explicitly assert that no Gemini fixture/request endpoint exists because current source creates no Gemini request leg.
+
 Extend the same test file with exact cases for:
 
 - configured absolute root and `~/override` with/without HOME;
 - provider/profile/endpoint sanitisation and `unknown` fallback;
+- exactly three distinct clock values per enabled valid exchange, consumed in history-path → envelope-timestamp → pending-filename order; assert the first value only determines history date/time, the second only `savedAt`/`savedAtMs`, and the third only `p-<ms>-<seq>.json`; assert disabled and malformed exchanges consume zero clock values;
 - invalid text (`body: null`, escaped `raw`), empty text (both null), and valid JSON primitive;
 - 200,001-character input yielding 200,000 raw characters and `truncated: true`;
 - empty payload staging branch;
@@ -249,6 +282,8 @@ function recordExchange(exchange) {
         return
     }
     try {
+        // Preserve current independent clock ownership/order exactly:
+        // history path first, envelope second, pending filename third.
         var paths = buildPaths(s, exchange, runtime.nowMs())
         var envelope = buildEnvelope(exchange, runtime.nowMs())
         var pendingPath = nextPendingPath(s, runtime.nowMs())
@@ -306,7 +341,9 @@ Expected: exit `0` and `All response cache pipeline tests passed.`
 ```bash
 git add contents/ui/js/ResponseCachePipeline.js \
         tests/helpers/fake-response-cache.mjs \
-        tests/test-response-cache-pipeline.mjs
+        tests/fixtures/response-cache-endpoints.mjs \
+        tests/test-response-cache-pipeline.mjs \
+        tests/test-profile-refresh-providers.mjs
 git commit -m "refactor(I005): add deterministic response cache pipeline"
 ```
 
@@ -328,8 +365,8 @@ Append tests that record two short exchanges (six clock reads), capture the firs
 
 ```js
 const stalled = createFakeResponseCache(Pipeline, {}, [
-    PATH_TIME, SAVE_TIME, SAVE_TIME,
-    PATH_TIME + 1000, SAVE_TIME + 1000, SAVE_TIME + 1000
+    PATH_TIME, SAVE_TIME, PENDING_TIME,
+    PATH_TIME + 1000, SAVE_TIME + 1000, PENDING_TIME + 1000
 ])
 stalled.recordExchange({ ...exchange, profileId: "first" })
 stalled.recordExchange({ ...exchange, profileId: "second" })
@@ -717,6 +754,8 @@ caller interface: recordExchange only
 cache disabled: no clock/effect/state change
 stale generation: still recorded
 metadata: effective provider/profile/endpoint/url/status exact
+provider endpoint contract: shared exhaustive fixture locks direct aliases, every current OpenCode alias/fallback, and both Grok legs at request construction and cache path/envelope consumption
+clock: exactly three independent reads per valid exchange, ordered and destination-locked to history path, envelope, and pending filename
 body: parsed/raw/empty/truncated exact
 paths: default/configured/HOME fallback and sanitisation exact
 staging: chunk size/order/quoting/path-only final argv exact
@@ -813,14 +852,15 @@ Before marking any implementation backlog task done:
 2. Implement only the smallest behaviour needed for that task.
 3. Run its green test and prerequisite regressions with explicit output.
 4. Confirm exchange recording remains before stale-generation rejection.
-5. Confirm shell atomic implementation and settings UI are untouched.
-6. Confirm the controller deletion test removes rather than aliases old cache state.
-7. Complete independent review/fix/rereview with no accepted blocker/major.
-8. Record explicit Qt status without turning a silent environment failure into a pass.
+5. Confirm the shared endpoint fixture passes at both provider-request and cache path/envelope seams, and the three distinct clock values reach only their ordered destinations.
+6. Confirm shell atomic implementation and settings UI are untouched.
+7. Confirm the controller deletion test removes rather than aliases old cache state.
+8. Complete independent review/fix/rereview with no accepted blocker/major.
+9. Record explicit Qt status without turning a silent environment failure into a pass.
 
 --- SUMMARY ---
 
-- **Task 1 (2h):** create the pure pipeline and fake adapter; characterise disabled, envelope, paths, staging, metadata, truncation, and normal FIFO behaviour.
+- **Task 1 (2h):** create the pure pipeline, shared exhaustive endpoint fixture, and fake adapter; characterise exact provider/leg slugs, three-read clock ownership, disabled behaviour, envelope, paths, staging, metadata, truncation, and normal FIFO behaviour.
 - **Task 2 (2.5h):** preserve bounded two-attempt watchdog retry, late-completion rejection, non-zero completion, and queue recovery.
 - **Task 3 (2h):** add an effects-only `LocalResponseCache.qml` production adapter.
 - **Task 4 (2h):** forward I002’s `recordExchange` port, migrate production, and delete cache internals from `ProfileController.qml` without touching refresh/registry/shell policy.
