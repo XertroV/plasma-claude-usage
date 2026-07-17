@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * P1.M2.E1.T003 / I002 Task 3 — ProfileController production refresh ports seam.
+ * P1.M2.E1.T003–T006 / I002 — ProfileController production refresh seam.
  *
  * Source-contract only (no Plasma/Qt runtime). Asserts the transaction import,
- * thin production ports, generation-guarded transition application, and that
- * global queue/due/timer scheduling remains while accepted refreshes enter
+ * thin production ports, generation-guarded transition application, retained
+ * global queue/due/timer scheduling, deletion of old lifecycle choreography
+ * (standard + Grok + auth helpers), and that accepted refreshes enter
  * ProfileRefresh.run.
  */
 import assert from "node:assert/strict"
@@ -120,6 +121,40 @@ for (const field of [
         `no transient Grok field ${field}`)
 }
 console.log("ok: Grok legacy lifecycle and live transaction state removed")
+
+// Task 6: final seam — global scheduling retained; old lifecycle deleted
+for (const name of [
+    "loadCredentials",
+    "noteAuthFailure",
+    "noteRateLimited",
+    "clearFailureStatePatch",
+    "extractAuth",
+    "pickGrokToken",
+    "extractOpencodeAuth",
+    "usageUrl",
+    "fetchUsage",
+    "fetchGrok",
+    "grokGet",
+    "finishGrokPart",
+    "endpointSlugForProvider",
+    "grokEndpointSlug"
+]) {
+    assert.doesNotMatch(src, new RegExp(`function ${name}\\s*\\(`),
+        `${name} must be deleted`)
+}
+// No standard-provider policy / parser dispatch left in the controller
+assert.doesNotMatch(src, /import\s+"js\/QuotaParsers\.js"\s+as\s+QP/)
+assert.doesNotMatch(src, /QP\.parse(Claude|Codex|Minimax|Zai|Kimi|Grok)\s*\(/)
+assert.doesNotMatch(src, /anthropic-beta|ChatGPT-Account-Id/)
+// Old generation fields gone; one generic refreshGeneration remains
+assert.doesNotMatch(src, /\busageFetchGen\b/, "no usageFetchGen on profiles")
+assert.match(src, /\brefreshGeneration\b/)
+// Response-cache path still reachable (via thin record port)
+assert.match(src, /function recordRefreshExchange\s*\(/)
+assert.match(src, /responseCache\.recordExchange|cacheResponse\s*\(/)
+// Still-used cache metadata helper until I005 fully relocates callers
+assert.match(src, /function effectiveProvider\s*\(/)
+console.log("ok: old lifecycle choreography deleted; transaction seam enforced")
 
 console.log("All profile refresh controller seam tests passed.")
 
