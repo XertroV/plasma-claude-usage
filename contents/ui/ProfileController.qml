@@ -4,6 +4,7 @@ import "js/QuotaCommon.js" as QC
 import "js/QuotaParsers.js" as QP
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
+import "js/ProfileRegistry.js" as Registry
 
 Item {
     id: controller
@@ -11,6 +12,8 @@ Item {
     property var plasmoid
     property var i18n
     property var profiles: []
+    // Safe 12-field public snapshots for views (built by registry; no secrets)
+    property var publicProfileList: []
     property bool discovering: false
     // User-visible discovery failure (parse/exit/path); empty when OK (B017)
     property string discoveryError: ""
@@ -225,9 +228,8 @@ Item {
     }
 
     /**
-     * Production visibility adapter for I003 ProfileRegistry (and current controller
-     * apply paths until full registry wiring lands). Opaque specs from
-     * VisibleQuotaConfig; time percentages stay outside the configuration module.
+     * Production visibility adapter for I003 ProfileRegistry.
+     * Opaque specs from VisibleQuotaConfig; time percentages stay outside VQ.
      */
     function registryVisibilityAdapter() {
         return {
@@ -241,6 +243,108 @@ Item {
                 return projected
             }
         }
+    }
+
+    /**
+     * Exact kcfg snapshot consumed by ProfileRegistry.transition / editConfig.
+     * Always re-read live configuration (never cache visibleWindowsJson policy).
+     */
+    function registryConfigSnapshot() {
+        return {
+            multiProfileMode: cfgValue("multiProfileMode", true),
+            provider: cfgValue("provider", "claude"),
+            opencodeSubProvider: cfgValue("opencodeSubProvider", "anthropic"),
+            credentialsPath: cfgValue("credentialsPath", ""),
+            displayName: cfgValue("displayName", ""),
+            discoverOnLoad: cfgValue("discoverOnLoad", true),
+            enabledProfilesJson: cfgValue("enabledProfilesJson", "[]"),
+            profileDisplayNamesJson: cfgValue("profileDisplayNamesJson", "{}"),
+            customProfilesJson: cfgValue("customProfilesJson", "[]"),
+            customProfileNextId: cfgValue("customProfileNextId", 0),
+            visibleWindowsJson: cfgValue("visibleWindowsJson", "[]")
+        }
+    }
+
+    /**
+     * Single registry result adapter: assign internal/public arrays once on
+     * accepted state change, then interpret effects (discover/refresh/persist/warning).
+     */
+    function applyRegistryResult(result) {
+        if (!result)
+            return false
+        if (result.accepted) {
+            if (result.state && result.state.profiles)
+                profiles = result.state.profiles
+            publicProfileList = result.publicProfiles || []
+            dataEpoch++
+        }
+        var effects = result.effects || []
+        for (var i = 0; i < effects.length; i++) {
+            var effect = effects[i]
+            if (!effect || !effect.type)
+                continue
+            switch (effect.type) {
+            case "discover":
+                discoverProfiles()
+                break
+            case "refreshAll":
+                staggerRefreshAll()
+                break
+            case "refresh":
+                var ids = effect.ids || []
+                for (var j = 0; j < ids.length; j++) {
+                    if (ids[j])
+                        queueProfileRefresh(ids[j], effect.manual !== false)
+                }
+                kickRefreshQueue()
+                break
+            case "persist":
+                if (effect.values && plasmoid && plasmoid.configuration) {
+                    var vals = effect.values
+                    for (var key in vals) {
+                        if (!vals.hasOwnProperty(key))
+                            continue
+                        // Only assign keys the configuration object actually owns
+                        if (plasmoid.configuration[key] !== undefined)
+                            plasmoid.configuration[key] = vals[key]
+                    }
+                }
+                break
+            case "warning":
+                console.log("Claude Usage: registry warning",
+                            effect.code || "", effect.profileId || "")
+                break
+            }
+        }
+        return !!result.accepted
+    }
+
+    /** Rebuild publicProfileList from the current internal profiles store. */
+    function syncPublicProfileList() {
+        publicProfileList = Registry.publicProfiles({ profiles: profiles })
+    }
+
+    /**
+     * Stable ID patch through the registry (optional generation precondition).
+     * Rejects patches that carry windows — those must use usageResult.
+     */
+    function registryPatch(profileId, patch, expectedGeneration) {
+        if (!profileId || !patch)
+            return false
+        var event = {
+            type: "patch",
+            profileId: profileId,
+            patch: patch
+        }
+        if (expectedGeneration !== undefined && expectedGeneration !== null)
+            event.expectedGeneration = expectedGeneration
+        return applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: event,
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
     }
 
     function refreshIntervalMs(provider) {
@@ -495,6 +599,7 @@ Item {
             rows.push(row)
         }
         profiles = rows
+        syncPublicProfileList()
         discoveryError = ""
         discovering = false
         dataEpoch++
@@ -582,6 +687,7 @@ Item {
         }
 
         profiles = rows
+        syncPublicProfileList()
         dataEpoch++
         console.log("Claude Usage: reapplyConfig",
                     patchMembership ? "membership+soft" : "soft",
@@ -657,28 +763,27 @@ Item {
         return row
     }
 
-    /** Full UI-facing list (no tokens / account ids / raw API bodies). */
+    /**
+     * Full UI-facing list (no tokens / account ids / raw API bodies).
+     * Prefers the prebuilt registry publicProfileList; falls back to allowlist projection.
+     */
     function publicProfiles() {
-        var out = []
-        var list = profiles || []
-        for (var i = 0; i < list.length; i++) {
-            if (list[i]) out.push(toUiProfile(list[i]))
-        }
-        return out
+        if (publicProfileList && publicProfileList.length)
+            return publicProfileList
+        return Registry.publicProfiles({ profiles: profiles })
     }
 
+    /**
+     * Patch one profile by mutable array index → stable ID via registry.
+     * Windows cannot be smuggled through this path (registry rejects them).
+     */
     function updateProfile(idx, patch) {
-        if (idx < 0 || idx >= profiles.length) return
-        var copy = []
-        for (var i = 0; i < profiles.length; i++)
-            copy.push(i === idx ? cloneProfile(profiles[i]) : profiles[i])
-        var p = copy[idx]
-        for (var k in patch) {
-            if (patch.hasOwnProperty(k)) p[k] = patch[k]
-        }
-        copy[idx] = p
-        profiles = copy
-        dataEpoch++
+        if (idx < 0 || idx >= profiles.length || !patch) return
+        var p = profiles[idx]
+        if (!p || !p.id) return
+        // Index-only fields (legacy Grok dual-fetch scratch) may not be on the
+        // registry schema; still apply via registry patch (opaque extra keys).
+        registryPatch(p.id, patch)
     }
 
     function loadingStats() {
@@ -1295,6 +1400,8 @@ Item {
     /**
      * Mechanical store adapter for ProfileRefresh transitions.
      * Resolves by stable profile ID + generation (never by mutable array index across async).
+     * Success → registry usageResult (visibility/time inside the registry);
+     * started/credentials/failures → registry patch.
      */
     function applyRefreshTransition(transition) {
         if (!transition || !transition.profileId)
@@ -1314,7 +1421,18 @@ Item {
                     started[sk] = sp[sk]
             }
             started.refreshGeneration = transition.generation
-            updateProfile(idx, started)
+            // No expectedGeneration: started *assigns* the generation for this run
+            applyRegistryResult(Registry.transition({
+                state: { profiles: profiles },
+                event: {
+                    type: "patch",
+                    profileId: transition.profileId,
+                    patch: started
+                },
+                config: registryConfigSnapshot(),
+                visibility: registryVisibilityAdapter(),
+                nowMs: nowMs
+            }))
             return
         }
 
@@ -1327,24 +1445,78 @@ Item {
         }
 
         if (transition.type === "credentials") {
-            updateProfile(idx, transition.patch || {})
+            applyRegistryResult(Registry.transition({
+                state: { profiles: profiles },
+                event: {
+                    type: "patch",
+                    profileId: transition.profileId,
+                    expectedGeneration: transition.generation,
+                    patch: transition.patch || {}
+                },
+                config: registryConfigSnapshot(),
+                visibility: registryVisibilityAdapter(),
+                nowMs: nowMs
+            }))
             return
         }
 
         if (transition.type === "success") {
-            if (transition.usageResult)
-                applyUsageResult(idx, transition.usageResult, transition.patch)
-            else {
+            if (transition.usageResult) {
+                var successPatch = {}
+                var us = transition.patch || {}
+                for (var uk in us) {
+                    if (us.hasOwnProperty(uk) && uk !== "windows")
+                        successPatch[uk] = us[uk]
+                }
+                successPatch.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+                if (successPatch.lastFetchMs === undefined)
+                    successPatch.lastFetchMs = Date.now()
+                var usageAccepted = applyRegistryResult(Registry.transition({
+                    state: { profiles: profiles },
+                    event: {
+                        type: "usageResult",
+                        profileId: transition.profileId,
+                        expectedGeneration: transition.generation,
+                        usageResult: transition.usageResult,
+                        patch: successPatch
+                    },
+                    config: registryConfigSnapshot(),
+                    visibility: registryVisibilityAdapter(),
+                    nowMs: nowMs
+                }))
+                if (usageAccepted)
+                    lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+                var wins = transition.usageResult.windows || []
+                var primaryCount = 0
+                for (var pi = 0; pi < wins.length; pi++) {
+                    if (wins[pi] && wins[pi].role === "primary")
+                        primaryCount++
+                }
+                console.log("Claude Usage: usageResult", transition.profileId,
+                            "accepted=", usageAccepted,
+                            "windows=", wins.length, "primary=", primaryCount)
+            } else {
                 // Defensive: never leave loading stuck if a success lacks a body
                 var emptyPatch = {}
                 var es = transition.patch || {}
                 for (var ek in es) {
-                    if (es.hasOwnProperty(ek))
+                    if (es.hasOwnProperty(ek) && ek !== "windows")
                         emptyPatch[ek] = es[ek]
                 }
                 if (emptyPatch.loading === undefined)
                     emptyPatch.loading = false
-                updateProfile(idx, emptyPatch)
+                applyRegistryResult(Registry.transition({
+                    state: { profiles: profiles },
+                    event: {
+                        type: "patch",
+                        profileId: transition.profileId,
+                        expectedGeneration: transition.generation,
+                        patch: emptyPatch
+                    },
+                    config: registryConfigSnapshot(),
+                    visibility: registryVisibilityAdapter(),
+                    nowMs: nowMs
+                }))
             }
             return
         }
@@ -1353,12 +1525,23 @@ Item {
         var patch = {}
         var src = transition.patch || {}
         for (var pk in src) {
-            if (src.hasOwnProperty(pk))
+            if (src.hasOwnProperty(pk) && pk !== "windows")
                 patch[pk] = src[pk]
         }
         if (patch.error !== undefined)
             patch.error = translateRefreshError(transition, patch.error)
-        updateProfile(idx, patch)
+        applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: {
+                type: "patch",
+                profileId: transition.profileId,
+                expectedGeneration: transition.generation,
+                patch: patch
+            },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
 
         if (transition.type === "auth_error")
             console.log("Claude Usage: auth failure via transaction", transition.profileId,
@@ -1556,25 +1739,20 @@ Item {
     }
 
     /**
-     * Apply normalised usage + live visibility. Optional `patch` from the
-     * ProfileRefresh success transition carries loading/error/auth/backoff fields.
-     * Legacy callers (fetchUsage/fetchGrok until Task 4/5) omit patch.
+     * Apply normalised usage through the registry usageResult transition.
+     * Optional `patch` carries loading/error/auth/backoff fields (never windows).
+     * Visibility/time always run inside ProfileRegistry via the production adapter.
+     * Legacy callers (fetchUsage/fetchGrok) omit patch.
      */
     function applyUsageResult(idx, result, patch) {
         if (idx < 0 || idx >= profiles.length || !result) return
         var p = profiles[idx]
-        if (!p) return
-        // Always re-read live visibleWindowsJson before specFor (B034 / I004).
-        // Production adapter composes VQ visibility + QC.updateTimePercent.
-        var adapter = registryVisibilityAdapter()
-        var rawVis = cfgValue("visibleWindowsJson", "[]")
-        var vis = adapter.specFor(p, rawVis)
-        var windows = adapter.apply(result.windows || [], vis, nowMs)
+        if (!p || !p.id) return
 
         var out = {}
         if (patch) {
             for (var k in patch) {
-                if (patch.hasOwnProperty(k))
+                if (patch.hasOwnProperty(k) && k !== "windows")
                     out[k] = patch[k]
             }
         } else {
@@ -1588,22 +1766,36 @@ Item {
             out.autoRefreshHoldUntilMs = clear.autoRefreshHoldUntilMs
             out.lastFailedToken = clear.lastFailedToken
         }
-        out.planName = result.planName || p.planName
-        out.bankedResets = result.bankedResets || 0
-        out.windows = windows
-        out.visibleWindowSpec = vis
         out.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
         if (out.lastFetchMs === undefined)
             out.lastFetchMs = Date.now()
 
-        updateProfile(idx, out)
-        lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
-        var primaryCount = 0
-        for (var pi = 0; pi < windows.length; pi++) {
-            if (windows[pi] && windows[pi].role === "primary" && windows[pi].visible !== false)
-                primaryCount++
-        }
-        console.log("Claude Usage: applyUsageResult idx=", idx, "windows=", windows.length, "primary=", primaryCount)
+        var gen = p.refreshGeneration
+        if (gen === undefined || gen === null)
+            gen = 0
+
+        var accepted = applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: {
+                type: "usageResult",
+                profileId: p.id,
+                expectedGeneration: gen,
+                usageResult: {
+                    windows: result.windows,
+                    planName: result.planName,
+                    bankedResets: result.bankedResets
+                },
+                patch: out
+            },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
+        if (accepted)
+            lastGlobalUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
+        var winCount = (result.windows && result.windows.length) || 0
+        console.log("Claude Usage: applyUsageResult id=", p.id,
+                    "accepted=", accepted, "windows=", winCount)
     }
 
     function fetchUsage(idx) {
