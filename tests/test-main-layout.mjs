@@ -61,25 +61,45 @@ function footerControlBlocks(footer) {
         refreshStart + refreshButton.length
     )
     const statusLabel = objectBlockAt(footer, statusStart)
-    const configureStart = footer.indexOf(
-        "PlasmaComponents.Button {",
+    const counterStart = footer.indexOf(
+        "PlasmaComponents.Label {",
         statusStart + statusLabel.length
     )
+    const loadingCounter = objectBlockAt(footer, counterStart)
+    const configureStart = footer.indexOf(
+        "PlasmaComponents.Button {",
+        counterStart + loadingCounter.length
+    )
     const configureButton = objectBlockAt(footer, configureStart)
-    return { refreshButton, statusLabel, configureButton }
+    return { refreshButton, statusLabel, loadingCounter, configureButton }
 }
 
 function footerHasSemanticOrder(footer) {
     if (directChildTypes(footer).join("|")
-        !== "PlasmaComponents.Button|PlasmaComponents.Label|PlasmaComponents.Button") {
+        !== "PlasmaComponents.Button|PlasmaComponents.Label|PlasmaComponents.Label|PlasmaComponents.Button") {
         return false
     }
     const controls = footerControlBlocks(footer)
     return controls.refreshButton.includes('icon.name: "view-refresh"')
         && controls.refreshButton.includes('root.i18nObj.tr("Refresh")')
         && controls.statusLabel.includes('root.i18nObj.tr("Updated:")')
+        && controls.statusLabel.includes("Layout.fillWidth: true")
+        && controls.loadingCounter.includes("id: loadingCounter")
+        && controls.loadingCounter.includes("visible: root.isLoading")
+        && controls.loadingCounter.includes("root.loadingCountText")
         && controls.configureButton.includes('icon.name: "configure"')
         && controls.configureButton.includes('root.i18nObj.tr("Configure…")')
+}
+
+function counterLivesOnlyInFooter(fullRepresentation) {
+    const scroll = fullRepresentation.indexOf("PlasmaComponents.ScrollView {")
+    const updated = fullRepresentation.indexOf('root.i18nObj.tr("Updated:")')
+    const footerStart = fullRepresentation.lastIndexOf("RowLayout {", updated)
+    const footer = objectBlockAt(fullRepresentation, footerStart)
+    return scroll >= 0
+        && !fullRepresentation.slice(0, scroll).includes("root.loadingCountText")
+        && footer.includes("id: loadingCounter")
+        && footer.includes("root.loadingCountText")
 }
 
 const fullStart = src.indexOf("fullRepresentation: Item {")
@@ -109,7 +129,9 @@ assert(footerStart >= scrollStart + scrollBlock.length
        && footerBlock.includes('root.i18nObj.tr("Updated:")'),
     "status label is in the footer below the cards")
 assert(footerHasSemanticOrder(footerBlock),
-    "footer direct children are Refresh, Updated, then Configure")
+    "footer direct children are Refresh, status, loading counter, then Configure")
+assert(counterLivesOnlyInFooter(fullSource),
+    "loading counter lives in the footer without a header row")
 
 const footerWithSpacer = footerBlock.replace(
     footerControls.statusLabel,
@@ -117,6 +139,13 @@ const footerWithSpacer = footerBlock.replace(
 )
 assert(!footerHasSemanticOrder(footerWithSpacer),
     "footer-order check detects an inserted spacer")
+
+const fullWithCounterAboveCards = fullSource
+    .replace(footerControls.loadingCounter, "")
+    .replace("PlasmaComponents.ScrollView {",
+        footerControls.loadingCounter + "\n            PlasmaComponents.ScrollView {")
+assert(!counterLivesOnlyInFooter(fullWithCounterAboveCards),
+    "counter-placement check detects the counter moved above the cards")
 
 const swapMarker = "__B035_FIRST_BUTTON__"
 const footerWithButtonsSwapped = footerBlock

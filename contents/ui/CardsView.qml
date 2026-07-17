@@ -188,6 +188,6 @@ Item {
                 }
             }
         }
-        // Loading count lives in the host chrome (header), not as a stray Flow item.
+        // Loading count lives in host chrome, not as a stray Flow item.
     }
 }

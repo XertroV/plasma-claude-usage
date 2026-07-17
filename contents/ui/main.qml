@@ -440,22 +440,6 @@ PlasmoidItem {
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.smallSpacing
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-                visible: root.isLoading
-
-                Item {
-                    Layout.fillWidth: true
-                }
-                PlasmaComponents.Label {
-                    visible: root.isLoading
-                    text: root.loadingCountText || (root.profilesDone + "/" + Math.max(root.profilesTotal, 1))
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                    color: Kirigami.Theme.disabledTextColor
-                }
-            }
-
             PlasmaComponents.ScrollView {
                 id: fullScroll
                 Layout.fillWidth: true
@@ -518,6 +502,13 @@ PlasmoidItem {
                     color: (root.discoveryError && root.discoveryError !== "")
                            ? Kirigami.Theme.negativeTextColor
                            : Kirigami.Theme.disabledTextColor
+                }
+                PlasmaComponents.Label {
+                    id: loadingCounter
+                    visible: root.isLoading
+                    text: root.loadingCountText || (root.profilesDone + "/" + Math.max(root.profilesTotal, 1))
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: Kirigami.Theme.disabledTextColor
                 }
                 PlasmaComponents.Button {
                     icon.name: "configure"
