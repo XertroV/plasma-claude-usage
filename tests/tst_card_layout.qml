@@ -71,7 +71,7 @@ TestCase {
                 "one visible card should not reserve empty columns to its right")
     }
 
-    function test_multipleCardsRetainResponsiveColumns() {
+    function test_partialFinalRowFillsAvailableWidth() {
         var view = makeCards([profile("one"), profile("two"), profile("three")])
         var cards = accountCards(view)
         var spacing = view.children[0].spacing
@@ -80,7 +80,23 @@ TestCase {
         compare(cards.length, 3)
         compare(cards[0].width, expectedTwoColumnWidth)
         compare(cards[1].width, expectedTwoColumnWidth)
-        compare(cards[2].width, expectedTwoColumnWidth)
+        compare(cards[2].width, view.width,
+                "a lone card in the final row should not reserve an empty column")
+    }
+
+    function test_delegatesBeyondMaximumStaySafeAndInvisible() {
+        var view = makeCards([profile("one"), profile("two"), profile("three")])
+        view.maxCards = 2
+        wait(0)
+        var cards = accountCards(view)
+        var spacing = view.children[0].spacing
+        var expectedTwoColumnWidth = Math.floor((view.width - spacing) / 2)
+
+        compare(cards.length, 3)
+        compare(cards[0].width, expectedTwoColumnWidth)
+        compare(cards[1].width, expectedTwoColumnWidth)
+        compare(cards[2].visible, false)
+        compare(cards[2].width, view.cardMinWidth)
     }
 
     function test_rightSideQuotaInformationRemainsAligned() {
