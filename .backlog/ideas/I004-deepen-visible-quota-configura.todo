@@ -44,3 +44,14 @@ Delete the current helpers and compatibility rules reappear in both KCM and runt
 - KCM and runtime share one interface.
 - Round-trip tests gain leverage.
 - Raw JSON stops leaking.
+
+
+## Planning outcome — 17 July 2026
+
+- Approved design: `docs/superpowers/specs/2026-07-17-visible-quota-configuration-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`
+- Ingested epic: `P1.M4.E1` — Centralize Visible Quota Configuration
+- Atomic tasks: `P1.M4.E1.T001` through `P1.M4.E1.T005` (10 hours total)
+- Dependencies: `P1.M1.E1.T005` and `P1.M3.E1.T006`; execution preflight requires those future-tree seams.
+- Independent full review found six plan issues; all were corrected and targeted rereview passed.
+- Product code was not implemented during this planning intake.
