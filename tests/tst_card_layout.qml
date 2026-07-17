@@ -85,8 +85,11 @@ TestCase {
     }
 
     function test_delegatesBeyondMaximumStaySafeAndInvisible() {
-        var view = makeCards([profile("one"), profile("two"), profile("three")])
-        view.maxCards = 2
+        var view = createTemporaryObject(
+                    cardsComponent, null,
+                    { profiles: [profile("one"), profile("two"), profile("three")],
+                      maxCards: 2 })
+        verify(view !== null, "capped CardsView should instantiate")
         wait(0)
         var cards = accountCards(view)
         var spacing = view.children[0].spacing
@@ -96,7 +99,15 @@ TestCase {
         compare(cards[0].width, expectedTwoColumnWidth)
         compare(cards[1].width, expectedTwoColumnWidth)
         compare(cards[2].visible, false)
-        compare(cards[2].width, view.cardMinWidth)
+        compare(cards[2].width, 0)
+        compare(cards[2].height, 0)
+
+        var moreLabels = labelsWithText(view, "+1 more")
+        compare(moreLabels.length, 1)
+        var flow = view.children[0]
+        var moreBottom = moreLabels[0].mapToItem(flow, 0, moreLabels[0].height).y
+        compare(flow.implicitHeight, moreBottom,
+                "Flow height should end at the visible overflow label, not a hidden card")
     }
 
     function test_rightSideQuotaInformationRemainsAligned() {

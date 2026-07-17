@@ -64,6 +64,7 @@ Item {
                 required property var modelData
                 required property int index
                 visible: index < cardsRoot.maxCards
+                height: visible ? implicitHeight : 0
                 profile: modelData
                 nowMs: cardsRoot.nowMs
                 sessionColorMode: cardsRoot.sessionColorMode
@@ -78,7 +79,7 @@ Item {
                         return minWidth
                     var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)
                     if (n <= 0 || index >= n)
-                        return minWidth
+                        return 0
                     var capacity = Math.max(1, Math.floor((avail + cardFlow.spacing)
                                             / (minWidth + cardFlow.spacing)))
                     // Fill each row without reserving columns for cards that are not in it.
