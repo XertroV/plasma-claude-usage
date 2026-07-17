@@ -1,0 +1,17 @@
+complexity: high
+depends_on: []
+epics:
+    - complexity: high
+      depends_on: []
+      description: Implement docs/superpowers/plans/2026-07-17-quota-presentation-policy.md without changing persisted configuration or provider behaviour.
+      estimate_hours: 10
+      id: E1
+      locked: false
+      name: Unify Quota Presentation
+      path: 01-unify-quota-presentation
+      status: pending
+estimate_hours: 10
+id: P1.M1
+locked: false
+name: Quota Presentation Policy
+status: pending

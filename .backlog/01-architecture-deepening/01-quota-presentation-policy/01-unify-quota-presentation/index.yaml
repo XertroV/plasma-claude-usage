@@ -1,0 +1,53 @@
+complexity: high
+depends_on: []
+estimate_hours: 10
+id: P1.M1.E1
+locked: false
+name: Unify Quota Presentation
+status: pending
+tasks:
+    - complexity: high
+      depends_on: []
+      estimate_hours: 2
+      file: T001-define-the-pure-quota-presenta.todo
+      id: T001
+      priority: critical
+      status: pending
+      title: Define the pure quota-presentation interface
+    - complexity: medium
+      depends_on:
+        - P1.M1.E1.T001
+      estimate_hours: 2
+      file: T002-migrate-quota-rows-and-account.todo
+      id: T002
+      priority: high
+      status: pending
+      title: Migrate quota rows and account cards
+    - complexity: medium
+      depends_on:
+        - P1.M1.E1.T002
+      estimate_hours: 2
+      file: T003-unify-detail-quota-rendering.todo
+      id: T003
+      priority: high
+      status: pending
+      title: Unify detail quota rendering
+    - complexity: medium
+      depends_on:
+        - P1.M1.E1.T001
+      estimate_hours: 2
+      file: T004-clean-compact-sync-and-migrate.todo
+      id: T004
+      priority: high
+      status: pending
+      title: Clean compact sync and migrate applet tooltips
+    - complexity: medium
+      depends_on:
+        - P1.M1.E1.T003
+        - P1.M1.E1.T004
+      estimate_hours: 2
+      file: T005-enforce-the-presentation-seam.todo
+      id: T005
+      priority: high
+      status: pending
+      title: Enforce the presentation seam and remove old selectors

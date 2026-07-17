@@ -1,0 +1,18 @@
+complexity: medium
+depends_on: []
+estimate_hours: 10
+id: P1
+locked: false
+milestones:
+    - complexity: high
+      depends_on: []
+      description: Plan and implement one presentation seam so selected quotas receive equal treatment across every rendering surface.
+      estimate_hours: 10
+      id: M1
+      locked: false
+      name: Quota Presentation Policy
+      path: 01-quota-presentation-policy
+      status: pending
+name: Architecture Deepening
+status: pending
+weeks: 1

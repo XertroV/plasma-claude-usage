@@ -1,7 +1,17 @@
 critical_path: []
 description: KDE Plasma 6 multi-provider AI coding usage widget
 next_available: null
-phases: []
+phases:
+    - depends_on: []
+      description: Establish deep modules for the architecture-review recommendations, beginning with I001 quota presentation policy.
+      estimate_hours: 10
+      id: P1
+      locked: false
+      name: Architecture Deepening
+      path: 01-architecture-deepening
+      priority: critical
+      status: pending
+      weeks: 1
 project: plasma-claude-usage
 stats:
     blocked: 0
