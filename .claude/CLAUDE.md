@@ -42,12 +42,34 @@ ls ~/.cache/plasma-claude-usage/responses/$(date +%Y/%m/%d)/
 jq . ~/.cache/plasma-claude-usage/latest/*-wham-usage.json | head
 ```
 
+## Quota reset celebration + log (I006)
+
+When successive polls show a window rolled to a new period (`resetAtMs` jumped and/or usage collapsed):
+
+1. Desktop notification (toggle `notifyOnQuotaReset`, default on) — batched per profile.
+2. Structured log under the same cache root (toggle `logQuotaResets`, default on):
+
+```
+{root}/resets/{YYYY}/{MM}/{DD}/{HHMMSS}-{ms3}-{provider}-{profileSlug}-{windowId}.json
+{root}/resets/latest/{provider}-{profileSlug}-{windowId}.json
+{root}/resets/events.jsonl
+```
+
+Fields include `kind` (`natural` | `early` | `late` | `surprise`), `unexpected`, expected vs observed times, previous/new usage %. First successful poll never counts as a reset. Pure detection: `contents/ui/js/QuotaResetEvents.js`.
+
+```bash
+tail -n 5 ~/.cache/plasma-claude-usage/resets/events.jsonl | jq .
+ls ~/.cache/plasma-claude-usage/resets/latest/
+```
+
 ## Key Files
 
-- `contents/ui/ProfileController.qml` — multi-profile fetch + response cache
+- `contents/ui/ProfileController.qml` — multi-profile fetch + response cache + reset celebrate/log
 - `contents/ui/main.qml` — widget shell / UI
 - `contents/ui/configGeneral.qml` — provider picker + paths
+- `contents/ui/js/QuotaResetEvents.js` — pure reset detect / notify / log payload
 - `contents/scripts/cache-response.sh` — atomic hist + latest write
+- `contents/scripts/log-reset.sh` — atomic reset event + jsonl append
 - `contents/icons/claude.svg` — icon
 - `metadata.json` — Plasma metadata
 - `fixture-examples/` — sample API payloads for offline reasoning

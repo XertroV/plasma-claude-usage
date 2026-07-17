@@ -94,5 +94,13 @@
             <label>Override root for response cache (empty = ~/.cache/plasma-claude-usage)</label>
             <default></default>
         </entry>
+        <entry name="notifyOnQuotaReset" type="Bool">
+            <label>Show a celebration notification when a quota window resets</label>
+            <default>true</default>
+        </entry>
+        <entry name="logQuotaResets" type="Bool">
+            <label>Log quota reset events under the cache root (resets/)</label>
+            <default>true</default>
+        </entry>
     </group>
 </kcfg>

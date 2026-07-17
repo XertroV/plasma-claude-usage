@@ -1,9 +1,11 @@
 import QtQuick
 import org.kde.plasma.plasma5support as Plasma5Support
+import org.kde.notification as KNotification
 import "js/QuotaCommon.js" as QC
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
 import "js/ProfileRegistry.js" as Registry
+import "js/QuotaResetEvents.js" as QuotaReset
 
 Item {
     id: controller
@@ -67,6 +69,119 @@ Item {
         if (!plasmoid || !plasmoid.configuration) return fallback
         var v = plasmoid.configuration[key]
         return (v === undefined || v === null) ? fallback : v
+    }
+
+    function cfgTruthy(key, defaultTrue) {
+        var v = cfgValue(key, defaultTrue !== false)
+        if (v === false || v === 0 || v === "false" || v === "0")
+            return false
+        if (v === true || v === 1 || v === "true" || v === "1")
+            return true
+        // unset / empty → honour defaultTrue
+        if (v === undefined || v === null || v === "")
+            return defaultTrue !== false
+        return !!v
+    }
+
+    readonly property string resetLogScript: {
+        var u = Qt.resolvedUrl("../scripts/log-reset.sh").toString()
+        if (u.indexOf("file://") === 0) return u.substring(7)
+        return u
+    }
+
+    /**
+     * Snapshot windows for a profile id before a usageResult transition.
+     * Empty when the profile is new or has never received windows (first poll).
+     */
+    function snapshotProfileWindows(profileId) {
+        if (!profileId) return []
+        for (var i = 0; i < profiles.length; i++) {
+            var p = profiles[i]
+            if (p && p.id === profileId)
+                return QuotaReset.snapshotWindows(p.windows)
+        }
+        return []
+    }
+
+    function findProfileById(profileId) {
+        if (!profileId) return null
+        for (var i = 0; i < profiles.length; i++) {
+            if (profiles[i] && profiles[i].id === profileId)
+                return profiles[i]
+        }
+        return null
+    }
+
+    /**
+     * After an accepted usageResult: detect window resets, celebrate, log.
+     * Batches multi-window resets into one notification; logs one file per window.
+     */
+    function handleQuotaResets(profileId, prevWindows, nextWindows) {
+        if (!profileId) return
+        var profile = findProfileById(profileId)
+        if (!profile) return
+
+        var result = QuotaReset.detectResets({
+            prevWindows: prevWindows,
+            nextWindows: nextWindows,
+            profile: profile,
+            nowMs: Date.now()
+        })
+        if (!result || !result.events || !result.events.length)
+            return
+
+        var kinds = []
+        for (var i = 0; i < result.events.length; i++)
+            kinds.push(result.events[i].windowId + "=" + result.events[i].kind)
+        console.log("Claude Usage: quota reset", profileId, kinds.join(","))
+
+        if (cfgTruthy("notifyOnQuotaReset", true) && result.notification)
+            sendQuotaResetNotification(result.notification.title, result.notification.text)
+
+        if (cfgTruthy("logQuotaResets", true) && result.envelopes)
+            logQuotaResetEnvelopes(result.envelopes)
+    }
+
+    function sendQuotaResetNotification(title, text) {
+        if (!title) return
+        try {
+            var n = resetNotificationComponent.createObject(controller, {
+                title: String(title),
+                text: String(text || ""),
+                iconName: "face-smile-big",
+                componentName: "plasma_workspace",
+                eventId: "notification"
+            })
+            if (n)
+                n.sendEvent()
+        } catch (e) {
+            console.log("Claude Usage: reset notification failed", e)
+        }
+    }
+
+    function logQuotaResetEnvelopes(envelopes) {
+        if (!envelopes || !envelopes.length) return
+        var settings = {
+            enabled: true,
+            configuredRoot: String(cfgValue("responseCachePath", "") || ""),
+            homeDir: homeDir || "",
+            logScript: resetLogScript
+        }
+        for (var i = 0; i < envelopes.length; i++) {
+            var cmd = QuotaReset.buildLogCommand(settings, envelopes[i], envelopes[i].observedAtMs)
+            if (!cmd) continue
+            // Unique sourceName so concurrent profile resets do not collide.
+            var src = "RESET_LOG=" + String(envelopes[i].profileId || "p")
+                    + ":" + String(envelopes[i].windowId || "w")
+                    + ":" + String(envelopes[i].observedAtMs || Date.now())
+                    + ":" + i
+                    + " " + cmd
+            try {
+                resetLogWriter.connectSource(src)
+            } catch (e) {
+                console.log("Claude Usage: reset log connect failed", e)
+            }
+        }
     }
 
     /**
@@ -804,6 +919,8 @@ Item {
                 successPatch.lastUpdate = Qt.formatTime(new Date(), "hh:mm:ss")
                 if (successPatch.lastFetchMs === undefined)
                     successPatch.lastFetchMs = Date.now()
+                // I006: snapshot prior windows before registry replaces them
+                var prevWinsSuccess = snapshotProfileWindows(transition.profileId)
                 var usageAccepted = applyRegistryResult(Registry.transition({
                     state: { profiles: profiles },
                     event: {
@@ -828,6 +945,8 @@ Item {
                 console.log("Claude Usage: usageResult", transition.profileId,
                             "accepted=", usageAccepted,
                             "windows=", wins.length, "primary=", primaryCount)
+                if (usageAccepted)
+                    handleQuotaResets(transition.profileId, prevWinsSuccess, wins)
             } else {
                 // Defensive: never leave loading stuck if a success lacks a body
                 var emptyPatch = {}
@@ -926,6 +1045,8 @@ Item {
         if (gen === undefined || gen === null)
             gen = 0
 
+        // I006: snapshot prior windows before registry replaces them
+        var prevWinsApply = QuotaReset.snapshotWindows(p.windows)
         var accepted = applyRegistryResult(Registry.transition({
             state: { profiles: profiles },
             event: {
@@ -948,6 +1069,8 @@ Item {
         var winCount = (result.windows && result.windows.length) || 0
         console.log("Claude Usage: applyUsageResult id=", p.id,
                     "accepted=", accepted, "windows=", winCount)
+        if (accepted)
+            handleQuotaResets(p.id, prevWinsApply, result.windows)
     }
 
 
@@ -1061,6 +1184,29 @@ Item {
                  && controller.cfgValue("cacheResponses", true) !== "0"
         configuredRoot: String(controller.cfgValue("responseCachePath", "") || "")
         homeDir: controller.homeDir
+    }
+
+    // I006: celebratory Plasma notifications on quota window reset
+    Component {
+        id: resetNotificationComponent
+        KNotification.Notification {
+            autoDelete: true
+        }
+    }
+
+    // I006: durable reset event log (hist + latest + events.jsonl)
+    Plasma5Support.DataSource {
+        id: resetLogWriter
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            var exitCode = data["exit code"] !== undefined
+                    ? data["exit code"] : data["exitCode"]
+            var stderr = data["stderr"] || ""
+            disconnectSource(sourceName)
+            if (exitCode && exitCode !== 0)
+                console.log("Claude Usage: reset log exit=", exitCode, "stderr=", stderr)
+        }
     }
 
     Plasma5Support.DataSource {

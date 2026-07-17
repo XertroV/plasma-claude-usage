@@ -16,6 +16,8 @@ A KDE Plasma 6 widget that displays AI coding usage quotas in the taskbar (Claud
   - Per-model / extra limits (Claude weekly_scoped, Codex Spark, banked resets)
   - Subscription plan badge
 - **Auto-refresh**: Configurable interval
+- **Quota reset celebration**: Desktop notification when a session/weekly window rolls over
+- **Reset event log**: Structured logs under `~/.cache/plasma-claude-usage/resets/` (natural vs early/late/surprise)
 - **Error Handling**: Clear messages when not logged in or token expired
 - **No Dependencies**: Pure QML, no Python or external tools required
 
@@ -98,6 +100,22 @@ Every provider response is cached (by default) under:
 ```
 
 Disable or change the path in widget settings (Response cache / Cache path).
+
+### Inspect quota reset events
+
+When a window resets between polls, the widget can notify and log:
+
+```
+~/.cache/plasma-claude-usage/resets/events.jsonl
+~/.cache/plasma-claude-usage/resets/latest/
+~/.cache/plasma-claude-usage/resets/YYYY/MM/DD/
+```
+
+```bash
+tail -n 5 ~/.cache/plasma-claude-usage/resets/events.jsonl | jq .
+```
+
+Each event records observed time, window id, previous/new usage %, expected `resetAt`, and `kind` (`natural` / `early` / `late` / `surprise`). Toggle notify/log in widget settings.
 
 ## File Structure
 

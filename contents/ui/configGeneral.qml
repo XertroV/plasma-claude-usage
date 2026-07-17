@@ -39,6 +39,8 @@ KCM.SimpleKCM {
     property int cfg_customProfileNextId
     property bool cfg_cacheResponses
     property string cfg_responseCachePath
+    property bool cfg_notifyOnQuotaReset
+    property bool cfg_logQuotaResets
 
     readonly property var providerValues: ["claude", "codex", "grok", "zai", "opencode", "minimax", "kimi"]
     readonly property var providerNames: [
@@ -859,6 +861,20 @@ KCM.SimpleKCM {
                 text: cfg_responseCachePath || ""
                 enabled: cfg_cacheResponses !== false
                 onTextChanged: cfg_responseCachePath = text
+            }
+
+            QQC2.CheckBox {
+                Kirigami.FormData.label: tr("Quota resets:")
+                text: tr("Celebrate with a desktop notification when a quota resets")
+                checked: cfg_notifyOnQuotaReset !== false
+                onCheckedChanged: cfg_notifyOnQuotaReset = checked
+            }
+
+            QQC2.CheckBox {
+                Kirigami.FormData.label: tr("Reset log:")
+                text: tr("Write structured reset events under the cache root")
+                checked: cfg_logQuotaResets !== false
+                onCheckedChanged: cfg_logQuotaResets = checked
             }
         }
 
