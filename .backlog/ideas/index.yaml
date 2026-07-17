@@ -23,7 +23,7 @@ ideas:
       file: I003-deepen-the-profile-registry.todo
       id: I003
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Deepen the profile registry
     - file: I004-deepen-visible-quota-configura.todo
