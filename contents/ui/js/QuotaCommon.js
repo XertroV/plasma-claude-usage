@@ -260,6 +260,18 @@ function displayWindowLabel(window) {
 }
 
 // Window visibility: treat missing/undefined `visible` as shown.
+// All quota rows selected for display, regardless of their primary/extra role.
+function visibleWindows(profile) {
+    var out = []
+    if (!profile || !profile.windows) return out
+    for (var i = 0; i < profile.windows.length; i++) {
+        var w = profile.windows[i]
+        if (w && w.visible !== false)
+            out.push(w)
+    }
+    return out
+}
+
 // Only explicit `visible === false` hides (never truthy-check `w.visible`).
 function primaryWindows(profile) {
     var out = []

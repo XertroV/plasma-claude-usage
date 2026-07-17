@@ -19,7 +19,7 @@ Rectangle {
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
 
-    readonly property var primaries: QC.primaryWindows(profile)
+    readonly property var quotaRows: QC.visibleWindows(profile)
     // Any in-flight fetch (refresh or first load)
     readonly property bool refreshing: !!(profile && profile.loading)
     // First load only — no windows yet. Never collapse existing rows while refreshing.
@@ -180,16 +180,16 @@ Rectangle {
             maximumLineCount: 2
         }
 
-        // Primary quota rows or first-load skeleton (stale rows kept while refreshing)
+        // Selected quota rows or first-load skeleton (stale rows kept while refreshing)
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
-            visible: !hasError || (primaries && primaries.length)
+            visible: !hasError || (quotaRows && quotaRows.length)
 
             Repeater {
                 model: {
-                    if (primaries && primaries.length > 0)
-                        return primaries
+                    if (quotaRows && quotaRows.length > 0)
+                        return quotaRows
                     // First load / empty: two skeleton rows (not on mid-refresh with data)
                     if (cardRoot.initialLoad || (profile && !profile.lastFetchMs && !hasError))
                         return [null, null]

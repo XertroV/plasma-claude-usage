@@ -25,6 +25,7 @@ const fn = new Function(
     + "exports.visibilityProviderKey = visibilityProviderKey;"
     + "exports.visibilitySpecForProvider = visibilitySpecForProvider;"
     + "exports.applyVisibility = applyVisibility;"
+    + "exports.visibleWindows = visibleWindows;"
     + "exports.makeWindow = makeWindow;"
 )
 fn(sandbox)
@@ -34,6 +35,7 @@ const {
     visibilityProviderKey,
     visibilitySpecForProvider,
     applyVisibility,
+    visibleWindows: visibleQuotaWindows,
     makeWindow
 } = sandbox
 
@@ -134,6 +136,8 @@ const grokWins = [
     }))
     const cOut = applyVisibility(claudeWins, visibilitySpecForProvider(cfg, "claude"))
     assert(windowsVisible(cOut).join(",") === "5h,weekly,weekly_fable", "show fable + keep defaults")
+    assert(visibleQuotaWindows({ windows: cOut }).map(w => w.id).join(",") === "5h,weekly,weekly_fable",
+        "card rows add enabled extra while keeping primaries")
 }
 
 // --- hide one primary with sparse override ---
