@@ -20,6 +20,8 @@ Item {
     property string discoveryError: ""
     property int maxCards: 12
     property int cardMinWidth: Kirigami.Units.gridUnit * 11
+    readonly property int contentFontPixelSize: Math.round(
+        (Kirigami.Theme.smallFont.pixelSize + Kirigami.Theme.defaultFont.pixelSize) / 2)
     /** When true, cards expand to fill available width in the flow. */
     property bool fillWidth: true
     property var i18n: null
@@ -106,7 +108,7 @@ Item {
         PlasmaComponents.Label {
             visible: cardsRoot.cards.length > cardsRoot.maxCards
             text: "+" + (cardsRoot.cards.length - cardsRoot.maxCards) + " more"
-            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            font.pixelSize: cardsRoot.contentFontPixelSize
             color: Kirigami.Theme.disabledTextColor
         }
 
@@ -156,7 +158,7 @@ Item {
                         return cardsRoot.tr("All accounts hidden")
                     return cardsRoot.tr("No profiles")
                 }
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                font.pixelSize: cardsRoot.contentFontPixelSize
                 color: emptyState.hasDiscoveryError
                        ? Kirigami.Theme.negativeTextColor
                        : Kirigami.Theme.disabledTextColor

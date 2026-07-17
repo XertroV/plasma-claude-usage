@@ -14,6 +14,10 @@ RowLayout {
     property string colorMode: "capacity"
     property string mode: "data"   // data | skeleton
     property bool compact: true
+    property int textPixelSize: compact
+        ? Math.round((Kirigami.Theme.smallFont.pixelSize
+                      + Kirigami.Theme.defaultFont.pixelSize) / 2)
+        : Kirigami.Theme.defaultFont.pixelSize
 
     spacing: Kirigami.Units.smallSpacing
     Layout.fillWidth: true
@@ -35,7 +39,7 @@ RowLayout {
 
     PlasmaComponents.Label {
         text: rowRoot.periodLabel
-        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+        font.pixelSize: rowRoot.textPixelSize
         font.bold: true
         color: isSkeleton ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.disabledTextColor
         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
@@ -58,7 +62,7 @@ RowLayout {
 
     PlasmaComponents.Label {
         text: isSkeleton ? "··" : (Math.round(rowRoot.usagePct) + "%")
-        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+        font.pixelSize: rowRoot.textPixelSize
         font.bold: !isSkeleton
         color: isSkeleton ? Kirigami.Theme.disabledTextColor : rowRoot.fillColor
         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
@@ -71,7 +75,7 @@ RowLayout {
             if (!windowData || !windowData.resetAtMs) return ""
             return QC.formatCountdown(windowData.resetAtMs, nowMs)
         }
-        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+        font.pixelSize: rowRoot.textPixelSize
         color: Kirigami.Theme.disabledTextColor
         Layout.preferredWidth: Kirigami.Units.gridUnit * 4
         Layout.maximumWidth: Kirigami.Units.gridUnit * 5

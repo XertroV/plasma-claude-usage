@@ -16,6 +16,9 @@ Rectangle {
     property bool showBankedBadge: true
     property int minWidth: Kirigami.Units.gridUnit * 11
 
+    readonly property int contentFontPixelSize: Math.round(
+        (Kirigami.Theme.smallFont.pixelSize + Kirigami.Theme.defaultFont.pixelSize) / 2)
+
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
 
@@ -70,7 +73,7 @@ Rectangle {
                         headerTextSlot.width * (cardRoot.hasError ? 0.4 : 1))
                     text: cardRoot.title
                     font.bold: true
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    font.pixelSize: cardRoot.contentFontPixelSize
                     color: Kirigami.Theme.textColor
                     elide: Text.ElideRight
 
@@ -96,7 +99,7 @@ Rectangle {
                     visible: cardRoot.hasError
                     text: cardRoot.hasError ? ("⚠ " + cardRoot.profile.error) : ""
                     textFormat: Text.PlainText
-                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    font.pixelSize: cardRoot.contentFontPixelSize
                     color: Kirigami.Theme.negativeTextColor
                     elide: Text.ElideRight
                     wrapMode: Text.NoWrap
@@ -232,6 +235,7 @@ Rectangle {
                     nowMs: cardRoot.nowMs
                     mode: modelData ? "data" : "skeleton"
                     compact: true
+                    textPixelSize: cardRoot.contentFontPixelSize
                     // Slight dim while refreshing existing data
                     opacity: (modelData && cardRoot.refreshing) ? 0.75 : 1
                     colorMode: modelData
