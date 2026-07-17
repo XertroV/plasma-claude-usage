@@ -1,7 +1,6 @@
 import QtQuick
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
-import "js/QuotaParsers.js" as QP
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
 import "js/ProfileRegistry.js" as Registry
@@ -559,6 +558,16 @@ Item {
      * Returns false when the credential port cannot start (busy / home / path)
      * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
      */
+        /**
+     * Cache/metadata helper: map opencode profile rows to their concrete sub-provider.
+     * Retained for any non-transaction callers; I005 pipeline has its own copy for cache.
+     */
+    function effectiveProvider(profile) {
+        if (profile.provider === "opencode") return profile.opencodeSlot || "anthropic"
+        return profile.provider
+    }
+
+
     function startProfileRefresh(idx, manual) {
         if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
@@ -880,15 +889,6 @@ Item {
                         "error=", patch.error)
     }
 
-    function clearFailureStatePatch() {
-        return {
-            authFailCount: 0,
-            authSuspended: false,
-            autoRefreshHoldUntilMs: 0,
-            lastFailedToken: "",
-            backoffMultiplier: 1
-        }
-    }
 
     /**
      * Apply normalised usage through the registry usageResult transition.
