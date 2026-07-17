@@ -954,17 +954,17 @@ Item {
     }
 
     /**
-     * I002 production entry: clone profile, allocate generation, run transaction.
-     * Returns false when the credential port cannot start (busy / home / path)
-     * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
-     */
-        /**
      * Thin cache port: forward settled exchange to LocalResponseCache.
      */
     function recordRefreshExchange(exchange) {
         responseCache.recordExchange(exchange)
     }
 
+    /**
+     * I002 production entry: clone profile, allocate generation, run transaction.
+     * Returns false when the credential port cannot start (busy / home / path)
+     * so the global queue can rotate. Holds and loading are checked by drainOneRefresh.
+     */
     function startProfileRefresh(idx, manual) {
         if (idx < 0 || idx >= profiles.length) return true
         var p = profiles[idx]
@@ -1484,7 +1484,15 @@ Item {
             if (settled) return
             settled = true
             // Always cache the HTTP exchange, even if this generation is stale
-            cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
+            recordRefreshExchange({
+                profileId: cacheProf.id,
+                provider: cacheProf.provider,
+                opencodeSlot: cacheProf.opencodeSlot || "",
+                endpoint: epSlug,
+                url: url,
+                status: status || 0,
+                responseText: responseText || ""
+            })
             var curIdx = findProfileIndex(profileId)
             if (curIdx < 0) return
             if (!profiles[curIdx] || profiles[curIdx].grokFetchGen !== gen) return
