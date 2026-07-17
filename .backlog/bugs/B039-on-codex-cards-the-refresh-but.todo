@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-17T03:12:17Z"
 claimed_by: cli-user
-completed_at: null
+completed_at: "2026-07-17T05:08:05Z"
 complexity: medium
 created_at: "2026-07-17T03:09:51Z"
 depends_on: []
+duration_minutes: 115.80520770578333
 estimate_hours: 1
 id: B039
 priority: high
 started_at: "2026-07-17T03:12:17Z"
-status: in_progress
+status: done
 tags: []
 title: On codex cards, the refresh button is on the left of the banked resets. We should swap them.
-updated_at: "2026-07-17T03:12:17Z"
+updated_at: "2026-07-17T05:08:05Z"
 ---
 
 On codex cards, the refresh button is on the left of the banked resets. We should swap them.
