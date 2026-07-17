@@ -22,7 +22,7 @@ tasks:
       file: T002-preserve-serial-watchdog-and-q.todo
       id: T002
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Preserve serial watchdog and queue recovery
     - complexity: medium

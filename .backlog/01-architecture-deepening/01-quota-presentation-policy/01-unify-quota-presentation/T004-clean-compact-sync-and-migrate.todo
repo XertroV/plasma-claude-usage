@@ -1,19 +1,20 @@
 ---
 claimed_at: "2026-07-17T15:07:51Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:16:35Z"
 complexity: medium
 created_at: "2026-07-17T04:55:59Z"
 depends_on:
     - P1.M1.E1.T001
+duration_minutes: 8.7340160441
 estimate_hours: 2
 id: P1.M1.E1.T004
 priority: high
 started_at: "2026-07-17T15:07:51Z"
-status: in_progress
+status: done
 tags: []
 title: Clean compact sync and migrate applet tooltips
-updated_at: "2026-07-17T15:07:51Z"
+updated_at: "2026-07-17T15:16:35Z"
 ---
 Source: I001 and `docs/superpowers/plans/2026-07-17-quota-presentation-policy.md`, Task 4.
 

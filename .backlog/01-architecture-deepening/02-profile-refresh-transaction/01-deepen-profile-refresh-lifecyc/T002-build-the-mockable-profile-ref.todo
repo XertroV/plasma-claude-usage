@@ -1,19 +1,20 @@
 ---
 claimed_at: "2026-07-17T15:07:51Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:16:35Z"
 complexity: high
 created_at: "2026-07-17T06:16:29Z"
 depends_on:
     - P1.M2.E1.T001
+duration_minutes: 8.734044118783334
 estimate_hours: 2
 id: P1.M2.E1.T002
 priority: high
 started_at: "2026-07-17T15:07:51Z"
-status: in_progress
+status: done
 tags: []
 title: Build the mockable profile refresh transaction
-updated_at: "2026-07-17T15:07:51Z"
+updated_at: "2026-07-17T15:16:35Z"
 ---
 Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 2.
 

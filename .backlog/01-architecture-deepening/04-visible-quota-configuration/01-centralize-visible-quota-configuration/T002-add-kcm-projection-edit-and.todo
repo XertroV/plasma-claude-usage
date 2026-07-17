@@ -1,19 +1,20 @@
 ---
 claimed_at: "2026-07-17T15:07:51Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:16:35Z"
 complexity: high
 created_at: "2026-07-17T11:01:49Z"
 depends_on:
     - P1.M4.E1.T001
+duration_minutes: 8.734081438883333
 estimate_hours: 2
 id: P1.M4.E1.T002
 priority: high
 started_at: "2026-07-17T15:07:51Z"
-status: in_progress
+status: done
 tags: []
 title: Add KCM projection editing and idempotent persistence
-updated_at: "2026-07-17T15:07:51Z"
+updated_at: "2026-07-17T15:16:35Z"
 ---
 Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.md`, Task 2.
 
