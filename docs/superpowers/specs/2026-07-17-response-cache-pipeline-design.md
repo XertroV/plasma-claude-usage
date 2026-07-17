@@ -1,7 +1,7 @@
 # Response Cache Pipeline Design
 
-**Backlog source:** I005 — Isolate the response-cache pipeline  
-**Date:** 17 July 2026  
+**Backlog source:** I005 — Isolate the response-cache pipeline
+**Date:** 17 July 2026
 **Status:** Approved for autonomous implementation planning; no product implementation is included in this document.
 
 ## Problem
