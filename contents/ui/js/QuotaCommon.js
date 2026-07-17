@@ -259,49 +259,6 @@ function displayWindowLabel(window) {
     return col !== "extra" ? col : ""
 }
 
-// Window visibility: treat missing/undefined `visible` as shown.
-// All quota rows selected for display, regardless of their primary/extra role.
-function visibleWindows(profile) {
-    var out = []
-    if (!profile || !profile.windows) return out
-    for (var i = 0; i < profile.windows.length; i++) {
-        var w = profile.windows[i]
-        if (w && w.visible !== false)
-            out.push(w)
-    }
-    return out
-}
-
-// Only explicit `visible === false` hides (never truthy-check `w.visible`).
-function primaryWindows(profile) {
-    var out = []
-    if (!profile || !profile.windows) return out
-    for (var i = 0; i < profile.windows.length; i++) {
-        var w = profile.windows[i]
-        if (!w || w.visible === false) continue
-        if (w.role === "primary" || w.role === "" || w.role === undefined)
-            out.push(w)
-    }
-    if (out.length === 0) {
-        for (var j = 0; j < profile.windows.length; j++) {
-            if (profile.windows[j] && profile.windows[j].visible !== false)
-                out.push(profile.windows[j])
-        }
-    }
-    return out
-}
-
-function extraWindows(profile) {
-    var out = []
-    if (!profile || !profile.windows) return out
-    for (var i = 0; i < profile.windows.length; i++) {
-        var w = profile.windows[i]
-        if (w && w.visible !== false && w.role === "extra")
-            out.push(w)
-    }
-    return out
-}
-
 function formatCountdown(resetAtMs, nowMs) {
     if (!resetAtMs || resetAtMs <= 0) return ""
     var diff = resetAtMs - (nowMs || Date.now())
