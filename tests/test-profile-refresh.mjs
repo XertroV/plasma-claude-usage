@@ -431,6 +431,9 @@ function terminalTypes(transitions) {
 }
 
 // ── Cache once per exchange (Grok: two legs) ────────────────────────
+function grokWindowIds(usageResult) {
+    return (usageResult.windows || []).map(w => w.id)
+}
 {
     const mock = mockRefreshPorts({ now: NOW })
     const input = baseInput({
@@ -438,7 +441,7 @@ function terminalTypes(transitions) {
     })
     const { transitions } = runCapture(input, mock)
     mock.finishCredentials({ stdout: grokCreds("g-tok"), stderr: "", exitCode: 0 })
-    assert.equal(mock.httpCallbacks.length, 2)
+    assert.equal(mock.httpCallbacks.length, 2, "both Grok legs always launch")
     // both legs share same token snapshot
     assert.deepEqual(
         mock.httpCallbacks.map(h => h.request.headers.Authorization),
@@ -452,12 +455,16 @@ function terminalTypes(transitions) {
     assert.equal(terminalTypes(transitions).length, 0)
     assert.equal(mock.exchanges.length, 1)
     mock.finishHttp(0, { status: 200, responseText: GROK_DEFAULT })
+    assert.equal(terminalTypes(transitions).length, 1)
     assert.equal(transitions[transitions.length - 1].type, "success")
     assert.equal(mock.exchanges.length, 2)
     assert.ok(transitions[transitions.length - 1].usageResult.windows.length > 0)
+    const creditsFirstIds = grokWindowIds(transitions[transitions.length - 1].usageResult)
+    assert.ok(creditsFirstIds.includes("weekly"), "monthly (weekly id) present")
+    assert.ok(creditsFirstIds.includes("session"), "session from credits present")
 }
 {
-    // reverse order: default first
+    // reverse order: default first — same windows, one terminal, two exchanges
     const mock = mockRefreshPorts({ now: NOW })
     const input = baseInput({
         profile: { id: "grok-2", provider: "grok" }
@@ -466,11 +473,15 @@ function terminalTypes(transitions) {
     mock.finishCredentials({ stdout: grokCreds(), stderr: "", exitCode: 0 })
     mock.finishHttp(0, { status: 200, responseText: GROK_DEFAULT })
     mock.finishHttp(1, { status: 200, responseText: GROK_CREDITS })
+    assert.equal(terminalTypes(transitions).length, 1)
     assert.equal(transitions[transitions.length - 1].type, "success")
     assert.equal(mock.exchanges.length, 2)
+    const defaultFirstIds = grokWindowIds(transitions[transitions.length - 1].usageResult)
+    assert.ok(defaultFirstIds.includes("weekly"))
+    assert.ok(defaultFirstIds.includes("session"))
 }
 
-// ── Grok partial success (credits fail) ─────────────────────────────
+// ── Grok partial success (credits fail → monthly-only) ──────────────
 {
     const mock = mockRefreshPorts({ now: NOW })
     const { transitions } = runCapture(baseInput({
@@ -479,11 +490,15 @@ function terminalTypes(transitions) {
     mock.finishCredentials({ stdout: grokCreds(), stderr: "", exitCode: 0 })
     mock.finishHttp(0, { status: 200, responseText: GROK_DEFAULT })
     mock.finishHttp(1, { status: 500, responseText: "" })
+    assert.equal(terminalTypes(transitions).length, 1)
     assert.equal(transitions[transitions.length - 1].type, "success")
     assert.equal(mock.exchanges.length, 2)
+    const ids = grokWindowIds(transitions[transitions.length - 1].usageResult)
+    assert.ok(ids.includes("weekly"), "monthly-only keeps weekly/$ slot")
+    assert.ok(!ids.includes("session"), "credits failure omits session slot")
 }
 
-// ── Grok default 429 → rate_limited ─────────────────────────────────
+// ── Grok default 429 → rate_limited (both legs still recorded) ──────
 {
     const mock = mockRefreshPorts({ now: NOW })
     const { transitions } = runCapture(baseInput({
@@ -492,7 +507,10 @@ function terminalTypes(transitions) {
     mock.finishCredentials({ stdout: grokCreds(), stderr: "", exitCode: 0 })
     mock.finishHttp(0, { status: 429, responseText: "" })
     mock.finishHttp(1, { status: 429, responseText: "" })
+    assert.equal(terminalTypes(transitions).length, 1)
     assert.equal(transitions[transitions.length - 1].type, "rate_limited")
+    assert.ok(transitions[transitions.length - 1].patch.backoffMultiplier > 1)
+    assert.equal(mock.exchanges.length, 2)
 }
 
 // ── Grok auth failure without body ──────────────────────────────────
@@ -504,8 +522,27 @@ function terminalTypes(transitions) {
     mock.finishCredentials({ stdout: grokCreds("bad"), stderr: "", exitCode: 0 })
     mock.finishHttp(0, { status: 401, responseText: "" })
     mock.finishHttp(1, { status: 401, responseText: "" })
+    assert.equal(terminalTypes(transitions).length, 1)
     assert.equal(transitions[transitions.length - 1].type, "auth_error")
     assert.equal(transitions[transitions.length - 1].patch.lastFailedToken, "bad")
+    assert.equal(mock.exchanges.length, 2)
+}
+
+// ── Grok credits-auth fail with monthly body → partial success ──────
+{
+    const mock = mockRefreshPorts({ now: NOW })
+    const { transitions } = runCapture(baseInput({
+        profile: { id: "grok-ca", provider: "grok" }
+    }), mock)
+    mock.finishCredentials({ stdout: grokCreds(), stderr: "", exitCode: 0 })
+    mock.finishHttp(0, { status: 200, responseText: GROK_DEFAULT })
+    mock.finishHttp(1, { status: 401, responseText: "" })
+    assert.equal(terminalTypes(transitions).length, 1)
+    assert.equal(transitions[transitions.length - 1].type, "success")
+    const ids = grokWindowIds(transitions[transitions.length - 1].usageResult)
+    assert.ok(ids.includes("weekly"))
+    assert.ok(!ids.includes("session"))
+    assert.equal(mock.exchanges.length, 2)
 }
 
 // ── Grok duplicate callback on one leg cannot double-finalize ───────

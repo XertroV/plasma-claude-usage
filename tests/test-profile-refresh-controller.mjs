@@ -97,6 +97,30 @@ for (const name of [
 // refreshGeneration is a live profile field
 assert.match(src, /refreshGeneration/)
 
+// Task 5: no Grok dual-fetch lifecycle or live-profile transaction state
+for (const name of ["fetchGrok", "grokGet", "finishGrokPart"]) {
+    assert.doesNotMatch(src, new RegExp(`function ${name}\\s*\\(`),
+        `${name} must be deleted`)
+}
+assert.doesNotMatch(src, /\bgrokFetchGen\b/, "no grokFetchGen on profiles")
+for (const field of [
+    "grokPending",
+    "grokDefaultSettled",
+    "grokCreditsSettled",
+    "grokFinalized",
+    "grokDefaultBody",
+    "grokCreditsBody",
+    "grokDefaultStatus",
+    "grokCreditsStatus",
+    "grokDefaultFromTimeout",
+    "grokCreditsFromTimeout",
+    "grokAuthFailed"
+]) {
+    assert.doesNotMatch(src, new RegExp(`\\b${field}\\b`),
+        `no transient Grok field ${field}`)
+}
+console.log("ok: Grok legacy lifecycle and live transaction state removed")
+
 console.log("All profile refresh controller seam tests passed.")
 
 /** Extract `{ ... }` body starting at the opening brace index. */
