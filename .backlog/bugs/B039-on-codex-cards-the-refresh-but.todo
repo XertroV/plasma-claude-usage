@@ -1,0 +1,14 @@
+---
+complexity: medium
+created_at: "2026-07-17T03:09:51Z"
+depends_on: []
+estimate_hours: 1
+id: B039
+priority: high
+status: pending
+tags: []
+title: On codex cards, the refresh button is on the left of the banked resets. We should swap them.
+updated_at: "2026-07-17T03:09:51Z"
+---
+
+On codex cards, the refresh button is on the left of the banked resets. We should swap them.
