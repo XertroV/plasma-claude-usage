@@ -6,7 +6,7 @@
 
 ## Problem
 
-Quota presentation policy is currently split across `QuotaCommon.js` and its rendering callers. Account cards use `visibleWindows()`, while detail, compact summary, and the applet tooltip compose `primaryWindows()` and `extraWindows()` differently. Callers also resolve labels and colour modes independently.
+Quota presentation policy is currently split across `QuotaCommon.js` and its rendering callers. Account cards—and therefore both compact and full `CardsView` surfaces—use `visibleWindows()`, while detail and the applet tooltip compose `primaryWindows()` and `extraWindows()` differently. `main.qml` also retains obsolete compact-sync scalars derived from `primaryWindows()`. Callers resolve labels and colour modes independently.
 
 This shallow selector choreography allowed an explicitly selected extra quota to appear in account cards while remaining absent or secondary elsewhere. A visibility-only test could pass even when a rendering caller chose the wrong selector. The interface therefore lacks locality: role, visibility, ordering, label, and colour-mode knowledge can drift at each call site.
 
@@ -31,8 +31,10 @@ This shallow selector choreography allowed an explicitly selected extra quota to
 ## Current State
 
 - `contents/ui/AccountCard.qml` repeats `QuotaCommon.visibleWindows(profile)`, so it already shows every selected window.
+- Both compact and full representations render `CardsView`, which delegates to `AccountCard`; compact display therefore already includes selected extras.
 - `contents/ui/DetailWindow.qml` renders separate Primary and Extra lists from `primaryWindows()` and `extraWindows()`.
-- `contents/ui/main.qml` maps only `primaryWindows()` into two fixed compact quota slots.
+- `contents/ui/main.qml::syncCompactFromController()` still computes unused fixed session/weekly scalar state from `primaryWindows()`; that state now affects only loading detection and diagnostic logging, not compact rendering.
+- `contents/ui/main.qml` retains unused colour helpers and `primaryWindowsFor()` from the former fixed compact implementation.
 - `contents/ui/main.qml::tooltipText()` includes only `primaryWindows()`.
 - `contents/ui/QuotaRow.qml` derives its own label and receives a caller-selected colour mode.
 - `tests/test-visibility.mjs` verifies configuration application and all-visible selection, but it does not prove that every rendering caller uses that policy.
@@ -125,11 +127,11 @@ Repeats `presentProfile(profile, options).rows`. Its current visible behaviour i
 
 Repeats the same rows in one section labelled “Quotas”. The Primary and Extra sections are removed because selected extra quotas receive equal treatment.
 
-### `main.qml` compact representation
+### `main.qml` compact sync cleanup
 
-Replaces the fixed session/weekly scalar state with an array-driven presentation model for the selected profile. It renders every selected row and allows compact dimensions to grow when the user explicitly enables more quotas.
+Compact rendering already flows through `CardsView` and `AccountCard`, so it gains the shared presentation rows through the card migration without a new renderer. Remove the obsolete session/weekly scalar properties and unused colour/helper functions from the former fixed compact implementation. Update loading detection and diagnostic logging to use the selected profile’s presentation-row count.
 
-Existing profile selection, loading, and error logic remains unchanged.
+Existing profile selection, `CardsView` layout, loading, and error behaviour remains unchanged.
 
 ### `main.qml` applet tooltip
 
@@ -149,8 +151,8 @@ QuotaPresentation.presentProfile(profile, colour preferences)
         │
         └── ordered presentation rows
               ├── AccountCard repeater
+              │     └── compact and full CardsView surfaces
               ├── DetailWindow repeater
-              ├── Compact representation repeater
               └── Applet tooltip formatter
 ```
 
@@ -165,7 +167,7 @@ QuotaPresentation.presentProfile(profile, colour preferences)
 - Missing labels use the established fallback chain.
 - Invalid usage/reset fields continue through existing rendering fallbacks; presentation does not reinterpret provider data.
 - Loading, profile errors, and no-data placeholders remain caller-owned and unchanged.
-- A selected profile with more than two visible quotas expands the compact representation rather than truncating or cycling rows.
+- A selected profile with more than two visible quotas continues to expand its compact account card through the existing `CardsView`/`AccountCard` layout rather than truncating or cycling rows.
 
 ## Testing Strategy
 
@@ -188,7 +190,7 @@ Add a Node test that loads `QuotaCommon.js` and `QuotaPresentation.js` through t
 - Add a Qt Quick test fixture with one primary and one explicitly selected extra window.
 - Instantiate account-card and detail rendering and assert both labels and percentages are visible.
 - Verify detail has one quota section and no role-based split.
-- Add a focused source-contract test for `main.qml` because a full Plasmoid runtime is not available in the existing Node harness. It must prove compact and tooltip paths consume `presentProfile().rows` and that rendering callers no longer invoke the old selector cluster.
+- Add a focused source-contract test for `main.qml` because a full Plasmoid runtime is not available in the existing Node harness. It must prove tooltip and compact-sync paths consume `presentProfile().rows`, compact rendering still delegates through `CardsView`/`AccountCard`, obsolete fixed-slot state is gone, and rendering callers no longer invoke the old selector cluster.
 - Preserve `tests/test-visibility.mjs` for visibility-configuration behaviour; presentation tests cover the separate rendering seam.
 
 ## Migration Sequence
@@ -196,7 +198,7 @@ Add a Node test that loads `QuotaCommon.js` and `QuotaPresentation.js` through t
 1. Add failing pure-interface tests, then introduce `QuotaPresentation.js`.
 2. Adapt `QuotaRow.qml` to accept a presentation row and migrate `AccountCard.qml`.
 3. Replace detail’s role-separated lists with one presentation-row list.
-4. Replace compact’s fixed two-window state and rendering with an array-driven model.
+4. Remove obsolete fixed-window compact-sync state and helpers; use presentation-row count for loading detection and diagnostics.
 5. Route applet tooltip generation through the same snapshot.
 6. Add rendering/wiring regression coverage.
 7. Remove unused `primaryWindows`, `extraWindows`, and `visibleWindows` selector choreography. Keep low-level `QuotaCommon` helpers only where the presentation module needs them internally.
@@ -221,7 +223,7 @@ After this design is reviewed, create the project’s first focused phase/milest
 1. presentation interface and pure tests;
 2. reusable row/card migration;
 3. detail migration;
-4. compact and tooltip migration;
+4. compact-sync cleanup and tooltip migration;
 5. cross-surface regression coverage and selector cleanup.
 
 Each task must carry its own test cycle and be independently reviewable. Dependencies should follow that sequence without introducing unrelated work from I002–I005.
