@@ -1,18 +1,19 @@
 ---
 claimed_at: "2026-07-17T15:03:09Z"
 claimed_by: grok-bl-p1
-completed_at: null
+completed_at: "2026-07-17T15:07:43Z"
 complexity: high
 created_at: "2026-07-17T10:18:39Z"
 depends_on: []
+duration_minutes: 4.57078088995
 estimate_hours: 2
 id: P1.M3.E1.T001
 priority: high
 started_at: "2026-07-17T15:03:09Z"
-status: in_progress
+status: done
 tags: []
 title: Centralize registry schema snapshots and stable patching
-updated_at: "2026-07-17T15:03:09Z"
+updated_at: "2026-07-17T15:07:43Z"
 ---
 Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 1.
 
