@@ -22,4 +22,4 @@ Source: I004 and `docs/superpowers/plans/2026-07-17-visible-quota-configuration.
 
 Migrate `configGeneral.qml` provider groups, checkboxes, provider/global resets, and advanced JSON projection to `VisibleQuotaConfig.configuration()`. Write cfg only for returned `changed:true` event results and delete the local catalogue, hydration, edit, default-comparison, and serialisation choreography.
 
-Acceptance: KCM source contracts prove all visible-quota UI state crosses the module; opening/projecting configuration performs no write; checkbox/reset effects persist only returned compatible JSON; advanced raw text remains supported; no migrated visibility policy remains in QML; configuration, visibility, and layout regressions pass.
+Acceptance: broad KCM seam contracts prove the module import/projection/event path, guarded `changed` writes, and absence of old policy helpers without prescribing delegate binding syntax; opening/projecting configuration performs no write; checkbox/reset effects persist only returned compatible JSON; advanced raw text remains supported; no migrated visibility policy remains in QML; configuration, visibility, and layout regressions pass.

@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Follow `docs/superpowers/specs/2026-07-17-visible-quota-configuration-design.md` exactly.
-- Do not begin until both `P1.M1.E1.T005` and `P1.M3.E1.T006` are done; this plan targets the post-I001/post-I003 tree.
+- Do not begin until both `P1.M1.E1.T005` and `P1.M3.E1.T006` are done; this plan targets the future post-I001/post-I003 tree and is intentionally not executable against the current planning branch.
+- Before Task 1, verify both dependency statuses and require the post-I002 `tests/helpers/load-qml-js.mjs` plus post-I003 `ProfileRegistry.js`/controller visibility-adapter seam. If any is absent, stop rather than recreating or guessing an upstream interface.
 - Preserve valid `[]`/`{}`, legacy global array, flat global map, per-provider map, and per-provider array meanings.
 - Preserve current provider-scoped identity and exact OpenCode slot/profile-key mapping.
 - Preserve the built-in catalogue/defaults and runtime-observed unknown-window fallback.
@@ -49,7 +50,7 @@
 - `contents/ui/js/ProfileRegistry.js` — continues to call the injected visibility adapter at discovery, configuration, and accepted usage-result transitions.
 - `contents/ui/js/QuotaPresentation.js` and its callers/tests — continue to consume already-annotated windows.
 - `contents/config/main.xml` — `visibleWindowsJson` remains a String with default `[]`.
-- `tests/helpers/load-qml-js.mjs` — created by I002 and reused for the pure module tests.
+- `tests/helpers/load-qml-js.mjs` — created by I002 and reused only after the dependency preflight confirms it exists.
 
 ---
 
@@ -64,6 +65,19 @@
 - Produces: `specFor(profile, persisted) -> opaqueSpec`.
 - Produces: `apply(windows, opaqueSpec) -> clonedWindows`.
 - Keeps the opaque spec’s properties private to `VisibleQuotaConfig.js`.
+
+- [ ] **Step 0: Verify the dependency-materialised implementation tree**
+
+```bash
+bl show P1.M1.E1.T005 --long | grep -q '^Status: done$'
+bl show P1.M3.E1.T006 --long | grep -q '^Status: done$'
+test -f tests/helpers/load-qml-js.mjs
+test -f contents/ui/js/ProfileRegistry.js
+rg -n 'visibility.*(specFor|apply)|specFor.*visibility|apply.*visibility' \
+  contents/ui/ProfileController.qml contents/ui/js/ProfileRegistry.js
+```
+
+Expected: both backlog checks print/compare `done`, both post-I002/I003 files exist, and the final search identifies I003’s injected production visibility adapter/calls. If not, stop: subsequent commands intentionally target the dependency-materialised tree, not this planning branch.
 
 - [ ] **Step 1: Replace the visibility test loader with the missing module interface**
 
@@ -193,8 +207,12 @@ assert.notEqual(configured[0], source[0])
 assert.equal(configured[0].nested, source[0].nested)
 assert.equal(configured.length, 3)
 assert.deepEqual(VQ.apply("bad", VQ.specFor(null, "bad json")), [])
-assert.deepEqual(VQ.apply([null, { id: "x", defaultVisible: true }], {}),
-                 [{ id: "x", defaultVisible: true, visible: true }])
+const foreignSpec = Object.freeze({
+    implementationDetail: Object.freeze({ mode: "strict", weekly: false })
+})
+assert.deepEqual(VQ.apply(
+    [null, { id: "x", defaultVisible: true }], foreignSpec),
+    [{ id: "x", defaultVisible: true, visible: true }])
 
 console.log("All visibility tests passed.")
 ```
@@ -353,6 +371,74 @@ assert.deepEqual(provider(defaults, "minimax").windows.map(w => [w.id, w.checked
 assert.deepEqual(provider(defaults, "kimi").windows.map(w => [w.id, w.checked]),
                  [["session", true], ["weekly", true], ["total_quota", false]])
 ```
+
+Add an explicit parser/catalogue consistency red test. Load `QuotaCommon.js` and `QuotaParsers.js` with the same shared loader used by I002, then parse inline records that exercise every built-in ID:
+
+```js
+const QC = loadQmlJs(join(root, "contents/ui/js/QuotaCommon.js"), {}, [
+    "formatWindowDuration", "makeWindow", "parseResetMs"
+])
+const QP = loadQmlJs(join(root, "contents/ui/js/QuotaParsers.js"), { QC }, [
+    "parseClaude", "parseCodex", "parseGrok", "parseMinimax", "parseZai", "parseKimi"
+])
+const parsed = {
+    claude: QP.parseClaude({
+        five_hour: { utilization: 1 }, seven_day: { utilization: 2 },
+        seven_day_fable: { utilization: 3 }, seven_day_oracle: { utilization: 4 },
+        seven_day_opus: { utilization: 5 }, seven_day_sonnet: { utilization: 6 },
+        seven_day_oauth_apps: { utilization: 7 },
+        seven_day_future_model: { utilization: 8 }
+    }),
+    codex: QP.parseCodex({
+        rate_limit: {
+            primary_window: { used_percent: 1, reset_at: 1, limit_window_seconds: 18000 },
+            secondary_window: { used_percent: 2, reset_at: 1, limit_window_seconds: 604800 }
+        },
+        additional_rate_limits: [{
+            limit_name: "GPT-5.3-spark",
+            rate_limit: { secondary_window: {
+                used_percent: 3, reset_at: 1, limit_window_seconds: 604800
+            }}
+        }],
+        credits: { unlimited: false, balance: "1.00" }
+    }),
+    grok: QP.parseGrok(
+        { monthlyLimit: 10000, used: 1000, billingPeriodEnd: "2026-08-01T00:00:00Z" },
+        { currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY",
+                           end: "2026-07-24T00:00:00Z" },
+          creditUsagePercent: 1, onDemandCap: 1000, onDemandUsed: 1 }),
+    zai: QP.parseZai({ limits: [
+        { type: "TOKENS_LIMIT", percentage: 1 },
+        { type: "TIME_LIMIT", percentage: 2 }
+    ]}),
+    minimax: QP.parseMinimax({ model_remains: [{
+        model_name: "general", current_interval_total_count: 10,
+        current_interval_usage_count: 9, current_weekly_total_count: 10,
+        current_weekly_usage_count: 8
+    }]}),
+    kimi: QP.parseKimi({
+        usage: { limit: 10, used: 1 },
+        limits: [{ window: { duration: 5, timeUnit: "HOUR" },
+                   detail: { limit: 10, used: 1 } }],
+        totalQuota: { used: 1 }
+    })
+}
+for (const p of defaults.providers) {
+    const actual = new Map(parsed[p.provider].windows.map(w => [w.id, w.defaultVisible]))
+    for (const builtIn of p.windows) {
+        assert.equal(actual.has(builtIn.id), true,
+                     `${p.provider}/${builtIn.id} missing from parser fixture`)
+        assert.equal(actual.get(builtIn.id), builtIn.checked,
+                     `${p.provider}/${builtIn.id} default drift`)
+    }
+}
+assert.equal(provider(defaults, "claude").windows.some(w =>
+    w.id === "weekly_future_model"), false)
+assert.equal(parsed.claude.windows.find(w =>
+    w.id === "weekly_future_model").defaultVisible, false)
+```
+
+This contract compares canonical provider, exact ID, and `defaultVisible` only. KCM-friendly labels may intentionally differ from parser presentation labels (`OAuth apps` versus `OAuth`); label text is asserted by the catalogue projection test, not treated as parser drift. Dynamic IDs remain outside the built-in catalogue and are covered by Task 1’s runtime-authoritative fallback.
 
 Assert event semantics and idempotence:
 
@@ -553,9 +639,10 @@ assert.match(kcm, /function editVisibleQuotaConfiguration\s*\(/)
 assert.match(kcm, /VQ\.configuration\s*\(/)
 assert.match(kcm, /if \(result\.changed\)/)
 assert.match(kcm, /cfg_visibleWindowsJson\s*=\s*result\.persisted/)
-assert.match(kcm, /model:\s*configPage\.visibleQuotaConfiguration\.providers/)
-assert.match(kcm, /checked:\s*modelData\.checked/)
-assert.match(kcm, /enabled:\s*modelData\.canReset/)
+assert.match(kcm, /visibleQuotaConfiguration\.providers/)
+assert.match(kcm, /editVisibleQuotaConfiguration\s*\(\s*\{/)
+assert.doesNotMatch(kcm,
+    /function\s+(hydrateVisibleByProvider|pushVisibleJson|setWindowVisible|resetProviderWindowDefaults)\s*\(/)
 
 console.log("Visible quota KCM wiring passed.")
 ```
@@ -699,9 +786,11 @@ git commit -m "refactor(I004): route KCM visibility through configuration seam"
 - Verify: `tests/test-profile-registry.mjs`
 
 **Interfaces:**
+- Precondition: the post-`P1.M3.E1.T006` tree contains `ProfileRegistry.transition()` calls to an injected `{specFor, apply}` object and a controller-created production adapter, whether I003 left that adapter inline or in an unnamed helper.
 - Consumes: `VQ.specFor(profile, persisted)` and `VQ.apply(windows, spec)`.
 - Preserves: I003 adapter `specFor(profile, visibleWindowsJson)` / `apply(windows, spec, nowMs)`.
 - Preserves: `QC.updateTimePercent(window, nowMs)` in the production adapter, outside visibility policy.
+- Produces: exact private controller helper `registryVisibilityAdapter()` by extracting/renaming the dependency-materialised adapter rather than assuming that name exists in the current pre-I003 source.
 
 - [ ] **Step 1: Extend the source contract with runtime assertions**
 
@@ -723,7 +812,17 @@ assert.doesNotMatch(controller,
     /QC\.(parseVisibleWindowsConfig|visibilityProviderKey|visibilitySpecForProvider|applyVisibility)\s*\(/)
 assert.match(registry, /visibility\.specFor\s*\(/)
 assert.match(registry, /visibility\.apply\s*\(/)
-assert.doesNotMatch(registry, /spec\.(mode|globalAllowlist|globalMap|byProvider)/)
+const forbiddenSpecReads = []
+for (const [name, source] of [
+    ["ProfileController.qml", controller],
+    ["ProfileRegistry.js", registry],
+    ["configGeneral.qml", kcm]
+]) {
+    for (const match of source.matchAll(/\bspec\s*\.\s*[A-Za-z_$][\w$]*/g))
+        forbiddenSpecReads.push(`${name}:${match[0]}`)
+}
+assert.deepEqual(forbiddenSpecReads, [],
+                 "opaque visibility spec inspected outside VisibleQuotaConfig.js")
 
 console.log("Visible quota runtime wiring passed.")
 ```
@@ -748,7 +847,7 @@ Add to `contents/ui/ProfileController.qml`:
 import "js/VisibleQuotaConfig.js" as VQ
 ```
 
-Use this exact post-I003 production adapter:
+First locate the concrete object that the dependency-materialised controller passes to I003 as the injected visibility adapter. If I003 left it inline or used another private helper name, extract/rename that existing object to `registryVisibilityAdapter()` and update its call sites; do not add a second adapter. Then use this exact body:
 
 ```qml
 function registryVisibilityAdapter() {
@@ -766,7 +865,7 @@ function registryVisibilityAdapter() {
 }
 ```
 
-Rename the post-I003 production adapter factory to the exact private QML function name `registryVisibilityAdapter` when replacing its body. Update every controller call site to that name. Do not change `ProfileRegistry.transition()` or its failure handling.
+The pre-I004 planning tree does not yet contain this factory; its absence before `P1.M3.E1.T006` is expected and is why Task 1 has a hard preflight. On the post-I003 tree, update every controller call site to the extracted `registryVisibilityAdapter()` name. Do not change `ProfileRegistry.transition()` or its failure handling.
 
 Remove residual controller functions that parse or inspect raw visibility formats. The config snapshot continues supplying `visibleWindowsJson`, and the accepted generation-checked `usageResult` transition must continue reading that live snapshot before `visibility.specFor()`.
 
