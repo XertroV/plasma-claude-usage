@@ -6,6 +6,7 @@
  * Task 1 (P1.M3.E1.T001): schema, public projection, patch, usageResult.
  * Task 2 (P1.M3.E1.T002): discovery/custom reconciliation.
  * Task 3 (P1.M3.E1.T003): shared KCM editConfig for enabled/name/custom.
+ * Task 5 (P1.M3.E1.T005): configurationChanged + setHidden impact/effects.
  * Controllers interpret effects; this module never performs I/O.
  */
 
@@ -558,6 +559,210 @@ function discoveredTransition(state, event, input) {
     return resultFor({ profiles: rows }, effects, true)
 }
 
+// ---------------------------------------------------------------------------
+// Configuration impact + hide/show (P1.M3.E1.T005)
+// ---------------------------------------------------------------------------
+
+/** Keys that force full rediscovery (highest precedence). */
+var REDISCOVER_CONFIG_KEYS = {
+    multiProfileMode: true,
+    credentialsPath: true,
+    provider: true,
+    opencodeSubProvider: true,
+    customProfilesJson: true
+}
+
+/** Keys that re-read enabled membership on current rows. */
+var MEMBERSHIP_CONFIG_KEYS = {
+    enabledProfilesJson: true
+}
+
+/** Keys that re-apply names / window visibility only. */
+var SOFT_CONFIG_KEYS = {
+    profileDisplayNamesJson: true,
+    visibleWindowsJson: true,
+    displayName: true
+}
+
+/**
+ * Classify config keys with precedence rediscover > membership > soft.
+ * Returns { impact: "rediscover"|"membership"|"soft"|null }.
+ */
+function classifyConfigKeys(keys) {
+    var list = keys || []
+    var hasRediscover = false
+    var hasMembership = false
+    var hasSoft = false
+    var anyKnown = false
+    for (var i = 0; i < list.length; i++) {
+        var k = list[i]
+        if (!k)
+            continue
+        if (REDISCOVER_CONFIG_KEYS[k]) {
+            hasRediscover = true
+            anyKnown = true
+        } else if (MEMBERSHIP_CONFIG_KEYS[k]) {
+            hasMembership = true
+            anyKnown = true
+        } else if (SOFT_CONFIG_KEYS[k]) {
+            hasSoft = true
+            anyKnown = true
+        }
+    }
+    if (!anyKnown)
+        return { impact: null }
+    if (hasRediscover)
+        return { impact: "rediscover" }
+    if (hasMembership)
+        return { impact: "membership" }
+    // hasSoft must be true here
+    return { impact: "soft" }
+}
+
+function discoverOnLoadEnabled(config) {
+    var v = config && config.discoverOnLoad
+    if (v === false || v === "false" || v === 0 || v === "0")
+        return false
+    return true
+}
+
+/**
+ * Soft name application: only overwrite when a live override is present.
+ * Soft name removal does not revert to default until rediscovery.
+ */
+function softDisplayName(profile, config) {
+    if (!profile)
+        return ""
+    if (isLegacySingleInstance(config)) {
+        var legacyName = (config && config.displayName) || ""
+        if (legacyName)
+            return legacyName
+        return profile.displayName
+    }
+    var names = parseJsonConfig(config && config.profileDisplayNamesJson, {})
+    if (names && profile.id && names[profile.id])
+        return names[profile.id]
+    return profile.displayName
+}
+
+/**
+ * configurationChanged: classify keys, rediscover or soft/membership reapply.
+ * Rediscover / empty-registry discover preserve current rows until discovery completes.
+ */
+function configurationChangedTransition(state, event, input) {
+    var classification = classifyConfigKeys(event && event.keys)
+    if (!classification.impact)
+        return resultFor(state, [], false)
+
+    var config = (input && input.config) ? input.config : {}
+    var visibility = input && input.visibility
+    var nowMs = input && input.nowMs
+    var effects = []
+
+    if (classification.impact === "rediscover") {
+        effects.push({ type: "discover" })
+        // Preserve state until discovery completes (accepted:false → no epoch bump)
+        return resultFor(state, effects, false)
+    }
+
+    // Membership/soft cannot rebind rows that do not exist yet
+    if (!state.profiles || state.profiles.length === 0) {
+        if (!discoverOnLoadEnabled(config))
+            return resultFor(state, [], false)
+        effects.push({ type: "discover" })
+        return resultFor(state, effects, false)
+    }
+
+    var patchMembership = classification.impact === "membership"
+    var rows = []
+    var becameEnabled = []
+
+    for (var i = 0; i < state.profiles.length; i++) {
+        var p = state.profiles[i]
+        if (!p || !p.id)
+            continue
+        // state already cloneState'd — mutate the clone in place
+        p.displayName = softDisplayName(p, config)
+        applyVisibilityToRow(p, config, visibility, nowMs, effects)
+        if (patchMembership) {
+            var wasOn = p.enabled !== false
+            var nowOn = isProfileEnabled(p.id, config)
+            p.enabled = nowOn
+            if (!wasOn && nowOn
+                    && (!p.windows || p.windows.length === 0)
+                    && !p.loading)
+                becameEnabled.push(p.id)
+        }
+        rows.push(p)
+    }
+
+    if (becameEnabled.length)
+        effects.push({ type: "refresh", ids: becameEnabled, manual: true })
+
+    return resultFor({ profiles: rows }, effects, true)
+}
+
+/**
+ * setHidden: shared enablement serialisation + immediate membership + optional refresh.
+ */
+function setHiddenTransition(state, event, input) {
+    var profileId = event && event.profileId ? String(event.profileId) : ""
+    if (!profileId)
+        return resultFor(state, [], false)
+
+    var idx = findProfileIndex(state.profiles, profileId)
+    if (idx < 0)
+        return resultFor(state, [], false)
+
+    var config = (input && input.config) ? input.config : {}
+    var wantEnabled = !event.hidden
+
+    // Known IDs: current rows + allowlist extras (preserve mid-discover entries)
+    var knownIds = []
+    var seen = {}
+    for (var i = 0; i < state.profiles.length; i++) {
+        var pid = state.profiles[i] && state.profiles[i].id
+        if (!pid || seen[pid])
+            continue
+        seen[pid] = true
+        knownIds.push(pid)
+    }
+    var enabledList = parseEnabledList(config && config.enabledProfilesJson)
+    for (var e = 0; e < enabledList.length; e++) {
+        var eid = enabledList[e]
+        if (!eid || eid === "__none__" || seen[eid])
+            continue
+        seen[eid] = true
+        knownIds.push(eid)
+    }
+    if (!seen[profileId]) {
+        knownIds.push(profileId)
+        seen[profileId] = true
+    }
+
+    var map = materializeEnabledMap(enabledList, knownIds)
+    map[profileId] = wantEnabled
+    var json = serializeEnabledMap(map, knownIds)
+
+    var target = state.profiles[idx]
+    var wasOn = target.enabled !== false
+    target.enabled = wantEnabled
+
+    var effects = [{
+        type: "persist",
+        values: { enabledProfilesJson: json }
+    }]
+
+    // Re-enabling an empty/non-loading row emits targeted refresh
+    if (!wasOn && wantEnabled
+            && (!target.windows || target.windows.length === 0)
+            && !target.loading) {
+        effects.push({ type: "refresh", ids: [profileId], manual: true })
+    }
+
+    return resultFor(state, effects, true)
+}
+
 /**
  * Runtime transition entry point.
  * input: { state, event, config, visibility, nowMs }
@@ -572,6 +777,10 @@ function transition(input) {
         return usageResultTransition(state, event, input)
     if (event.type === "discovered")
         return discoveredTransition(state, event, input)
+    if (event.type === "configurationChanged")
+        return configurationChangedTransition(state, event, input)
+    if (event.type === "setHidden")
+        return setHiddenTransition(state, event, input)
     return resultFor(state, [], false)
 }
 

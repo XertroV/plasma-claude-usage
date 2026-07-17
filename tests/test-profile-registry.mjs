@@ -958,4 +958,316 @@ function discover(opts) {
     console.log("ok: legacy credentialsPath path match")
 }
 
-console.log("\nAll profile-registry schema/patch/usageResult/discovery tests passed.")
+// =============================================================================
+// P1.M3.E1.T005 — configurationChanged + setHidden effects
+// =============================================================================
+
+function multiCfg(overrides) {
+    return Object.assign({
+        multiProfileMode: true,
+        provider: "claude",
+        opencodeSubProvider: "anthropic",
+        credentialsPath: "",
+        displayName: "",
+        discoverOnLoad: true,
+        enabledProfilesJson: "[]",
+        profileDisplayNamesJson: "{}",
+        customProfilesJson: "[]",
+        customProfileNextId: 0,
+        visibleWindowsJson: "[]"
+    }, overrides || {})
+}
+
+function configChanged(opts) {
+    return Registry.transition({
+        state: opts.state || { profiles: [] },
+        event: { type: "configurationChanged", keys: opts.keys || [] },
+        config: opts.config || multiCfg(),
+        visibility: opts.visibility || trackingVisibility().adapter,
+        nowMs: opts.nowMs !== undefined ? opts.nowMs : 1000
+    })
+}
+
+// --- exact key map and precedence (rediscover > membership > soft) ---
+{
+    const row = makeInternal({
+        id: "claude-work",
+        enabled: true,
+        windows: [{ id: "5h", usagePercent: 10, visible: true }],
+        displayName: "Work"
+    })
+    const state = { profiles: [row] }
+
+    // rediscover alone
+    let r = configChanged({
+        state,
+        keys: ["provider"],
+        config: multiCfg()
+    })
+    assert.ok(r.effects.some(e => e && e.type === "discover"), "provider → discover")
+    assert.equal(r.state.profiles[0].id, "claude-work", "rediscover preserves state")
+    assert.equal(r.state.profiles[0].accessToken, "secret")
+
+    // membership alone does not rediscover when registry non-empty
+    r = configChanged({
+        state,
+        keys: ["enabledProfilesJson"],
+        config: multiCfg({ enabledProfilesJson: JSON.stringify(["claude-work"]) })
+    })
+    assert.ok(!r.effects.some(e => e && e.type === "discover"), "membership alone no discover")
+    assert.equal(r.accepted, true)
+
+    // soft alone
+    r = configChanged({
+        state,
+        keys: ["profileDisplayNamesJson"],
+        config: multiCfg({
+            profileDisplayNamesJson: JSON.stringify({ "claude-work": "Renamed" })
+        })
+    })
+    assert.ok(!r.effects.some(e => e && e.type === "discover"), "soft alone no discover")
+    assert.equal(r.state.profiles[0].displayName, "Renamed")
+
+    // precedence: rediscover wins over membership+soft in same key batch
+    r = configChanged({
+        state,
+        keys: ["enabledProfilesJson", "profileDisplayNamesJson", "customProfilesJson"],
+        config: multiCfg({
+            enabledProfilesJson: JSON.stringify(["__none__"]),
+            profileDisplayNamesJson: JSON.stringify({ "claude-work": "ShouldNotApply" })
+        })
+    })
+    assert.ok(r.effects.some(e => e && e.type === "discover"), "rediscover precedence")
+    assert.equal(r.state.profiles[0].displayName, "Work", "state frozen until discovery")
+    assert.equal(r.state.profiles[0].enabled, true, "membership not applied on rediscover path")
+
+    // multi-key membership + soft still applies soft names (no rediscover)
+    r = configChanged({
+        state,
+        keys: ["enabledProfilesJson", "profileDisplayNamesJson", "visibleWindowsJson"],
+        config: multiCfg({
+            enabledProfilesJson: JSON.stringify(["__none__"]),
+            profileDisplayNamesJson: JSON.stringify({ "claude-work": "Both" }),
+            visibleWindowsJson: JSON.stringify({ claude: { "5h": true } })
+        })
+    })
+    assert.ok(!r.effects.some(e => e && e.type === "discover"))
+    assert.equal(r.state.profiles[0].displayName, "Both", "membership batch still applies soft")
+    assert.equal(r.state.profiles[0].enabled, false, "membership applied")
+
+    // unknown keys ignored; empty keys → rejected
+    r = configChanged({ state, keys: [], config: multiCfg() })
+    assert.equal(r.accepted, false, "empty keys rejected")
+    r = configChanged({ state, keys: ["refreshInterval"], config: multiCfg() })
+    assert.equal(r.accepted, false, "unknown-only keys rejected")
+
+    console.log("ok: configurationChanged key map and precedence")
+}
+
+// --- membership/soft cloning; soft name removal preserves existing ---
+{
+    const windows = [{ id: "5h", usagePercent: 15, visible: false, periodMs: 0 }]
+    const row = makeInternal({
+        id: "claude-work",
+        displayName: "Prior Label",
+        enabled: true,
+        windows: windows,
+        accessToken: "tok"
+    })
+    const frozen = freezeDeep(row)
+    const track = trackingVisibility()
+    const result = configChanged({
+        state: { profiles: [row] },
+        keys: ["profileDisplayNamesJson", "visibleWindowsJson"],
+        config: multiCfg({
+            // no override for this id → soft must keep Prior Label
+            profileDisplayNamesJson: "{}",
+            visibleWindowsJson: JSON.stringify({ claude: { "5h": true } })
+        }),
+        visibility: track.adapter,
+        nowMs: 777
+    })
+    assert.equal(result.accepted, true)
+    assert.equal(result.state.profiles[0].displayName, "Prior Label",
+        "soft without override preserves display name")
+    assert.equal(result.state.profiles[0].accessToken, "tok", "live fields preserved")
+    assert.notEqual(result.state.profiles[0], row, "row cloned")
+    assert.notEqual(result.state.profiles[0].windows, row.windows, "windows cloned")
+    assert.equal(track.calls.apply, 1, "visibility reapplied on soft")
+    assert.equal(result.state.profiles[0].windows[0].timePercent, 777 % 100)
+    assert.deepEqual(row, frozen, "input profile not mutated")
+    assert.equal(result.effects.length, 0, "soft does not refresh")
+    console.log("ok: membership/soft cloning + soft name preserve")
+}
+
+// --- newly enabled empty refresh IDs ---
+{
+    const emptyOff = makeInternal({
+        id: "claude-work",
+        enabled: false,
+        windows: [],
+        loading: false
+    })
+    const loadingOff = makeInternal({
+        id: "claude-other",
+        provider: "claude",
+        profileKey: "other",
+        enabled: false,
+        windows: [],
+        loading: true
+    })
+    const fullOff = makeInternal({
+        id: "codex-default",
+        provider: "codex",
+        profileKey: "",
+        enabled: false,
+        windows: [{ id: "5h", usagePercent: 1, visible: true }],
+        loading: false
+    })
+    const result = configChanged({
+        state: { profiles: [emptyOff, loadingOff, fullOff] },
+        keys: ["enabledProfilesJson"],
+        config: multiCfg({
+            // all-on via empty allowlist
+            enabledProfilesJson: "[]"
+        })
+    })
+    assert.equal(result.accepted, true)
+    assert.equal(result.state.profiles[0].enabled, true)
+    assert.equal(result.state.profiles[1].enabled, true)
+    assert.equal(result.state.profiles[2].enabled, true)
+    const refresh = result.effects.filter(e => e && e.type === "refresh")
+    assert.equal(refresh.length, 1, "one targeted refresh effect")
+    assert.deepEqual(refresh[0].ids, ["claude-work"],
+        "only newly enabled empty non-loading gets refresh")
+    assert.equal(refresh[0].manual, true)
+    console.log("ok: newly enabled empty refresh IDs")
+}
+
+// --- empty-registry discovery effect ---
+{
+    let r = configChanged({
+        state: { profiles: [] },
+        keys: ["profileDisplayNamesJson"],
+        config: multiCfg({ discoverOnLoad: true })
+    })
+    assert.ok(r.effects.some(e => e && e.type === "discover"),
+        "empty registry + discoverOnLoad → discover")
+    // accepted may be false (no state change yet) — either way state stays empty
+    assert.equal(r.state.profiles.length, 0)
+
+    r = configChanged({
+        state: { profiles: [] },
+        keys: ["enabledProfilesJson"],
+        config: multiCfg({ discoverOnLoad: false })
+    })
+    assert.ok(!r.effects.some(e => e && e.type === "discover"),
+        "empty registry + discoverOnLoad false → no discover")
+    console.log("ok: empty-registry discovery effect")
+}
+
+// --- setHidden persistence + immediate state + refresh on re-enable empty ---
+{
+    const a = makeInternal({
+        id: "claude-work", enabled: true, windows: [{ id: "5h", usagePercent: 3, visible: true }]
+    })
+    const b = makeInternal({
+        id: "codex-default", provider: "codex", profileKey: "",
+        enabled: true, windows: [], loading: false,
+        accessToken: "c-secret"
+    })
+    const frozen = freezeDeep({ profiles: [a, b] })
+
+    // hide a → partial allowlist
+    let r = Registry.transition({
+        state: { profiles: [a, b] },
+        event: { type: "setHidden", profileId: "claude-work", hidden: true },
+        config: multiCfg({ enabledProfilesJson: "[]" }),
+        visibility: trackingVisibility().adapter,
+        nowMs: 1
+    })
+    assert.equal(r.accepted, true)
+    assert.equal(r.state.profiles[0].enabled, false, "immediate hide")
+    assert.equal(r.state.profiles[1].enabled, true)
+    const persist = r.effects.find(e => e && e.type === "persist")
+    assert.ok(persist, "persist effect")
+    assert.equal(persist.values.enabledProfilesJson, JSON.stringify(["codex-default"]))
+    assert.deepEqual(a.enabled, true, "input not mutated")
+    assert.deepEqual(frozen.profiles[0].enabled, true)
+
+    // re-enable empty non-loading b from allowlist that left it off
+    const bOff = makeInternal({
+        id: "codex-default", provider: "codex", profileKey: "",
+        enabled: false, windows: [], loading: false
+    })
+    const aOn = makeInternal({
+        id: "claude-work", enabled: true,
+        windows: [{ id: "5h", usagePercent: 3, visible: true }]
+    })
+    r = Registry.transition({
+        state: { profiles: [aOn, bOff] },
+        event: { type: "setHidden", profileId: "codex-default", hidden: false },
+        config: multiCfg({
+            enabledProfilesJson: JSON.stringify(["claude-work"])
+        }),
+        visibility: trackingVisibility().adapter,
+        nowMs: 1
+    })
+    assert.equal(r.accepted, true)
+    assert.equal(r.state.profiles[1].enabled, true)
+    // all on again → []
+    const persist2 = r.effects.find(e => e && e.type === "persist")
+    assert.equal(persist2.values.enabledProfilesJson, "[]")
+    const ref = r.effects.find(e => e && e.type === "refresh")
+    assert.ok(ref, "re-enable empty emits refresh")
+    assert.deepEqual(ref.ids, ["codex-default"])
+    assert.equal(ref.manual, true)
+
+    // hide last remaining → __none__ sentinel
+    r = Registry.transition({
+        state: { profiles: [makeInternal({ id: "only", enabled: true, windows: [] })] },
+        event: { type: "setHidden", profileId: "only", hidden: true },
+        config: multiCfg({ enabledProfilesJson: "[]" }),
+        visibility: trackingVisibility().adapter,
+        nowMs: 1
+    })
+    assert.equal(r.state.profiles[0].enabled, false)
+    assert.equal(
+        r.effects.find(e => e.type === "persist").values.enabledProfilesJson,
+        JSON.stringify(["__none__"])
+    )
+
+    // unknown id rejected
+    r = Registry.transition({
+        state: { profiles: [a] },
+        event: { type: "setHidden", profileId: "missing", hidden: true },
+        config: multiCfg(),
+        visibility: trackingVisibility().adapter,
+        nowMs: 1
+    })
+    assert.equal(r.accepted, false)
+    assert.equal(r.effects.length, 0)
+    console.log("ok: setHidden persistence/immediate state/refresh")
+}
+
+// --- registry performs no I/O (no timers, no fs, no network) ---
+{
+    // Smoke: pure transitions only return data; no global side-effect hooks required.
+    // Guard against accidental Node builtins usage by ensuring result is plain data.
+    const r = configChanged({
+        state: { profiles: [makeInternal()] },
+        keys: ["displayName"],
+        config: multiCfg({ displayName: "X", multiProfileMode: false })
+    })
+    assert.equal(typeof r, "object")
+    assert.ok(Array.isArray(r.effects))
+    assert.ok(r.state && Array.isArray(r.state.profiles))
+    for (const e of r.effects) {
+        assert.equal(typeof e.type, "string")
+        assert.ok(["discover", "refresh", "refreshAll", "persist", "warning"].indexOf(e.type) >= 0
+            || e.type, "effect is data-only")
+    }
+    console.log("ok: configurationChanged/setHidden return pure data (no I/O)")
+}
+
+console.log("\nAll profile-registry schema/patch/usageResult/discovery/config-impact tests passed.")

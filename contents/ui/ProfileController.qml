@@ -23,6 +23,11 @@ Item {
     // Bumped on every profile mutation so UI can re-sync reliably
     property int dataEpoch: 0
 
+    // Config-impact coalescing (moved from main.qml in T005): accumulate kcfg keys
+    // then classify via ProfileRegistry.configurationChanged (rediscover > membership > soft).
+    property var dirtyConfigKeys: ({})
+    property bool configWatchReady: false
+
     // Staggered refresh queue: [{ id, manual }, ...] — used by refresh-all and autoRefresh (B002)
     property var refreshQueue: []
     // Monotonic fetch generation — never reset on merge, so stale XHR cannot collide (B008)
@@ -155,70 +160,59 @@ Item {
     }
 
     /**
-     * Hide/show a profile on the panel (B032). Persists via enabledProfilesJson
-     * (same allowlist as KCM "On" checkboxes). Empty JSON = all visible.
-     * Immediate in-memory patch for snappy UI; config watch re-merges membership.
+     * Hide/show a profile on the panel (B032). Registry setHidden owns allowlist
+     * serialisation, immediate membership, and optional re-enable refresh.
+     * Persist effect writes enabledProfilesJson; config watch may re-apply membership.
      */
     function setProfileHidden(profileId, hidden) {
-        if (!profileId || !plasmoid || !plasmoid.configuration) return
+        if (!profileId) return
+        applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: {
+                type: "setHidden",
+                profileId: profileId,
+                hidden: !!hidden
+            },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
+    }
 
-        var enabledList = parseJsonConfig(cfgValue("enabledProfilesJson", "[]"), [])
-        if (!Array.isArray(enabledList)) enabledList = []
-
-        var allIds = []
-        var seen = {}
-        for (var i = 0; i < profiles.length; i++) {
-            var pid = profiles[i] && profiles[i].id
-            if (!pid || seen[pid]) continue
-            seen[pid] = true
-            allIds.push(pid)
+    /**
+     * Main reports a single changed kcfg key; controller coalesces and classifies.
+     */
+    function noteRegistryConfigChanged(key) {
+        if (!key || !configWatchReady) return
+        var map = dirtyConfigKeys || {}
+        // QML may give a frozen/var map — copy then reassign
+        var next = {}
+        for (var k in map) {
+            if (map.hasOwnProperty(k))
+                next[k] = map[k]
         }
-        // Preserve allowlist entries not currently loaded (e.g. mid-discover)
-        for (var e = 0; e < enabledList.length; e++) {
-            var eid = enabledList[e]
-            if (!eid || eid === "__none__" || seen[eid]) continue
-            seen[eid] = true
-            allIds.push(eid)
+        next[key] = true
+        dirtyConfigKeys = next
+        configCoalesceTimer.restart()
+    }
+
+    function flushRegistryConfigDirty() {
+        var map = dirtyConfigKeys || {}
+        var keys = []
+        for (var k in map) {
+            if (map.hasOwnProperty(k) && map[k])
+                keys.push(k)
         }
-        if (!seen[profileId]) {
-            allIds.push(profileId)
-            seen[profileId] = true
-        }
-
-        var currentlyAllOn = enabledList.length === 0
-        var wantOn = {}
-        for (var a = 0; a < allIds.length; a++) {
-            var id = allIds[a]
-            wantOn[id] = currentlyAllOn ? true : (enabledList.indexOf(id) >= 0)
-        }
-        wantOn[profileId] = !hidden
-
-        var next = []
-        var anyOff = false
-        for (var k = 0; k < allIds.length; k++) {
-            var kid = allIds[k]
-            if (wantOn[kid])
-                next.push(kid)
-            else
-                anyOff = true
-        }
-
-        // Empty allowlist means "all on" — if every profile is hidden, use a
-        // sentinel so isProfileEnabled stays false until something is re-enabled.
-        var json
-        if (!anyOff)
-            json = "[]"
-        else if (next.length === 0)
-            json = JSON.stringify(["__none__"])
-        else
-            json = JSON.stringify(next)
-
-        var idx = findProfileIndex(profileId)
-        if (idx >= 0)
-            updateProfile(idx, { enabled: !hidden })
-
-        if (String(plasmoid.configuration.enabledProfilesJson || "") !== json)
-            plasmoid.configuration.enabledProfilesJson = json
+        dirtyConfigKeys = ({})
+        if (keys.length === 0)
+            return
+        applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: { type: "configurationChanged", keys: keys },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
     }
 
     /**
@@ -279,6 +273,9 @@ Item {
                 continue
             switch (effect.type) {
             case "discover":
+                // Preserve legacy bootstrap row while discovery runs (empty legacy)
+                if (isLegacySingleInstance() && profiles.length === 0)
+                    bootstrapLegacyProfiles()
                 discoverProfiles()
                 break
             case "refreshAll":
@@ -298,8 +295,9 @@ Item {
                     for (var key in vals) {
                         if (!vals.hasOwnProperty(key))
                             continue
-                        // Only assign keys the configuration object actually owns
-                        if (plasmoid.configuration[key] !== undefined)
+                        // Only assign when value actually changes (avoid config storms)
+                        if (plasmoid.configuration[key] !== undefined
+                                && String(plasmoid.configuration[key]) !== String(vals[key]))
                             plasmoid.configuration[key] = vals[key]
                     }
                 }
@@ -478,6 +476,18 @@ Item {
             accountId: "",
             resourceUrl: "https://api.minimax.io",
             opencodeSlot: "",
+            grokFetchGen: 0,
+            grokPending: 0,
+            grokDefaultSettled: false,
+            grokCreditsSettled: false,
+            grokFinalized: false,
+            grokDefaultBody: null,
+            grokCreditsBody: null,
+            grokDefaultStatus: 0,
+            grokCreditsStatus: 0,
+            grokDefaultFromTimeout: false,
+            grokCreditsFromTimeout: false,
+            grokAuthFailed: false,
             usageFetchGen: 0,
             // Generic refresh generation for ProfileRefresh transaction (I002)
             refreshGeneration: 0,
@@ -492,188 +502,50 @@ Item {
         }
     }
 
+    /**
+     * Discovery success path: valid candidate list crosses registry `discovered`.
+     * Failure must not call this (failDiscovery leaves registry state unchanged).
+     */
     function mergeDiscovered(discovered) {
-        var custom = parseJsonConfig(cfgValue("customProfilesJson", "[]"), [])
-        var merged = filterDiscoveredProfiles(discovered.slice())
-        if (merged.length === 0 && isLegacySingleInstance()) {
-            var legacyCred = cfgValue("credentialsPath", "")
-            if (legacyCred) {
-                merged.push({
-                    id: "legacy-" + cfgValue("provider", "claude"),
-                    provider: cfgValue("provider", "claude"),
-                    profileKey: "legacy",
-                    configDir: "",
-                    credPath: legacyCred,
-                    credInode: "legacy",
-                    isFlatFile: false
-                })
-            }
-        }
-        // Customs are multi-profile only (B004) — legacy single stays one row
-        if (!isLegacySingleInstance()) {
-            for (var c = 0; c < custom.length; c++) {
-                var entry = custom[c]
-                if (!entry || !entry.path || !entry.provider) continue
-                var resolvedCred = resolveCustomCredPath(entry)
-                var isFlat = !!entry.isFlatFile
-                if (entry.provider === "kimi" && resolvedCred === entry.path)
-                    isFlat = true
-                merged.push({
-                    id: entry.id || (entry.provider + "-custom-" + c),
-                    provider: entry.provider,
-                    profileKey: entry.profileKey || "custom",
-                    configDir: entry.path,
-                    credPath: resolvedCred,
-                    credInode: "custom:" + (entry.id || c),
-                    isFlatFile: isFlat,
-                    // Prefer explicit entry.displayName when no cfg rename
-                    displayNameHint: entry.displayName || ""
-                })
-            }
-        }
-
-        // Live visibility snapshot for this reconciliation (B034 / I004)
-        var visAdapter = registryVisibilityAdapter()
-        var rawVis = cfgValue("visibleWindowsJson", "[]")
-        // Preserve fetch/auth state across rediscover / config reapply (B003)
-        var prevById = {}
-        for (var pi = 0; pi < profiles.length; pi++) {
-            if (profiles[pi] && profiles[pi].id)
-                prevById[profiles[pi].id] = profiles[pi]
-        }
-
-        var rows = []
-        for (var i = 0; i < merged.length; i++) {
-            var meta = merged[i]
-            // Keep hidden (disabled) profiles in the list with enabled:false so the
-            // details page can unhide them without a full rediscover (B032).
-            var rowVis = visAdapter.specFor(meta, rawVis)
-            var row = blankProfileRow(meta, rowVis)
-            row.enabled = isProfileEnabled(meta)
-            if (meta.displayNameHint && row.displayName === QC.defaultProfileLabel(meta.provider, meta.profileKey))
-                row.displayName = meta.displayNameHint
-            var prev = prevById[meta.id]
-            if (prev) {
-                // Keep live usage + auth; refresh labels / visibility from config
-                var keepKeys = [
-                    "loading", "error", "planName", "bankedResets", "windows",
-                    "lastUpdate", "accessToken", "accountId", "resourceUrl",
-                    "opencodeSlot", "usageFetchGen", "refreshGeneration",
-                    "backoffMultiplier", "lastFetchMs",
-                    "authFailCount", "authSuspended", "autoRefreshHoldUntilMs",
-                    "lastFailedToken", "credLoadManual"
-                ]
-                for (var ki = 0; ki < keepKeys.length; ki++) {
-                    var k = keepKeys[ki]
-                    if (prev[k] !== undefined)
-                        row[k] = Array.isArray(prev[k]) ? prev[k].slice() : prev[k]
-                }
-                // Re-apply window visibility from live config (B034 / I004 seam)
-                row.visibleWindowSpec = visAdapter.specFor(row, rawVis)
-                if (row.windows && row.windows.length)
-                    row.windows = visAdapter.apply(row.windows, row.visibleWindowSpec, nowMs)
-            }
-            rows.push(row)
-        }
-        profiles = rows
-        syncPublicProfileList()
+        var candidates = discovered || []
+        var result = Registry.transition({
+            state: { profiles: profiles },
+            event: { type: "discovered", candidates: candidates },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        })
         discoveryError = ""
         discovering = false
-        dataEpoch++
-        console.log("Claude Usage: merged", rows.length, "profile(s)")
-        // Only kick fetches for enabled rows that still need data
-        var needFetch = false
-        for (var ri = 0; ri < rows.length; ri++) {
-            if (rows[ri].enabled === false) continue
-            if (!rows[ri].windows || rows[ri].windows.length === 0) {
-                needFetch = true
-                break
-            }
-        }
-        if (needFetch || rows.length === 0)
-            staggerRefreshAll()
-        else {
-            // Ensure empty new rows still load
-            for (var rj = 0; rj < rows.length; rj++) {
-                if (rows[rj].enabled === false) continue
-                if (!rows[rj].windows || rows[rj].windows.length === 0)
-                    queueProfileRefresh(rows[rj].id, true)
-            }
-            kickRefreshQueue()
-        }
+        console.log("Claude Usage: merged",
+                    (result && result.state && result.state.profiles)
+                        ? result.state.profiles.length : 0,
+                    "profile(s)")
+        applyRegistryResult(result)
     }
 
     /**
-     * Re-apply config after KCM Apply (B003) or details Hidden toggle (B032).
-     * - rediscover: full discoverProfiles (merge preserves fetch state)
-     * - membership: re-read enabled flags on current rows; rediscover only if empty
-     * - soft: names + window visibility only on current rows
+     * Compatibility wrapper: map legacy rediscover/membership/soft opts onto
+     * registry configurationChanged keys. Prefer noteRegistryConfigChanged().
      */
     function reapplyConfig(opts) {
         opts = opts || {}
+        var keys = []
         if (opts.rediscover || opts.forceFull) {
-            console.log("Claude Usage: reapplyConfig → rediscover")
-            if (isLegacySingleInstance() && profiles.length === 0)
-                bootstrapLegacyProfiles()
-            discoverProfiles()
-            return
+            keys = ["multiProfileMode", "credentialsPath", "provider",
+                    "opencodeSubProvider", "customProfilesJson"]
+        } else if (opts.membership) {
+            keys = ["enabledProfilesJson"]
+        } else {
+            keys = ["profileDisplayNamesJson", "visibleWindowsJson", "displayName"]
         }
-
-        if (profiles.length === 0) {
-            if (isLegacySingleInstance())
-                bootstrapLegacyProfiles()
-            if (cfgValue("discoverOnLoad", true) !== false)
-                discoverProfiles()
-            return
-        }
-
-        // Soft (+ optional membership): names, window visibility, and enabled flags.
-        // Membership is in-place so Hidden can toggle without a full rediscover (B032).
-        // Always apply soft fields so multi-key Apply (On + rename) does not drop names.
-        // B034/I004: live visibility snapshot — not a stale global list or cached policy.
-        var visAdapter = registryVisibilityAdapter()
-        var rawVis = cfgValue("visibleWindowsJson", "[]")
-        var names = parseJsonConfig(cfgValue("profileDisplayNamesJson", "{}"), {})
-        var patchMembership = !!opts.membership
-        var rows = []
-        var becameEnabled = []
-        for (var j = 0; j < profiles.length; j++) {
-            var p = profiles[j]
-            if (!p || !p.id) continue
-            var copy = cloneProfile(p)
-            if (isLegacySingleInstance()) {
-                var legacyName = cfgValue("displayName", "")
-                if (legacyName) copy.displayName = legacyName
-            } else if (names && names[p.id]) {
-                copy.displayName = names[p.id]
-            }
-            // else keep existing displayName (custom displayNameHint / prior label)
-            copy.visibleWindowSpec = visAdapter.specFor(copy, rawVis)
-            if (copy.windows && copy.windows.length)
-                copy.windows = visAdapter.apply(copy.windows, copy.visibleWindowSpec, nowMs)
-            if (patchMembership) {
-                var wasOn = p.enabled !== false
-                var nowOn = isProfileEnabled(p.id)
-                copy.enabled = nowOn
-                if (!wasOn && nowOn
-                        && (!copy.windows || copy.windows.length === 0)
-                        && !copy.loading)
-                    becameEnabled.push(copy.id)
-            }
-            rows.push(copy)
-        }
-
-        profiles = rows
-        syncPublicProfileList()
-        dataEpoch++
-        console.log("Claude Usage: reapplyConfig",
-                    patchMembership ? "membership+soft" : "soft",
-                    "patched", rows.length, "profile(s)")
-        if (patchMembership && becameEnabled.length) {
-            for (var bi = 0; bi < becameEnabled.length; bi++)
-                queueProfileRefresh(becameEnabled[bi], true)
-            kickRefreshQueue()
-        }
+        applyRegistryResult(Registry.transition({
+            state: { profiles: profiles },
+            event: { type: "configurationChanged", keys: keys },
+            config: registryConfigSnapshot(),
+            visibility: registryVisibilityAdapter(),
+            nowMs: nowMs
+        }))
     }
 
     function findProfileIndex(id) {
@@ -704,6 +576,8 @@ Item {
             || k === "accountId"
             || k === "resourceUrl"
             || k === "lastFailedToken"
+            || k === "grokDefaultBody"
+            || k === "grokCreditsBody"
     }
 
     /**
@@ -1333,7 +1207,7 @@ Item {
      * Apply normalised usage through the registry usageResult transition.
      * Optional `patch` carries loading/error/auth/backoff fields (never windows).
      * Visibility/time always run inside ProfileRegistry via the production adapter.
-     * Production path is applyRefreshTransition; keep for any direct/legacy callers.
+     * Legacy callers (fetchUsage/fetchGrok) omit patch.
      */
     function applyUsageResult(idx, result, patch) {
         if (idx < 0 || idx >= profiles.length || !result) return
@@ -1387,6 +1261,179 @@ Item {
         var winCount = (result.windows && result.windows.length) || 0
         console.log("Claude Usage: applyUsageResult id=", p.id,
                     "accepted=", accepted, "windows=", winCount)
+    }
+
+    function fetchGrok(idx) {
+        var p = profiles[idx]
+        var profileId = p.id
+        // Snapshot token once so both dual-fetch legs use the same post-reload
+        // credential (B033: avoid stale token on one leg after concurrent updates)
+        var tokenSnapshot = p.accessToken || ""
+        if (!tokenSnapshot) {
+            noteAuthFailure(idx, tr("Not logged in"), "")
+            return
+        }
+        var gen = allocFetchGen()
+        updateProfile(idx, {
+            grokFetchGen: gen,
+            grokPending: 2,
+            grokDefaultSettled: false,
+            grokCreditsSettled: false,
+            grokFinalized: false,
+            grokDefaultBody: null,
+            grokCreditsBody: null,
+            grokDefaultStatus: 0,
+            grokCreditsStatus: 0,
+            grokDefaultFromTimeout: false,
+            grokCreditsFromTimeout: false,
+            grokAuthFailed: false
+        })
+        var defaultUrl = "https://cli-chat-proxy.grok.com/v1/billing"
+        var creditsUrl = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+        grokGet(profileId, gen, defaultUrl, tokenSnapshot, function(ok, body, status, fromTimeout) {
+            var patch = {
+                grokDefaultSettled: true,
+                grokDefaultStatus: status || 0,
+                grokDefaultFromTimeout: !!fromTimeout
+            }
+            if (ok) patch.grokDefaultBody = body
+            else if (status === 401 || status === 403) patch.grokAuthFailed = true
+            finishGrokPart(profileId, gen, patch, tokenSnapshot)
+        })
+        // Always re-request credits on every fetch — partial monthly success must
+        // not prevent a later credits success (B033)
+        grokGet(profileId, gen, creditsUrl, tokenSnapshot, function(ok, body, status, fromTimeout) {
+            var patch = {
+                grokCreditsSettled: true,
+                grokCreditsStatus: status || 0,
+                grokCreditsFromTimeout: !!fromTimeout
+            }
+            // Auth failure on credits alone: mark; shared-token case usually fails both
+            if (ok) patch.grokCreditsBody = body
+            else if (status === 401 || status === 403) patch.grokAuthFailed = true
+            finishGrokPart(profileId, gen, patch, tokenSnapshot)
+        })
+    }
+
+    function grokGet(profileId, gen, url, token, callback) {
+        var idx = findProfileIndex(profileId)
+        if (idx < 0) return
+        var p = profiles[idx]
+        var epSlug = grokEndpointSlug(url)
+        var cacheProf = { id: p.id, provider: p.provider, opencodeSlot: p.opencodeSlot }
+        var authToken = token || p.accessToken || ""
+        var settled = false
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", url)
+        xhr.timeout = 25000
+        xhr.setRequestHeader("Authorization", "Bearer " + authToken)
+        xhr.setRequestHeader("Accept", "application/json")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        // Bypass any HTTP cache that may have stored pre-relogin 401s (B033)
+        xhr.setRequestHeader("Cache-Control", "no-cache")
+        xhr.setRequestHeader("Pragma", "no-cache")
+        xhr.setRequestHeader("x-grok-client-version", "0.2.93")
+        xhr.setRequestHeader("x-grok-client-surface", "grok-build")
+
+        function settleGrok(status, responseText, fromTimeout) {
+            if (settled) return
+            settled = true
+            // Always cache the HTTP exchange, even if this generation is stale
+            cacheResponse(cacheProf, epSlug, url, status || 0, responseText || "")
+            var curIdx = findProfileIndex(profileId)
+            if (curIdx < 0) return
+            if (!profiles[curIdx] || profiles[curIdx].grokFetchGen !== gen) return
+            if (status === 200) {
+                try { callback(true, JSON.parse(responseText || ""), status, fromTimeout) }
+                catch (e) { callback(false, null, status, fromTimeout) }
+            } else {
+                callback(false, null, status || 0, fromTimeout)
+            }
+        }
+
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            settleGrok(xhr.status || 0, xhr.responseText || "", false)
+        }
+        xhr.ontimeout = function() {
+            settleGrok(0, "", true)
+        }
+        xhr.send()
+    }
+
+    function finishGrokPart(profileId, gen, patch, tokenSnapshot) {
+        var idx = findProfileIndex(profileId)
+        if (idx < 0) return
+        var p = profiles[idx]
+        if (!p || p.grokFetchGen !== gen || p.grokFinalized) return
+
+        // Only the leg that completes the pair claims finalization (avoids
+        // double applyUsageResult if updateProfile re-enters on property notify)
+        var defDone = !!(patch.grokDefaultSettled || p.grokDefaultSettled)
+        var credDone = !!(patch.grokCreditsSettled || p.grokCreditsSettled)
+        var claimFinalize = defDone && credDone && !p.grokFinalized
+        if (claimFinalize) {
+            // Claim on the live row immediately so reentrant finishGrokPart
+            // (property-notify during updateProfile) cannot finalize twice
+            p.grokFinalized = true
+            patch.grokFinalized = true
+        }
+        patch.grokPending = (defDone && credDone) ? 0 : ((defDone || credDone) ? 1 : 2)
+        updateProfile(idx, patch)
+
+        if (!claimFinalize) return
+
+        idx = findProfileIndex(profileId)
+        if (idx < 0) return
+        p = profiles[idx]
+        if (!p || p.grokFetchGen !== gen) return
+
+        // Auth: default or credits 401/403 after both legs settled
+        if (p.grokAuthFailed || p.grokDefaultStatus === 401 || p.grokDefaultStatus === 403
+                || p.grokCreditsStatus === 401 || p.grokCreditsStatus === 403) {
+            // Monthly body present → partial success (show mo; next refresh retries credits)
+            // Shared-token case: either both fail auth or neither does.
+            if (!p.grokDefaultBody) {
+                noteAuthFailure(idx, tr("Token expired"), tokenSnapshot)
+                return
+            }
+            console.log("Claude Usage: grok partial — credits auth fail, monthly ok", profileId,
+                        "default=", p.grokDefaultStatus, "credits=", p.grokCreditsStatus)
+        }
+        if (p.grokDefaultStatus === 429) {
+            noteRateLimited(idx)
+            return
+        }
+        if (!p.grokDefaultBody) {
+            var detail
+            if (p.grokDefaultStatus === 0)
+                detail = p.grokDefaultFromTimeout ? "timeout" : "network error"
+            else
+                detail = String(p.grokDefaultStatus || "error")
+            updateProfile(idx, {
+                loading: false,
+                error: p.error || (tr("API error") + " (" + detail + ")"),
+                lastFetchMs: Date.now()
+            })
+            return
+        }
+        try {
+            var creditsBody = p.grokCreditsBody
+            if (!creditsBody) {
+                console.log("Claude Usage: grok credits missing/failed", profileId,
+                            "status=", p.grokCreditsStatus,
+                            "timeout=", !!p.grokCreditsFromTimeout,
+                            "— applying monthly only; next refresh retries credits")
+            } else {
+                console.log("Claude Usage: grok dual-fetch ok", profileId,
+                            "default=", p.grokDefaultStatus, "credits=", p.grokCreditsStatus)
+            }
+            var result = QP.parseGrok(p.grokDefaultBody, creditsBody)
+            applyUsageResult(idx, result)
+        } catch (e) {
+            console.log("Claude Usage: grok parse error", e)
+            updateProfile(idx, { loading: false, error: "Parse error", lastFetchMs: Date.now() })
+        }
     }
 
     // B027: only advance the clock. Do NOT reassign `profiles` (or bump dataEpoch).
@@ -1546,6 +1593,14 @@ Item {
             // Next profile can start cat while XHR runs (loading still true on this row)
             kickRefreshQueue()
         }
+    }
+
+    // Coalesce multi-key KCM Apply storms (50ms) before registry classification
+    Timer {
+        id: configCoalesceTimer
+        interval: 50
+        repeat: false
+        onTriggered: controller.flushRegistryConfigDirty()
     }
 
     Timer {

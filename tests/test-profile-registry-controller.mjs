@@ -277,4 +277,47 @@ function makeInternal(overrides) {
     console.log("ok: adapter failure safety retained")
 }
 
+// --- Task 5: main only reports changed keys; no category knowledge ---
+{
+    assert.doesNotMatch(mainSrc, /configDirtyRediscover/)
+    assert.doesNotMatch(mainSrc, /configDirtyMembership/)
+    assert.doesNotMatch(mainSrc, /configDirtySoft/)
+    assert.doesNotMatch(mainSrc, /function\s+markConfigDirty\s*\(/)
+    assert.doesNotMatch(mainSrc, /function\s+flushConfigDirty\s*\(/)
+    // Literal rediscover/membership/soft category strings must not drive config impact
+    assert.doesNotMatch(mainSrc, /["']rediscover["']/)
+    assert.doesNotMatch(mainSrc, /["']membership["']/)
+    assert.doesNotMatch(mainSrc, /["']soft["']/)
+    assert.match(mainSrc, /noteRegistryConfigChanged\s*\(/)
+    // Main reports concrete kcfg keys, not categories
+    assert.match(mainSrc, /noteRegistryConfigChanged\(\s*["']multiProfileMode["']\s*\)/)
+    assert.match(mainSrc, /noteRegistryConfigChanged\(\s*["']enabledProfilesJson["']\s*\)/)
+    assert.match(mainSrc, /noteRegistryConfigChanged\(\s*["']profileDisplayNamesJson["']\s*\)/)
+    console.log("ok: main.qml reports keys only (no rediscover/membership/soft knowledge)")
+}
+
+// --- Task 5: controller owns coalescing + setHidden + discovery success ---
+{
+    assert.match(controllerSrc, /function\s+noteRegistryConfigChanged\s*\(/)
+    assert.match(controllerSrc, /type:\s*"configurationChanged"/)
+    assert.match(controllerSrc, /type:\s*"setHidden"/)
+    assert.match(controllerSrc, /type:\s*"discovered"/)
+
+    const hiddenBody = functionBody(controllerSrc, "setProfileHidden")
+    assert.match(hiddenBody, /Registry\.transition\s*\(/)
+    assert.match(hiddenBody, /type:\s*"setHidden"/)
+    assert.match(hiddenBody, /applyRegistryResult\s*\(/)
+    // Old allowlist hand-roll should not remain in setProfileHidden
+    assert.doesNotMatch(hiddenBody, /__none__/)
+    assert.doesNotMatch(hiddenBody, /updateProfile\s*\(/)
+
+    // Discovery success routes candidates through registry; failure does not replace state
+    assert.match(controllerSrc, /event:\s*\{[\s\S]*type:\s*"discovered"/)
+    const failBody = functionBody(controllerSrc, "failDiscovery")
+    assert.doesNotMatch(failBody, /Registry\.transition\s*\(/)
+    assert.doesNotMatch(failBody, /profiles\s*=/)
+    assert.match(failBody, /discoveryError\s*=/)
+    console.log("ok: controller coalescing/setHidden/discovery success seam")
+}
+
 console.log("\nAll profile-registry-controller seam tests passed.")
