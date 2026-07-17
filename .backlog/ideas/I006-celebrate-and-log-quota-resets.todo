@@ -1,16 +1,18 @@
 ---
+claimed_at: "2026-07-17T17:06:59Z"
+claimed_by: cli-user
+completed_at: null
 complexity: medium
 created_at: "2026-07-17T17:06:31Z"
 depends_on: []
 estimate_hours: 10
 id: I006
 priority: medium
-status: pending
-tags:
-    - idea
-    - planning
+started_at: "2026-07-17T17:06:59Z"
+status: in_progress
+tags: []
 title: Celebrate and log quota resets
-updated_at: "2026-07-17T17:06:31Z"
+updated_at: "2026-07-17T17:06:59Z"
 ---
 When a usage quota window resets (session, weekly, monthly — per provider/profile):
 
