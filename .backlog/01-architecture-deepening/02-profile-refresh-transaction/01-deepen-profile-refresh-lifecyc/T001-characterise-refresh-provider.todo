@@ -1,0 +1,23 @@
+---
+complexity: high
+created_at: "2026-07-17T06:16:29Z"
+depends_on: []
+estimate_hours: 2
+id: P1.M2.E1.T001
+priority: high
+status: pending
+tags:
+    - i002
+    - architecture
+    - refresh
+    - providers
+    - fixtures
+    - tdd
+title: Characterise refresh provider adapters with fixtures
+updated_at: "2026-07-17T06:16:29Z"
+---
+Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 1.
+
+Create the reusable QML-JS test loader and `ProfileRefreshProviders.js`. Drive Claude, Codex, Grok, MiniMax, Z.ai, Kimi, and OpenCode credential/request/parser behaviour through fixture or inline bodies without network access.
+
+Acceptance: adapters preserve current URLs, headers, account selection, token snapshots, parser dispatch, plan-name fallback, Grok completion-order independence, and monthly-only partial success; fixture tests pass.

@@ -1,0 +1,61 @@
+complexity: high
+depends_on: []
+estimate_hours: 10
+id: P1.M2.E1
+locked: false
+name: Deepen Profile Refresh Lifecycle
+status: pending
+tasks:
+    - complexity: high
+      depends_on: []
+      estimate_hours: 2
+      file: T001-characterise-refresh-provider.todo
+      id: T001
+      priority: high
+      status: pending
+      title: Characterise refresh provider adapters with fixtures
+    - complexity: high
+      depends_on:
+        - P1.M2.E1.T001
+      estimate_hours: 2
+      file: T002-build-the-mockable-profile-ref.todo
+      id: T002
+      priority: high
+      status: pending
+      title: Build the mockable profile refresh transaction
+    - complexity: high
+      depends_on:
+        - P1.M2.E1.T002
+      estimate_hours: 2
+      file: T003-adapt-production-refresh-ports.todo
+      id: T003
+      priority: high
+      status: pending
+      title: Adapt production refresh ports and switch the controller
+    - complexity: medium
+      depends_on:
+        - P1.M2.E1.T003
+      estimate_hours: 1.5
+      file: T004-remove-the-standard-provider-l.todo
+      id: T004
+      priority: high
+      status: pending
+      title: Remove the standard-provider legacy refresh lifecycle
+    - complexity: medium
+      depends_on:
+        - P1.M2.E1.T004
+      estimate_hours: 1.5
+      file: T005-remove-the-grok-legacy-refresh.todo
+      id: T005
+      priority: high
+      status: pending
+      title: Remove the Grok legacy refresh lifecycle and state
+    - complexity: medium
+      depends_on:
+        - P1.M2.E1.T005
+      estimate_hours: 1
+      file: T006-enforce-the-refresh-seam-and-v.todo
+      id: T006
+      priority: high
+      status: pending
+      title: Enforce the refresh seam and verify lifecycle behaviour

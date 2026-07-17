@@ -1,0 +1,23 @@
+---
+complexity: high
+created_at: "2026-07-17T06:16:29Z"
+depends_on:
+    - P1.M2.E1.T002
+estimate_hours: 2
+id: P1.M2.E1.T003
+priority: high
+status: pending
+tags:
+    - i002
+    - qml
+    - refresh
+    - identity
+    - tdd
+title: Adapt production refresh ports and switch the controller
+updated_at: "2026-07-17T06:16:29Z"
+---
+Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 3.
+
+Adapt the existing executable credential reader, XMLHttpRequest, response-cache call, clock, and profile store as thin production ports. Add stable-ID/generation transition application and switch all accepted queue items into the transaction while retaining global scheduling.
+
+Acceptance: queue/due/timer behaviour is unchanged; credential and HTTP ports contain no provider/retry policy; every accepted refresh uses the transaction; current visibility is re-read on success; controller seam and pure tests pass.

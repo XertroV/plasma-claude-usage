@@ -1,0 +1,17 @@
+complexity: high
+depends_on: []
+epics:
+    - complexity: high
+      depends_on: []
+      description: Implement docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md while preserving provider, auth, backoff, Grok, and cache behaviour.
+      estimate_hours: 10
+      id: E1
+      locked: false
+      name: Deepen Profile Refresh Lifecycle
+      path: 01-deepen-profile-refresh-lifecyc
+      status: pending
+estimate_hours: 10
+id: P1.M2
+locked: false
+name: Profile Refresh Transaction
+status: pending

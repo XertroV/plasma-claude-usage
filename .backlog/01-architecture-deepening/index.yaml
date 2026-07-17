@@ -13,6 +13,15 @@ milestones:
       name: Quota Presentation Policy
       path: 01-quota-presentation-policy
       status: pending
+    - complexity: high
+      depends_on: []
+      description: Deepen one profile's credential-to-outcome refresh lifecycle behind stable identity, provider adapters, and mockable I/O ports.
+      estimate_hours: 10
+      id: M2
+      locked: false
+      name: Profile Refresh Transaction
+      path: 02-profile-refresh-transaction
+      status: pending
 name: Architecture Deepening
 status: pending
 weeks: 1

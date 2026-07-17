@@ -1,0 +1,23 @@
+---
+complexity: high
+created_at: "2026-07-17T06:16:29Z"
+depends_on:
+    - P1.M2.E1.T001
+estimate_hours: 2
+id: P1.M2.E1.T002
+priority: high
+status: pending
+tags:
+    - i002
+    - architecture
+    - refresh
+    - mock
+    - tdd
+title: Build the mockable profile refresh transaction
+updated_at: "2026-07-17T06:16:29Z"
+---
+Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 2.
+
+Implement pure `ProfileRefresh.run(input, ports, emit)` plus deterministic mock credential/HTTP/cache/clock ports. Own started/credential/terminal transitions, stable identity/generation, once-only settlement, auth state, 429 backoff, timeout classification, and provider aggregation.
+
+Acceptance: mock tests cover busy and valid credential reads, non-zero exit with valid stdout, missing/malformed auth, token rotation/manual retry, auth suspension, backoff ceiling, duplicate callbacks, cache-once, Grok ordering/partial success, and no input mutation.
