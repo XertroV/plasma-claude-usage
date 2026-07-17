@@ -23,12 +23,14 @@
 ## File Structure
 
 - Modify `tests/test-card-typography.mjs`: add small brace-aware QML block helpers and semantic assertions for the period label, pace bar, percentage label, and countdown label.
+- Modify `tests/tst_card_layout.qml`: replace the obsolete equal-countdown-left-edge invariant with differing natural left edges and equal right edges.
 - Modify `contents/ui/QuotaRow.qml`: use the countdown label’s `implicitWidth` as its preferred width; retain all existing constraints and behaviour.
 
 ### Task 1: Use Natural Countdown Width
 
 **Files:**
 - Modify: `tests/test-card-typography.mjs`
+- Modify: `tests/tst_card_layout.qml`
 - Modify: `contents/ui/QuotaRow.qml`
 
 **Interfaces:**
@@ -120,7 +122,33 @@ node tests/test-card-typography.mjs
 
 Expected: exactly one failure, `countdown uses its natural bounded width and remains right-aligned`, because `QuotaRow.qml` still contains `Layout.preferredWidth: Kirigami.Units.gridUnit * 4`. All new neighbouring-column assertions should pass.
 
-- [ ] **Step 3: Make the minimal production change**
+- [ ] **Step 3: Update the runtime geometry invariant**
+
+In `test_rightSideQuotaInformationRemainsAligned()` in `tests/tst_card_layout.qml`, replace the countdown left-edge comparison:
+
+```qml
+compare(firstTime[0].mapToItem(view, 0, 0).x,
+        secondTime[0].mapToItem(view, 0, 0).x)
+```
+
+with natural-width and right-edge checks:
+
+```qml
+compare(firstPct[0].width, secondPct[0].width)
+var firstTimeX = firstTime[0].mapToItem(view, 0, 0).x
+var secondTimeX = secondTime[0].mapToItem(view, 0, 0).x
+compare(firstTime[0].width, firstTime[0].implicitWidth)
+compare(secondTime[0].width, secondTime[0].implicitWidth)
+verify(firstTime[0].width !== secondTime[0].width,
+       "different countdown lengths should consume different natural widths")
+verify(Math.abs((firstTimeX + firstTime[0].width)
+                - (secondTimeX + secondTime[0].width)) < 1,
+       "countdown right edges should align within one pixel")
+```
+
+This matches the approved layout semantics: the percentage slots retain equal fixed widths; countdown labels take their exact natural widths; and countdown right edges remain aligned within one physical pixel, allowing harmless subpixel text-metric differences.
+
+- [ ] **Step 4: Make the minimal production change**
 
 In the final countdown `PlasmaComponents.Label` in `contents/ui/QuotaRow.qml`, replace:
 
@@ -136,17 +164,20 @@ Layout.preferredWidth: implicitWidth
 
 Do not alter any other property in the block.
 
-- [ ] **Step 4: Run focused GREEN verification**
+- [ ] **Step 5: Run focused GREEN verification**
 
 Run:
 
 ```bash
 node tests/test-card-typography.mjs
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    /usr/lib/qt6/bin/qmltestrunner \
+    -input tests/tst_card_layout.qml -import contents/ui -o -,txt
 ```
 
-Expected: exit status 0 and `All card typography tests passed.`
+Expected: the Node regression exits 0 with `All card typography tests passed.` and the Qt runtime suite reports all tests passed, including the natural-width/right-edge geometry invariant.
 
-- [ ] **Step 5: Run the complete mechanical verification suite**
+- [ ] **Step 6: Run the complete mechanical verification suite**
 
 Run the repository’s three shell suites, all Node suites, Qt QML runtime geometry tests, QML lint, and whitespace validation:
 
@@ -158,7 +189,9 @@ done
 for test_file in tests/test-*.mjs; do
     node "$test_file"
 done
-QT_QPA_PLATFORM=offscreen qmltestrunner -input tests
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    /usr/lib/qt6/bin/qmltestrunner \
+    -input tests/tst_card_layout.qml -import contents/ui -o -,txt
 find contents/ui -path '*/node_modules' -prune -o -name '*.qml' -print0 \
     | xargs -0 -n1 qmllint
 git diff --check
@@ -166,7 +199,7 @@ git diff --check
 
 Expected: every shell and Node suite exits 0; all Qt QML tests pass; every QML file passes `qmllint`; `git diff --check` emits no output.
 
-- [ ] **Step 6: Visually validate constrained quota rows**
+- [ ] **Step 7: Visually validate constrained quota rows**
 
 Render the existing deterministic card-layout visual fixture (or the project’s established `plasmoidviewer` fixture) at minimum card width with multiple data rows and skeleton rows. Inspect the resulting image and confirm:
 
@@ -178,18 +211,18 @@ Render the existing deterministic card-layout visual fixture (or the project’s
 
 Record the capture path and inspection result in the task/review evidence. Any visible clipping, overlap, or horizontal overflow is a failure requiring correction before review.
 
-- [ ] **Step 7: Commit the tested implementation**
+- [ ] **Step 8: Commit the tested implementation**
 
 Run:
 
 ```bash
-git add tests/test-card-typography.mjs contents/ui/QuotaRow.qml
+git add tests/test-card-typography.mjs tests/tst_card_layout.qml contents/ui/QuotaRow.qml
 git commit -m "fix(B041): tighten countdown column width"
 ```
 
-Expected: one implementation commit containing only the semantic regression and the one-line QML layout change.
+Expected: one implementation commit containing only the semantic structural regression, the corrected runtime geometry invariant, and the one-line QML layout change.
 
-- [ ] **Step 8: Run an independent review/fix gate**
+- [ ] **Step 9: Run an independent review/fix gate**
 
 Ask a fresh reviewer to inspect the committed B041 range against the approved design and verify:
 
@@ -202,7 +235,7 @@ Ask a fresh reviewer to inspect the committed B041 range against the approved de
 
 Fix every accepted blocker or major finding, rerun affected checks, commit fixes, and repeat independent review until no accepted blocker or major issue remains.
 
-- [ ] **Step 9: Rebase, verify integration, automerge, and close B041**
+- [ ] **Step 10: Rebase, verify integration, automerge, and close B041**
 
 From the main checkout, rebase the worktree branch onto the current `main`, rerun the complete mechanical suite from Step 5, then fast-forward merge, mark B041 done, and clean up the branch/worktree only after checking for valuable untracked or ignored files:
 
@@ -221,6 +254,7 @@ Expected: rebase and fast-forward merge succeed; B041 is done; final `main` veri
 --- SUMMARY ---
 
 - Add semantic, brace-aware regression coverage for the four quota-row layout children.
+- Update runtime geometry coverage to require natural-width left edges and aligned right edges.
 - Prove RED specifically against the fixed four-grid-unit countdown slot.
 - Change only the countdown preferred width to `implicitWidth`, preserving its cap, elision, and alignment.
 - Run focused, full mechanical, runtime, lint, and visual checks.
