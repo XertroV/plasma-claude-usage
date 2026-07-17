@@ -1,0 +1,24 @@
+---
+complexity: high
+created_at: "2026-07-17T10:18:39Z"
+depends_on:
+    - P1.M3.E1.T003
+estimate_hours: 2
+id: P1.M3.E1.T004
+priority: high
+status: pending
+tags:
+    - i003
+    - qml
+    - registry
+    - controller
+    - integration
+    - tdd
+title: Integrate registry state into the post-I002 controller
+updated_at: "2026-07-17T10:18:39Z"
+---
+Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 4.
+
+Integrate registry internal/public state and effect interpretation into the post-I002 ProfileController. Route I002 success through `usageResult` and other outcomes through stable ID/generation patching.
+
+Acceptance: controller uses one registry result adapter; views consume prebuilt safe public profiles; internal refresh state remains private; I002 and registry tests pass; raw usage windows cannot bypass visibility.

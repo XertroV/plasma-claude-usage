@@ -1,0 +1,18 @@
+complexity: high
+depends_on:
+    - P1.M2.E1.T006
+epics:
+    - complexity: high
+      depends_on: []
+      description: Implement docs/superpowers/plans/2026-07-17-profile-registry.md without absorbing discovery transport, refresh lifecycle, visibility migration, or cache internals.
+      estimate_hours: 10
+      id: E1
+      locked: false
+      name: Centralize Profile Lifecycle
+      path: 01-centralize-profile-lifecycle
+      status: pending
+estimate_hours: 10
+id: P1.M3
+locked: false
+name: Profile Registry
+status: pending

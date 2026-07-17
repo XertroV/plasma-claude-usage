@@ -1,0 +1,24 @@
+---
+complexity: high
+created_at: "2026-07-17T10:18:39Z"
+depends_on:
+    - P1.M3.E1.T002
+estimate_hours: 2
+id: P1.M3.E1.T003
+priority: high
+status: pending
+tags:
+    - i003
+    - registry
+    - kcm
+    - configuration
+    - identity
+    - tdd
+title: Share profile configuration editing with the KCM
+updated_at: "2026-07-17T10:18:39Z"
+---
+Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 3.
+
+Add shared `editConfig()` semantics for enabled allowlists/sentinel, names, and custom add/remove; persist monotonic `customProfileNextId`; migrate the KCM while leaving visible-quota editing for I004.
+
+Acceptance: runtime/KCM semantics match; custom IDs never reuse after removal/reload; default credential paths, trimming, malformed JSON fallback, and enabled/custom/name serialization tests pass.

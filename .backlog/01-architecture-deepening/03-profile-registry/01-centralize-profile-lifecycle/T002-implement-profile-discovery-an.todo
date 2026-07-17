@@ -1,0 +1,23 @@
+---
+complexity: high
+created_at: "2026-07-17T10:18:39Z"
+depends_on:
+    - P1.M3.E1.T001
+estimate_hours: 2
+id: P1.M3.E1.T002
+priority: high
+status: pending
+tags:
+    - i003
+    - registry
+    - discovery
+    - reconciliation
+    - tdd
+title: Implement profile discovery and custom reconciliation
+updated_at: "2026-07-17T10:18:39Z"
+---
+Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 2.
+
+Implement discovery/custom reconciliation, exact-ID live-state preservation, deterministic ordering/collision warnings, legacy filtering and all three synthetic legacy IDs, visibility adapter application, and refresh effects.
+
+Acceptance: production-shaped local candidates and `test-discovery.sh` prove new/same/removed rows, post-I002 live fields, metadata replacement, legacy quirks, no mutation, and refresh-all effect parity.

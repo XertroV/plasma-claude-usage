@@ -22,6 +22,16 @@ milestones:
       name: Profile Refresh Transaction
       path: 02-profile-refresh-transaction
       status: pending
+    - complexity: high
+      depends_on:
+        - P1.M2.E1.T006
+      description: Centralize profile identity, reconciliation, configuration semantics, stable patching, effects, and safe snapshots after the refresh transaction lands.
+      estimate_hours: 10
+      id: M3
+      locked: false
+      name: Profile Registry
+      path: 03-profile-registry
+      status: pending
 name: Architecture Deepening
 status: pending
 weeks: 1
