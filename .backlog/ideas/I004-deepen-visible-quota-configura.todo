@@ -1,0 +1,46 @@
+---
+complexity: high
+created_at: "2026-07-17T01:47:37Z"
+depends_on: []
+estimate_hours: 10
+id: I004
+priority: medium
+status: pending
+tags:
+    - architecture-review
+    - deep-module
+    - visibility-config
+    - in-process
+title: Deepen visible-quota configuration
+updated_at: "2026-07-17T01:47:37Z"
+---
+Source: `file:///tmp/architecture-review-20260715-224729.html` (Candidate 04)
+
+Rating: **Worth exploring**
+Test seam: **in-process**
+
+Relevant files:
+- `contents/ui/configGeneral.qml`
+- `contents/ui/js/QuotaCommon.js`
+- `ProfileController.qml`
+- `contents/config/main.xml`
+- `tests/test-visibility.mjs`
+
+## Problem
+
+Legacy formats, provider defaults, edits, serialisation, and runtime application span three modules; `hydrateVisibleByProvider` alone has cyclomatic complexity 21 and cognitive complexity 53. The current raw JSON format acts as the seam across KCM checkbox handlers, catalog default materialisation, legacy migration, sparse-map serialisation, runtime parsing, and profile visibility reapplication.
+
+## Proposed direction
+
+Deepen visible-quota configuration into one module used by the KCM and runtime. It should own the catalogue and defaults, legacy migration, edits and reset, persistence, and runtime application so migration and persistence become implementation details rather than caller knowledge.
+
+## Deletion test
+
+Delete the current helpers and compatibility rules reappear in both KCM and runtime, proving the seam is real but fragmented.
+
+## Expected wins
+
+- Migrations stay internal.
+- KCM and runtime share one interface.
+- Round-trip tests gain leverage.
+- Raw JSON stops leaking.
