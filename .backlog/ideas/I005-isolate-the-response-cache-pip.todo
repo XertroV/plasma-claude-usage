@@ -46,3 +46,5 @@ Delete the cluster and process safety plus queue state spill into every fetch ca
 ## Evidence trail
 
 B023 exposed process-argument leakage; B024 exposed queue liveness hidden from the shell-only tests.
+
+Planning outcome (2026-07-17): selected a pure ResponseCachePipeline.js state machine behind recordExchange(exchange), with LocalResponseCache.qml production effects and a deterministic fake adapter. Design: docs/superpowers/specs/2026-07-17-response-cache-pipeline-design.md. TDD plan: docs/superpowers/plans/2026-07-17-response-cache-pipeline.md. Accepted planning-review corrections lock the exhaustive current provider/OpenCode/Grok endpoint-slug contract through a shared request/cache fixture and preserve three independent clock reads in exact history-path, envelope, then pending-filename order. Ingested epic P1.M5.E1 with tasks T001 2h, T002 2.5h, T003 2h, T004 2h, and T005 1.5h (exactly 10h), sequentially dependent and gated by milestone dependencies P1.M2.E1.T006 and P1.M3.E1.T006. Scope remains planning/ingestion only; I005 intentionally stays in_progress for coordinator review/merge.

@@ -1,0 +1,52 @@
+complexity: high
+depends_on: []
+estimate_hours: 10
+id: P1.M5.E1
+locked: false
+name: Isolate the response-cache pipeline
+status: pending
+tasks:
+    - complexity: high
+      depends_on: []
+      estimate_hours: 2
+      file: T001-characterise-and-build-determi.todo
+      id: T001
+      priority: high
+      status: pending
+      title: Characterise and build deterministic cache preparation
+    - complexity: high
+      depends_on:
+        - P1.M5.E1.T001
+      estimate_hours: 2.5
+      file: T002-preserve-serial-watchdog-and-q.todo
+      id: T002
+      priority: high
+      status: pending
+      title: Preserve serial watchdog and queue recovery
+    - complexity: medium
+      depends_on:
+        - P1.M5.E1.T002
+      estimate_hours: 2
+      file: T003-add-the-local-plasma-response.todo
+      id: T003
+      priority: high
+      status: pending
+      title: Add the local Plasma response-cache adapter
+    - complexity: high
+      depends_on:
+        - P1.M5.E1.T003
+      estimate_hours: 2
+      file: T004-migrate-the-cache-port-and-del.todo
+      id: T004
+      priority: high
+      status: pending
+      title: Migrate the cache port and delete controller internals
+    - complexity: medium
+      depends_on:
+        - P1.M5.E1.T004
+      estimate_hours: 1.5
+      file: T005-enforce-the-response-cache-sea.todo
+      id: T005
+      priority: high
+      status: pending
+      title: Enforce the response-cache seam and verify regressions

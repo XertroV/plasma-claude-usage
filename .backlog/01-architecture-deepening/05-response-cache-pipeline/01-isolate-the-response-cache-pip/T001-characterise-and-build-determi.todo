@@ -1,0 +1,18 @@
+---
+complexity: high
+created_at: "2026-07-17T10:54:55Z"
+depends_on: []
+estimate_hours: 2
+id: P1.M5.E1.T001
+priority: high
+status: pending
+tags:
+    - i005
+    - architecture
+    - response-cache
+    - tdd
+    - pure-js
+title: Characterise and build deterministic cache preparation
+updated_at: "2026-07-17T10:54:55Z"
+---
+Source: I005 and docs/superpowers/plans/2026-07-17-response-cache-pipeline.md, Task 1. Create ResponseCachePipeline.js, the deterministic fake adapter, a shared exhaustive endpoint fixture, and public-seam tests for disabled mode, roots, effective-provider/profile/endpoint metadata, exact envelope parsing/raw/truncation, history/latest paths, pending names, 8192-character staging, shell quoting, path-only final invocation, stale-generation recording, and normal FIFO advancement. Acceptance: the red missing-module test is observed; the green test drives recordExchange without Plasma/filesystem/network; the shared fixture locks Claude/Anthropic, Codex/OpenAI, Z.ai, Kimi, MiniMax, Grok default/credits, and every current OpenCode alias/fallback at both provider-request and cache path/envelope seams; three distinct injected clock values are consumed exactly once in history-path, envelope, pending-filename order and disabled/malformed inputs consume none; exact current metadata/envelope/path/staging behaviour passes; created interfaces match the design; no controller or shell production path changes in this task.

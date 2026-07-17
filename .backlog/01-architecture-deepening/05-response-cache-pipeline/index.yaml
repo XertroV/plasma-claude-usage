@@ -2,7 +2,16 @@ complexity: high
 depends_on:
     - P1.M2.E1.T006
     - P1.M3.E1.T006
-epics: []
+epics:
+    - complexity: high
+      depends_on: []
+      description: 'Implement I005 from docs/superpowers/specs/2026-07-17-response-cache-pipeline-design.md and docs/superpowers/plans/2026-07-17-response-cache-pipeline.md. Deepen the one-method recordExchange seam with a pure pipeline, local Plasma adapter, and deterministic fake while preserving shell atomic-file ownership. Acceptance: all five atomic tasks complete, their estimates total 10h, milestone prerequisites remain P1.M2.E1.T006 and P1.M3.E1.T006, and the final deletion/regression review passes.'
+      estimate_hours: 10
+      id: E1
+      locked: false
+      name: Isolate the response-cache pipeline
+      path: 01-isolate-the-response-cache-pip
+      status: pending
 estimate_hours: 10
 id: P1.M5
 locked: false
