@@ -26,7 +26,21 @@ ideas:
       status: done
       tags: []
       title: Deepen the profile registry
-    - file: I004-deepen-visible-quota-configura.todo
+    - complexity: high
+      depends_on: []
+      estimate_hours: 10
+      file: I004-deepen-visible-quota-configura.todo
       id: I004
-    - file: I005-isolate-the-response-cache-pip.todo
+      priority: medium
+      status: in_progress
+      tags: []
+      title: Deepen visible-quota configuration
+    - complexity: medium
+      depends_on: []
+      estimate_hours: 10
+      file: I005-isolate-the-response-cache-pip.todo
       id: I005
+      priority: medium
+      status: in_progress
+      tags: []
+      title: Isolate the response-cache pipeline
