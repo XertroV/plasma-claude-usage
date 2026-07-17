@@ -48,28 +48,70 @@ Rectangle {
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
 
-        // Header: name · refresh/spinner · banked · detail
+        // Header: name · inline error · refresh/spinner · banked · detail
         RowLayout {
+            id: headerRow
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
 
-            PlasmaComponents.Label {
+            // This slot absorbs width pressure before the always-allocated controls do.
+            Item {
+                id: headerTextSlot
                 Layout.fillWidth: true
-                text: hasError ? ("⚠ " + cardRoot.title) : cardRoot.title
-                font.bold: true
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                color: hasError ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-                elide: Text.ElideRight
+                Layout.minimumWidth: 0
+                implicitHeight: Math.max(nameLabel.implicitHeight, errorLabel.implicitHeight)
 
-                HoverHandler { id: nameHover }
-                QQC2.ToolTip {
-                    visible: nameHover.hovered
-                    text: {
-                        var bits = [cardRoot.title]
-                        if (profile && profile.planName) bits.push(profile.planName)
-                        if (profile && profile.configDir) bits.push(profile.configDir)
-                        if (cardRoot.refreshing) bits.push("Refreshing…")
-                        return bits.join("\n")
+                PlasmaComponents.Label {
+                    id: nameLabel
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(
+                        implicitWidth,
+                        headerTextSlot.width * (cardRoot.hasError ? 0.4 : 1))
+                    text: cardRoot.title
+                    font.bold: true
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: Kirigami.Theme.textColor
+                    elide: Text.ElideRight
+
+                    HoverHandler { id: nameHover }
+                    QQC2.ToolTip {
+                        visible: nameHover.hovered
+                        text: {
+                            var bits = [cardRoot.title]
+                            if (profile && profile.planName) bits.push(profile.planName)
+                            if (profile && profile.configDir) bits.push(profile.configDir)
+                            if (cardRoot.refreshing) bits.push("Refreshing…")
+                            return bits.join("\n")
+                        }
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    id: errorLabel
+                    anchors.left: nameLabel.right
+                    anchors.leftMargin: visible ? Kirigami.Units.smallSpacing : 0
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: cardRoot.hasError
+                    text: cardRoot.hasError ? ("⚠ " + cardRoot.profile.error) : ""
+                    textFormat: Text.PlainText
+                    font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                    color: Kirigami.Theme.negativeTextColor
+                    elide: Text.ElideRight
+                    wrapMode: Text.NoWrap
+                    maximumLineCount: 1
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                    Accessible.name: cardRoot.hasError
+                        ? ("Error: " + cardRoot.profile.error) : ""
+                    Accessible.role: Accessible.StaticText
+                    Accessible.ignored: !cardRoot.hasError
+
+                    HoverHandler { id: errorHover }
+                    QQC2.ToolTip {
+                        visible: errorHover.hovered && cardRoot.hasError
+                        text: cardRoot.hasError ? cardRoot.profile.error : ""
                     }
                 }
             }
@@ -166,18 +208,6 @@ Rectangle {
                     text: "Details"
                 }
             }
-        }
-
-        // Error line
-        PlasmaComponents.Label {
-            Layout.fillWidth: true
-            visible: hasError && profile.error
-            text: profile.error
-            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-            color: Kirigami.Theme.negativeTextColor
-            elide: Text.ElideRight
-            wrapMode: Text.WordWrap
-            maximumLineCount: 2
         }
 
         // Selected quota rows or first-load skeleton (stale rows kept while refreshing)
