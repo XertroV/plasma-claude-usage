@@ -53,7 +53,7 @@ milestones:
       locked: false
       name: Response Cache Pipeline
       path: 05-response-cache-pipeline
-      status: pending
+      status: done
 name: Architecture Deepening
 status: pending
 weeks: 1

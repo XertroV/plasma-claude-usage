@@ -52,7 +52,7 @@ tasks:
       file: T005-move-profile-configuration-and.todo
       id: T005
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Move profile configuration and discovery effects behind the seam
     - complexity: medium
