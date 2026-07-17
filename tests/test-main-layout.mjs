@@ -53,6 +53,35 @@ function cardsBlockWithin(scrollViewBlock) {
     return objectBlockAt(scrollViewBlock, scrollViewBlock.indexOf("CardsView {"))
 }
 
+function footerControlBlocks(footer) {
+    const refreshStart = footer.indexOf("PlasmaComponents.Button {")
+    const refreshButton = objectBlockAt(footer, refreshStart)
+    const statusStart = footer.indexOf(
+        "PlasmaComponents.Label {",
+        refreshStart + refreshButton.length
+    )
+    const statusLabel = objectBlockAt(footer, statusStart)
+    const configureStart = footer.indexOf(
+        "PlasmaComponents.Button {",
+        statusStart + statusLabel.length
+    )
+    const configureButton = objectBlockAt(footer, configureStart)
+    return { refreshButton, statusLabel, configureButton }
+}
+
+function footerHasSemanticOrder(footer) {
+    if (directChildTypes(footer).join("|")
+        !== "PlasmaComponents.Button|PlasmaComponents.Label|PlasmaComponents.Button") {
+        return false
+    }
+    const controls = footerControlBlocks(footer)
+    return controls.refreshButton.includes('icon.name: "view-refresh"')
+        && controls.refreshButton.includes('root.i18nObj.tr("Refresh")')
+        && controls.statusLabel.includes('root.i18nObj.tr("Updated:")')
+        && controls.configureButton.includes('icon.name: "configure"')
+        && controls.configureButton.includes('root.i18nObj.tr("Configure…")')
+}
+
 const fullStart = src.indexOf("fullRepresentation: Item {")
 const fullSource = src.slice(fullStart)
 const scrollStart = fullSource.indexOf("PlasmaComponents.ScrollView {")
@@ -62,12 +91,7 @@ const cardsBlock = cardsBlockWithin(scrollBlock)
 const updatedIndex = fullSource.indexOf('root.i18nObj.tr("Updated:")')
 const footerStart = fullSource.lastIndexOf("RowLayout {", updatedIndex)
 const footerBlock = objectBlockAt(fullSource, footerStart)
-const footerChildren = directChildTypes(footerBlock)
-const expectedFooterChildren = [
-    "PlasmaComponents.Button",
-    "PlasmaComponents.Label",
-    "PlasmaComponents.Button"
-]
+const footerControls = footerControlBlocks(footerBlock)
 
 assert(fullStart >= 0, "full representation exists")
 assert(scrollStart >= 0 && scrollBlock !== "", "full representation scroll view exists")
@@ -84,15 +108,23 @@ assert(!headerSource.includes('icon.name: "view-refresh"'), "header omits the re
 assert(footerStart >= scrollStart + scrollBlock.length
        && footerBlock.includes('root.i18nObj.tr("Updated:")'),
     "status label is in the footer below the cards")
-assert(footerChildren.join("|") === expectedFooterChildren.join("|"),
+assert(footerHasSemanticOrder(footerBlock),
     "footer direct children are Refresh, Updated, then Configure")
 
 const footerWithSpacer = footerBlock.replace(
-    "PlasmaComponents.Label {",
-    "Rectangle {\n                }\n                PlasmaComponents.Label {"
+    footerControls.statusLabel,
+    "Rectangle {\n                }\n                " + footerControls.statusLabel
 )
-assert(directChildTypes(footerWithSpacer).join("|") !== expectedFooterChildren.join("|"),
+assert(!footerHasSemanticOrder(footerWithSpacer),
     "footer-order check detects an inserted spacer")
+
+const swapMarker = "__B035_FIRST_BUTTON__"
+const footerWithButtonsSwapped = footerBlock
+    .replace(footerControls.refreshButton, swapMarker)
+    .replace(footerControls.configureButton, footerControls.refreshButton)
+    .replace(swapMarker, footerControls.configureButton)
+assert(!footerHasSemanticOrder(footerWithButtonsSwapped),
+    "footer-order check detects Refresh and Configure being swapped")
 
 const scrollWithoutCards = scrollBlock.replace(cardsBlock, "")
 assert(cardsBlockWithin(scrollWithoutCards) === "",
