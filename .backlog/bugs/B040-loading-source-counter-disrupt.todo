@@ -1,0 +1,14 @@
+---
+complexity: medium
+created_at: "2026-07-17T06:06:53Z"
+depends_on: []
+estimate_hours: 1
+id: B040
+priority: high
+status: pending
+tags: []
+title: Loading source counter disrupts the header flow; show it on the RHS of the Updated label instead
+updated_at: "2026-07-17T06:06:53Z"
+---
+
+Loading source counter disrupts the header flow; show it on the RHS of the Updated label instead
