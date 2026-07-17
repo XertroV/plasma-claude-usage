@@ -349,7 +349,7 @@ assert.equal(transitions[0].profileId, "claude-1")
 assert.equal(transitions[0].generation, 7)
 ```
 
-Then drive credential and HTTP callbacks and assert one `credentials` transition precedes exactly one terminal transition. The credential patch must contain the resolved token/account/resource/slot/plan fields and clear `credLoadManual`; even an unchanged suspended token must emit this patch before its `auth_suspended` terminal outcome and launch no HTTP. A manual read or rotated token must also clear prior auth failure state before HTTP. Add cases for busy credential port (`accepted === false`, no transition), valid stdout with non-zero executable exit, missing/malformed credentials, first/second auth failures, unchanged suspended token, rotated token, manual retry, 429 ceiling, timeout/network distinction, malformed response, duplicate callback, cache once, both Grok completion orders, and input immutability.
+Then drive credential and HTTP callbacks and assert one `credentials` transition precedes exactly one terminal transition. The credential patch must contain the resolved token/account/resource/slot/plan fields and clear `credLoadManual`; even an unchanged suspended token must emit this patch before its `auth_suspended` terminal outcome and launch no HTTP. A manual read or rotated token must also clear prior auth failure state before HTTP. Add cases for busy credential port (`accepted === false`, no transition), valid stdout with non-zero executable exit, missing/malformed credential body, syntactically valid credentials with no token (credentials transition then auth error), first/second auth failures, unchanged suspended token, rotated token, manual retry, 429 ceiling, timeout/network distinction, malformed response, duplicate callback, cache once, both Grok completion orders, and input immutability.
 
 - [ ] **Step 3: Verify the transaction test fails for the missing module**
 
@@ -405,13 +405,12 @@ function run(input, ports, emit) {
         } catch (error) {
             return finish(authFailure(profile, "", input.policy, ports.now()))
         }
-        if (preparation.kind === "auth_error")
-            return finish(authFailure(profile, "", input.policy, ports.now()))
         var unchangedSuspendedToken = !manual && profile.authSuspended
+            && preparation.auth.token
             && preparation.auth.token === profile.lastFailedToken
-        // Every valid credential body updates auth metadata and clears
-        // credLoadManual before any terminal outcome. Manual or rotated tokens
-        // additionally clear the previous auth failure state.
+        // Every syntactically valid credential body updates auth metadata and
+        // clears credLoadManual before any terminal outcome. A valid token from
+        // a manual read, or a rotated token, additionally clears auth failures.
         var retryProfile = credentialStateAfterRead(
             profile, preparation.auth, manual)
         emit({
@@ -420,6 +419,8 @@ function run(input, ports, emit) {
             generation: generation,
             patch: credentialPatch(retryProfile)
         })
+        if (preparation.kind === "auth_error")
+            return finish(authFailure(retryProfile, "", input.policy, ports.now()))
         if (unchangedSuspendedToken)
             return finish(suspendedOutcome(retryProfile, input.policy, ports.now()))
         dispatch(preparation, retryProfile)
@@ -461,7 +462,7 @@ function run(input, ports, emit) {
 }
 ```
 
-Implement private pure helpers `cloneObject`, `startedPatch`, `credentialStateAfterRead`, `credentialPatch`, `authFailure`, `suspendedOutcome`, `rateLimitOutcome`, `successOutcome`, `transportOutcome`, and `outcomeFor`. `credentialStateAfterRead` merges the resolved access token/account/resource/slot/plan fields and clears auth count/suspension/hold/failed-token/backoff when a valid manual read succeeds or the token differs from `lastFailedToken`; `credentialPatch` emits those fields before HTTP, and the cleared local state is the basis for any subsequent outcome. Preserve exact current field calculations from `noteAuthFailure`, `noteRateLimited`, and `clearFailureStatePatch`.
+Implement private pure helpers `cloneObject`, `startedPatch`, `credentialStateAfterRead`, `credentialPatch`, `authFailure`, `suspendedOutcome`, `rateLimitOutcome`, `successOutcome`, `transportOutcome`, and `outcomeFor`. `credentialStateAfterRead` merges the resolved access token/account/resource/slot/plan fields for every syntactically valid credential body and clears auth count/suspension/hold/failed-token/backoff only when a non-empty token comes from a manual read or differs from `lastFailedToken`; `credentialPatch` emits those fields before HTTP, and the cleared local state is the basis for any subsequent outcome. Preserve exact current field calculations from `noteAuthFailure`, `noteRateLimited`, and `clearFailureStatePatch`.
 
 - [ ] **Step 5: Run all transaction/provider tests**
 

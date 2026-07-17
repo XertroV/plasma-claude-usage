@@ -344,7 +344,7 @@ Test:
 - missing credential body;
 - malformed credential JSON;
 - valid credential stdout accompanied by a non-zero executable exit code (preserve current parse behaviour);
-- missing token;
+- syntactically valid credentials with a missing token emit credential metadata before auth failure;
 - first automatic auth failure hold;
 - auth suspension threshold;
 - unchanged suspended token emits credential metadata/`credLoadManual: false`, preserves suspension, then skips HTTP;
