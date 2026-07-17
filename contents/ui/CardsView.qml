@@ -76,12 +76,13 @@ Item {
                     var avail = cardFlow.width > 0 ? cardFlow.width : cardsRoot.width
                     if (avail <= 0)
                         return minWidth
-                    var cols = Math.max(1, Math.floor((avail + cardFlow.spacing)
-                                        / (minWidth + cardFlow.spacing)))
+                    var capacity = Math.max(1, Math.floor((avail + cardFlow.spacing)
+                                            / (minWidth + cardFlow.spacing)))
                     var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)
                     if (n <= 0)
                         return minWidth
-                    // Prefer filling: use actual column count for current width
+                    // Fill rows without reserving empty columns when fewer cards are visible.
+                    var cols = Math.min(capacity, n)
                     var w = Math.floor((avail - cardFlow.spacing * (cols - 1)) / cols)
                     return Math.max(minWidth, w)
                 }
