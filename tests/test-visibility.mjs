@@ -1,177 +1,134 @@
 #!/usr/bin/env node
 /**
- * B034 unit tests for per-provider window visibility helpers.
- * Ports the pure algorithm from contents/ui/js/QuotaCommon.js (keep in sync).
+ * P1.M4.E1.T001 — runtime visibility through VisibleQuotaConfig.specFor()/apply().
+ * Characterises legacy/global/per-provider formats, OpenCode identity, immutability,
+ * dynamic windows, foreign opaque specs, and malformed input safety.
  */
-import { readFileSync } from "fs"
-import { fileURLToPath } from "url"
-import { dirname, join } from "path"
+import assert from "node:assert/strict"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { loadQmlJs } from "./helpers/load-qml-js.mjs"
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const srcPath = join(__dirname, "../contents/ui/js/QuotaCommon.js")
-const src = readFileSync(srcPath, "utf8")
-
-// Eval the library functions in a sandbox (strip nothing; QML uses plain JS here)
-const sandbox = {}
-// Provide minimal stubs used only if referenced during load
-const fn = new Function(
-    "exports",
-    src
-        .replace(/\.pragma library[\s\S]*?(?=function |var |$)/, "") // drop pragma if any at top
-        .replace(/\.import[^\n]*\n/g, "")
-    + "\nexports.objectKeyCount = typeof objectKeyCount!=='undefined'?objectKeyCount:undefined;"
-    + "exports.isWindowBoolMap = typeof isWindowBoolMap!=='undefined'?isWindowBoolMap:undefined;"
-    + "exports.parseVisibleWindowsConfig = parseVisibleWindowsConfig;"
-    + "exports.visibilityProviderKey = visibilityProviderKey;"
-    + "exports.visibilitySpecForProvider = visibilitySpecForProvider;"
-    + "exports.applyVisibility = applyVisibility;"
-    + "exports.visibleWindows = visibleWindows;"
-    + "exports.makeWindow = makeWindow;"
+const here = dirname(fileURLToPath(import.meta.url))
+const root = join(here, "..")
+const VQ = loadQmlJs(
+    join(root, "contents/ui/js/VisibleQuotaConfig.js"), {},
+    ["specFor", "apply"]
 )
-fn(sandbox)
 
-const {
-    parseVisibleWindowsConfig,
-    visibilityProviderKey,
-    visibilitySpecForProvider,
-    applyVisibility,
-    visibleWindows: visibleQuotaWindows,
-    makeWindow
-} = sandbox
-
-let failed = 0
-function assert(cond, msg) {
-    if (!cond) {
-        console.error("FAIL:", msg)
-        failed++
-    } else {
-        console.log("ok:", msg)
-    }
+function visibleIds(windows) {
+    return windows.filter(window => window.visible !== false)
+        .map(window => window.id)
 }
 
-function windowsVisible(wins) {
-    return wins.filter(w => w.visible !== false).map(w => w.id)
-}
-
-// --- parse: empty ---
-{
-    const c = parseVisibleWindowsConfig("[]")
-    assert(c.mode === "defaults", "empty array → defaults")
-    assert(parseVisibleWindowsConfig("{}").mode === "defaults", "empty object → defaults")
-    assert(parseVisibleWindowsConfig("").mode === "defaults", "empty string → defaults")
-}
-
-// --- parse: legacy allowlist ---
-{
-    const c = parseVisibleWindowsConfig('["5h","weekly"]')
-    assert(c.mode === "globalAllowlist", "legacy array → globalAllowlist")
-    assert(c.globalAllowlist.join(",") === "5h,weekly", "legacy ids preserved")
-}
-
-// --- parse: per-provider ---
-{
-    const c = parseVisibleWindowsConfig('{"claude":{"5h":true,"weekly":false},"grok":{"session":true}}')
-    assert(c.mode === "perProvider", "object of providers → perProvider")
-    assert(c.byProvider.claude.weekly === false, "claude weekly false")
-    assert(c.byProvider.grok.session === true, "grok session true")
-}
-
-// --- parse: flat global map ---
-{
-    const c = parseVisibleWindowsConfig('{"5h":true,"weekly":false}')
-    assert(c.mode === "globalMap", "flat bool map → globalMap")
-}
-
-// --- visibilityProviderKey ---
-assert(visibilityProviderKey("claude") === "claude", "key claude")
-assert(visibilityProviderKey("opencode", "anthropic") === "claude", "opencode anthropic → claude")
-assert(visibilityProviderKey("opencode", "openai") === "codex", "opencode openai → codex")
-assert(visibilityProviderKey("opencode", "kimi") === "kimi", "opencode kimi → kimi")
-assert(visibilityProviderKey("opencode", "", "anthropic-accounts") === "claude", "opencode profileKey anthropic")
-assert(visibilityProviderKey("opencode", "", "openai") === "codex", "opencode profileKey openai")
-
-// --- sample windows ---
-const claudeWins = [
-    makeWindow("5h", "5h", 10, 0, 0, "primary", true),
-    makeWindow("weekly", "7d", 20, 0, 0, "primary", true),
-    makeWindow("weekly_fable", "Fable", 30, 0, 0, "extra", false)
+const claudeWindows = [
+    { id: "5h", label: "5h", defaultVisible: true, visible: false },
+    { id: "weekly", label: "7d", defaultVisible: true },
+    { id: "weekly_fable", label: "Fable", defaultVisible: false }
 ]
-const grokWins = [
-    makeWindow("session", "7d/build", 40, 0, 0, "primary", true),
-    makeWindow("weekly", "mo", 50, 0, 0, "primary", true)
+const grokWindows = [
+    { id: "session", label: "7d/build", defaultVisible: true },
+    { id: "weekly", label: "mo", defaultVisible: true }
 ]
 
-// --- defaults ---
-{
-    const out = applyVisibility(claudeWins, null)
-    assert(windowsVisible(out).join(",") === "5h,weekly", "defaults hide extras")
+// --- empty / defaults ---
+for (const raw of [null, undefined, "", "[]", "{}", [], {}]) {
+    assert.deepEqual(
+        visibleIds(VQ.apply(claudeWindows, VQ.specFor({ provider: "claude" }, raw))),
+        ["5h", "weekly"]
+    )
 }
 
-// --- legacy allowlist only 5h: hides weekly (old global bug reproduction when used alone) ---
-{
-    const out = applyVisibility(claudeWins, ["5h"])
-    assert(windowsVisible(out).join(",") === "5h", "allowlist only 5h")
-    const grokOut = applyVisibility(grokWins, ["5h"])
-    assert(windowsVisible(grokOut).join(",") === "", "global allowlist 5h blanks grok (root cause)")
+// --- legacy global allowlist ---
+assert.deepEqual(
+    visibleIds(VQ.apply(claudeWindows,
+        VQ.specFor({ provider: "claude" }, '["5h"]'))),
+    ["5h"]
+)
+assert.deepEqual(
+    visibleIds(VQ.apply(grokWindows,
+        VQ.specFor({ provider: "grok" }, '["5h"]'))),
+    []
+)
+
+// --- sparse global map ---
+assert.deepEqual(
+    visibleIds(VQ.apply(claudeWindows,
+        VQ.specFor({ provider: "claude" },
+            '{"5h":true,"weekly":false}'))),
+    ["5h"]
+)
+
+// --- sparse per-provider map ---
+assert.deepEqual(
+    visibleIds(VQ.apply(claudeWindows,
+        VQ.specFor({ provider: "claude" },
+            '{"claude":{"weekly_fable":true}}'))),
+    ["5h", "weekly", "weekly_fable"]
+)
+assert.deepEqual(
+    visibleIds(VQ.apply(grokWindows,
+        VQ.specFor({ provider: "grok" },
+            '{"claude":{"weekly":false}}'))),
+    ["session", "weekly"]
+)
+
+// --- strict per-provider array ---
+assert.deepEqual(
+    visibleIds(VQ.apply(claudeWindows,
+        VQ.specFor({ provider: "claude" },
+            '{"claude":["5h"]}'))),
+    ["5h"]
+)
+
+// --- provider identity (incl. OpenCode slot / profileKey) ---
+const identityCases = [
+    [{ provider: "claude" }, "claude"],
+    [{ provider: "codex" }, "codex"],
+    [{ provider: "opencode", opencodeSlot: "anthropic" }, "claude"],
+    [{ provider: "opencode", opencodeSlot: "openai" }, "codex"],
+    [{ provider: "opencode", opencodeSlot: "kimi" }, "kimi"],
+    [{ provider: "opencode", opencodeSlot: "zai" }, "zai"],
+    [{ provider: "opencode", opencodeSlot: "future" }, "opencode"],
+    [{ provider: "opencode", profileKey: "anthropic-accounts" }, "claude"],
+    [{ provider: "opencode", profileKey: "openai" }, "codex"],
+    [{ provider: "opencode", profileKey: "codex-work" }, "codex"],
+    [{ provider: "opencode", profileKey: "kimi" }, "kimi"],
+    [{ provider: "opencode", profileKey: "z-ai" }, "zai"],
+    [{ provider: "opencode" }, "claude"]
+]
+for (const [profile, key] of identityCases) {
+    const raw = JSON.stringify({ [key]: { dynamic: false } })
+    const out = VQ.apply(
+        [{ id: "dynamic", defaultVisible: true }],
+        VQ.specFor(profile, raw)
+    )
+    assert.equal(out[0].visible, false, JSON.stringify(profile))
 }
 
-// --- per-provider fix: claude hide weekly, grok untouched ---
-{
-    const cfg = parseVisibleWindowsConfig(JSON.stringify({
-        claude: { "5h": true, weekly: false, weekly_fable: false }
-    }))
-    const cSpec = visibilitySpecForProvider(cfg, "claude")
-    const gSpec = visibilitySpecForProvider(cfg, "grok")
-    assert(gSpec === null, "missing provider → null defaults")
-    const cOut = applyVisibility(claudeWins, cSpec)
-    const gOut = applyVisibility(grokWins, gSpec)
-    assert(windowsVisible(cOut).join(",") === "5h", "claude weekly hidden only")
-    assert(windowsVisible(gOut).join(",") === "session,weekly", "grok still defaults")
-}
+// --- immutability, order/duplicates, ignore stale visible, foreign/malformed ---
+const source = [
+    { id: "future", defaultVisible: false, visible: true, nested: { keep: true } },
+    { id: "dup", defaultVisible: true },
+    { id: "dup", defaultVisible: true }
+]
+const before = JSON.stringify(source)
+const configured = VQ.apply(source, VQ.specFor(
+    { provider: "claude" },
+    '{"claude":{"future":true,"dup":false}}'
+))
+assert.deepEqual(visibleIds(configured), ["future"])
+assert.equal(JSON.stringify(source), before)
+assert.notEqual(configured, source)
+assert.notEqual(configured[0], source[0])
+assert.equal(configured[0].nested, source[0].nested)
+assert.equal(configured.length, 3)
+assert.deepEqual(VQ.apply("bad", VQ.specFor(null, "bad json")), [])
+const foreignSpec = Object.freeze({
+    implementationDetail: Object.freeze({ mode: "strict", weekly: false })
+})
+assert.deepEqual(VQ.apply(
+    [null, { id: "x", defaultVisible: true }], foreignSpec),
+    [{ id: "x", defaultVisible: true, visible: true }])
 
-// --- show extra without hiding primaries (override map) ---
-{
-    const cfg = parseVisibleWindowsConfig(JSON.stringify({
-        claude: { weekly_fable: true }
-    }))
-    const cOut = applyVisibility(claudeWins, visibilitySpecForProvider(cfg, "claude"))
-    assert(windowsVisible(cOut).join(",") === "5h,weekly,weekly_fable", "show fable + keep defaults")
-    assert(visibleQuotaWindows({ windows: cOut }).map(w => w.id).join(",") === "5h,weekly,weekly_fable",
-        "card rows add enabled extra while keeping primaries")
-}
-
-// --- hide one primary with sparse override ---
-{
-    const cfg = parseVisibleWindowsConfig(JSON.stringify({
-        claude: { weekly: false }
-    }))
-    const cOut = applyVisibility(claudeWins, visibilitySpecForProvider(cfg, "claude"))
-    assert(windowsVisible(cOut).join(",") === "5h", "sparse weekly:false keeps 5h")
-}
-
-// --- re-apply after "config change" uses live spec ---
-{
-    let cfgRaw = "[]"
-    let cfg = parseVisibleWindowsConfig(cfgRaw)
-    let out = applyVisibility(claudeWins, visibilitySpecForProvider(cfg, "claude"))
-    assert(windowsVisible(out).length === 2, "before config change: 2 primaries")
-
-    cfgRaw = JSON.stringify({ claude: { "5h": true, weekly: false } })
-    cfg = parseVisibleWindowsConfig(cfgRaw)
-    out = applyVisibility(out, visibilitySpecForProvider(cfg, "claude"))
-    assert(windowsVisible(out).join(",") === "5h", "after config change applies without refetch")
-}
-
-// --- per-provider array allowlist ---
-{
-    const cfg = parseVisibleWindowsConfig(JSON.stringify({ claude: ["5h"] }))
-    assert(cfg.mode === "perProvider", "provider array entry")
-    const cOut = applyVisibility(claudeWins, visibilitySpecForProvider(cfg, "claude"))
-    assert(windowsVisible(cOut).join(",") === "5h", "provider allowlist only 5h")
-}
-
-if (failed) {
-    console.error(`\n${failed} failure(s)`)
-    process.exit(1)
-}
-console.log("\nAll visibility tests passed.")
+console.log("All visibility tests passed.")
