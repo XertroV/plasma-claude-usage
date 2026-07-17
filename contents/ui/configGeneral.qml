@@ -10,6 +10,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as Plasma5Support
 import "js/QuotaCommon.js" as QC
+import "js/ProfileRegistry.js" as Registry
 import "js/VisibleQuotaConfig.js" as VQ
 
 KCM.SimpleKCM {
@@ -33,6 +34,7 @@ KCM.SimpleKCM {
     property bool cfg_multiProfileMode
     property string cfg_profileDisplayNamesJson
     property string cfg_enabledProfilesJson
+    property int cfg_customProfileNextId
     property string cfg_visibleWindowsJson
     property string cfg_customProfilesJson
     property bool cfg_cacheResponses
