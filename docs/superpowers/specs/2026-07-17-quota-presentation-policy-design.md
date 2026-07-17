@@ -42,7 +42,10 @@ This shallow selector choreography allowed an explicitly selected extra quota to
 Create a pure JavaScript module at `contents/ui/js/QuotaPresentation.js` with one caller-facing interface:
 
 ```js
-presentProfile(profile, options) -> {
+presentProfile(profile, {
+    sessionColorMode,
+    weeklyColorMode
+}) -> {
     rows: [
         {
             windowData,
@@ -53,7 +56,7 @@ presentProfile(profile, options) -> {
 }
 ```
 
-`options` carries the current session and weekly colour-mode preferences. The module may use low-level `QuotaCommon.js` helpers as implementation details. Rendering callers must not directly invoke `primaryWindows`, `extraWindows`, `visibleWindows`, `displayWindowLabel`, or `colorModeForWindow`.
+The options object uses the exact keys `sessionColorMode` and `weeklyColorMode`; omitted or empty values retain the existing `capacity` and `efficiency` defaults. The module may use low-level `QuotaCommon.js` helpers as implementation details. Rendering callers must not directly invoke `primaryWindows`, `extraWindows`, `visibleWindows`, `displayWindowLabel`, or `colorModeForWindow`.
 
 This is a deep module because one small interface owns policy used by four rendering surfaces and their tests. Deleting it would force selection, ordering, label, colour-mode, and fallback knowledge back into every caller.
 
@@ -106,11 +109,11 @@ Does not own:
 
 ### `QuotaRow.qml`
 
-Consumes one presentation row:
+Exposes `property var presentationRow: null` and consumes one presentation row:
 
-- `row.windowData` supplies usage, reset, period, and tooltip-extra data;
-- `row.label` supplies visible and hover labels;
-- `row.colorMode` supplies pace-bar mode.
+- `presentationRow.windowData` supplies usage, reset, period, and tooltip-extra data;
+- `presentationRow.label` supplies visible and hover labels;
+- `presentationRow.colorMode` supplies pace-bar mode.
 
 It retains time-sensitive calculations using `nowMs` and the Plasma theme. Skeleton mode remains available without a presentation row.
 
