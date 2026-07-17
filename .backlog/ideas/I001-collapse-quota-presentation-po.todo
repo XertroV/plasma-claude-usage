@@ -52,3 +52,14 @@ The 15 July draft placed extras in detail or compact chips; current user directi
 ## Priority rationale
 
 Top recommendation in the review: the extra-row failure directly demonstrates that the current interface has no locality, and this in-process deepening offers immediate leverage across cards, detail, compact summary, tooltips, and their tests.
+
+
+## Planning outcome — 17 July 2026
+
+- Approved design: `docs/superpowers/specs/2026-07-17-quota-presentation-policy-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-07-17-quota-presentation-policy.md`
+- Ingested epic: `P1.M1.E1` — Unify Quota Presentation
+- Atomic tasks: `P1.M1.E1.T001` through `P1.M1.E1.T005`
+- Product decision: every explicitly selected quota receives equal presentation across cards, detail, compact cards, row hover, and applet tooltip.
+- Product code was not implemented during this planning intake.
+- Independent PIRFL rereview: PASS with no remaining blocker/major findings.
