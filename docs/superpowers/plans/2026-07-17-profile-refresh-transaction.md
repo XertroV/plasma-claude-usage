@@ -606,7 +606,7 @@ Expected: FAIL on existing `fetchUsage()` and provider branches.
 
 - [ ] **Step 3: Remove standard-provider lifecycle from the controller**
 
-Delete `fetchUsage()` and move/delete controller copies of `extractAuth`, `extractOpencodeAuth`, `effectiveProvider`, and `usageUrl` once no non-refresh caller uses them. Remove credential callback parsing/auth decisions now handled by the transaction.
+Delete `fetchUsage()` and remove controller copies of `extractAuth`, `extractOpencodeAuth`, and `usageUrl` once no non-refresh caller uses them. Retain the small `effectiveProvider(profile)` helper because existing response-cache path/envelope code still uses it; I005 may relocate it with the cache pipeline. Remove credential callback parsing/auth decisions now handled by the transaction.
 
 Keep `applyUsageResult()` only as the live visibility/store adapter; it must not select provider, classify status, compute retry, or parse JSON.
 
@@ -716,7 +716,7 @@ for (const name of [
 for (const name of [
     "loadCredentials", "noteAuthFailure", "noteRateLimited",
     "clearFailureStatePatch", "extractAuth", "pickGrokToken",
-    "extractOpencodeAuth", "effectiveProvider", "usageUrl",
+    "extractOpencodeAuth", "usageUrl",
     "fetchUsage", "fetchGrok", "grokGet", "finishGrokPart"
 ]) assert.doesNotMatch(src, new RegExp(`function ${name}\\s*\\(`))
 ```
@@ -725,7 +725,7 @@ Also assert `ProfileRefresh.run`, stable ID/generation checks, thin port functio
 
 - [ ] **Step 2: Remove dead imports/functions/fields/comments**
 
-Delete any now-unused controller lifecycle helper, `QuotaParsers.js` import, old generation fields (`usageFetchGen`, `grokFetchGen`), and stale B001/B008/B033 comments. Retain one generic `refreshGeneration` and comments documenting the transaction seam.
+Delete any now-unused controller lifecycle helper, `QuotaParsers.js` import, old generation fields (`usageFetchGen`, `grokFetchGen`), and stale B001/B008/B033 comments. Retain one generic `refreshGeneration`, comments documenting the transaction seam, and cache-owned helpers such as `effectiveProvider`, `endpointSlugForProvider`, and `grokEndpointSlug` until I005 relocates the cache pipeline.
 
 - [ ] **Step 3: Run the complete serial suite**
 
