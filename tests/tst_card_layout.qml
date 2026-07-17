@@ -108,6 +108,19 @@ TestCase {
         var moreBottom = moreLabels[0].mapToItem(flow, 0, moreLabels[0].height).y
         compare(flow.implicitHeight, moreBottom,
                 "Flow height should end at the visible overflow label, not a hidden card")
+
+        var fixedWidthView = createTemporaryObject(
+                    cardsComponent, null,
+                    { profiles: [profile("one"), profile("two"), profile("three")],
+                      maxCards: 2, fillWidth: false })
+        verify(fixedWidthView !== null, "fixed-width capped CardsView should instantiate")
+        wait(0)
+        var fixedCards = accountCards(fixedWidthView)
+        compare(fixedCards[0].width, fixedWidthView.cardMinWidth)
+        compare(fixedCards[1].width, fixedWidthView.cardMinWidth)
+        compare(fixedCards[2].visible, false)
+        compare(fixedCards[2].width, 0)
+        compare(fixedCards[2].height, 0)
     }
 
     function test_rightSideQuotaInformationRemainsAligned() {

@@ -72,14 +72,14 @@ Item {
                 showBankedBadge: cardsRoot.showBankedBadge
                 minWidth: cardsRoot.cardMinWidth
                 width: {
+                    var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)
+                    if (n <= 0 || index >= n)
+                        return 0
                     if (!cardsRoot.fillWidth)
                         return minWidth
                     var avail = cardFlow.width > 0 ? cardFlow.width : cardsRoot.width
                     if (avail <= 0)
                         return minWidth
-                    var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)
-                    if (n <= 0 || index >= n)
-                        return 0
                     var capacity = Math.max(1, Math.floor((avail + cardFlow.spacing)
                                             / (minWidth + cardFlow.spacing)))
                     // Fill each row without reserving columns for cards that are not in it.
