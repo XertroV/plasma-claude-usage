@@ -32,7 +32,8 @@ tasks:
       file: T003-unify-detail-quota-rendering.todo
       id: T003
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Unify detail quota rendering
     - complexity: medium
       depends_on:

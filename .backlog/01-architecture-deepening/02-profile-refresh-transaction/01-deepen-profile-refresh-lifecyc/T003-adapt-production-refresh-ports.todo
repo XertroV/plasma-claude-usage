@@ -1,4 +1,7 @@
 ---
+claimed_at: "2026-07-17T15:16:42Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T06:16:29Z"
 depends_on:
@@ -6,15 +9,11 @@ depends_on:
 estimate_hours: 2
 id: P1.M2.E1.T003
 priority: high
-status: pending
-tags:
-    - i002
-    - qml
-    - refresh
-    - identity
-    - tdd
+started_at: "2026-07-17T15:16:42Z"
+status: in_progress
+tags: []
 title: Adapt production refresh ports and switch the controller
-updated_at: "2026-07-17T06:16:29Z"
+updated_at: "2026-07-17T15:16:42Z"
 ---
 Source: I002 and `docs/superpowers/plans/2026-07-17-profile-refresh-transaction.md`, Task 3.
 
