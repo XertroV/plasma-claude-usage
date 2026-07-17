@@ -39,3 +39,4 @@ bugs:
     - file: B038-card-shows-errors-like-rate-li.todo
     - file: B039-on-codex-cards-the-refresh-but.todo
     - file: B040-loading-source-counter-disrupt.todo
+    - file: B041-countdown-column-reserves-four.todo

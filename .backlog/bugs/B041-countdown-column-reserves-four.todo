@@ -1,0 +1,57 @@
+---
+complexity: medium
+created_at: "2026-07-17T10:05:54Z"
+depends_on: []
+estimate_hours: 1
+id: B041
+priority: high
+status: pending
+tags:
+    - ui
+    - qml
+    - layout
+title: Countdown column reserves four grid units, wasting quota-row space
+updated_at: "2026-07-17T10:05:54Z"
+---
+## Symptom
+
+Each quota row leaves a conspicuous block of empty horizontal space between the usage percentage and the reset countdown (the blue-boxed regions in the supplied screenshot). On minimum-width cards this space is taken away from the pace/progress bar, leaving the useful visualisation much narrower than necessary.
+
+## Why this happens
+
+This is inside `contents/ui/QuotaRow.qml`, not the outer `CardsView` flow. The final reset-countdown `PlasmaComponents.Label` currently has:
+
+```qml
+Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+Layout.maximumWidth: Kirigami.Units.gridUnit * 5
+horizontalAlignment: Text.AlignRight
+```
+
+Four grid units is about 72 px with the current theme, while normal `QC.formatCountdown()` output such as `5d 18h`, `2d 6h`, or `59m 3s` is only roughly 30–45 px wide. `RowLayout` therefore reserves the full 4-grid-unit slot before allocating remaining width to the `PaceBar` (`Layout.fillWidth: true`), and right alignment puts all surplus width on the countdown label's leading edge. That reserved-but-unpainted part of the label is exactly the blue-boxed gap. `Layout.maximumWidth` does not reduce it because the preferred width is still fixed at four grid units.
+
+## Exact change
+
+In the reset-countdown label at `contents/ui/QuotaRow.qml:72-84`, replace:
+
+```qml
+Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+```
+
+with:
+
+```qml
+Layout.preferredWidth: implicitWidth
+```
+
+Keep the existing `Layout.maximumWidth`, elision, and right alignment as the safety cap/overflow behaviour. Do not change the fixed period-label or percentage widths: those are useful alignment columns. With the countdown using its natural width, the existing fill-width `PaceBar` automatically receives the reclaimed pixels.
+
+Update `tests/test-card-typography.mjs`: remove the expectation that the quota row contains a `gridUnit * 4` preferred-width countdown column and assert instead that the reset-countdown label uses `Layout.preferredWidth: implicitWidth` while retaining its `gridUnit * 5` maximum and `Text.ElideRight` cap.
+
+## Acceptance criteria
+
+- Reset countdowns sit after the percentage with only normal `RowLayout.spacing`; there is no large leading blank block inside the countdown column.
+- Reclaimed width is used by the pace bar on compact/minimum-width cards.
+- Countdown strings still right-align, and unusually long values remain capped/elided.
+- Period and percentage columns remain fixed/aligned.
+- Skeleton rows and cards with multiple quota rows do not overflow or clip.
+- The card typography/layout regression tests cover the natural-width countdown behaviour and pass.
