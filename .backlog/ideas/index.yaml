@@ -7,3 +7,5 @@ ideas:
       id: I003
     - file: I004-deepen-visible-quota-configura.todo
       id: I004
+    - file: I005-isolate-the-response-cache-pip.todo
+      id: I005

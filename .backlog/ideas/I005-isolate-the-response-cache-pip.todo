@@ -1,0 +1,48 @@
+---
+complexity: medium
+created_at: "2026-07-17T01:47:37Z"
+depends_on: []
+estimate_hours: 10
+id: I005
+priority: medium
+status: pending
+tags:
+    - architecture-review
+    - deep-module
+    - response-cache
+    - local-substitutable
+title: Isolate the response-cache pipeline
+updated_at: "2026-07-17T01:47:37Z"
+---
+Source: `file:///tmp/architecture-review-20260715-224729.html` (Candidate 05)
+
+Rating: **Worth exploring**
+Test seam: **local-substitutable**
+
+Relevant files:
+- `contents/ui/ProfileController.qml:814–1096`
+- `contents/scripts/cache-response.sh`
+- `tests/test-cache-response.sh`
+
+## Problem
+
+The profile controller owns eleven cache functions and a five-value call interface (`profile`, `endpoint`, URL, status, and `responseText`), while tests begin only at the final shell adapter. Paths, envelope creation, truncation, staging, queueing, watchdog behaviour, shell quoting, process handling, and cleanup are scattered inside the controller.
+
+## Proposed direction
+
+Expose a small interface that caches one response outcome. Place the envelope, paths, staging, queue discipline, watchdog, and cleanup behind a deep response-cache module with a Plasma adapter and a local test adapter.
+
+## Deletion test
+
+Delete the cluster and process safety plus queue state spill into every fetch callback.
+
+## Expected wins
+
+- Cache policy becomes local.
+- The controller interface shrinks.
+- Tests reach queue behaviour.
+- Two adapters justify the seam.
+
+## Evidence trail
+
+B023 exposed process-argument leakage; B024 exposed queue liveness hidden from the shell-only tests.
