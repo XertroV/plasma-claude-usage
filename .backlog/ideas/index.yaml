@@ -44,3 +44,5 @@ ideas:
       status: done
       tags: []
       title: Isolate the response-cache pipeline
+    - file: I006-celebrate-and-log-quota-resets.todo
+      id: I006
