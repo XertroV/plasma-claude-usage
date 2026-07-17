@@ -51,14 +51,18 @@ RowLayout {
         color: isSkeleton
                ? Kirigami.Theme.disabledTextColor
                : Kirigami.Theme.textColor
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 4
+        // Tight period slot so short labels (5h/7d) do not reserve extra bar width.
+        Layout.preferredWidth: Math.min(implicitWidth, Kirigami.Units.gridUnit * 2)
+        Layout.maximumWidth: compact ? Kirigami.Units.gridUnit * 2.5
+                                     : Kirigami.Units.gridUnit * 3
+        Layout.fillWidth: false
         elide: Text.ElideRight
     }
 
     PaceBar {
+        // preferredWidth 0 + fillWidth: claim all leftover after fixed text columns
         Layout.fillWidth: true
-        Layout.preferredWidth: compact ? Kirigami.Units.gridUnit * 3 : Kirigami.Units.gridUnit * 6
+        Layout.preferredWidth: 0
         Layout.minimumWidth: Kirigami.Units.gridUnit * 2
         Layout.preferredHeight: compact ? 6 : 10
         usagePercent: isSkeleton ? 0 : rowRoot.usagePct
@@ -74,7 +78,11 @@ RowLayout {
         font.pixelSize: rowRoot.textPixelSize
         font.bold: !isSkeleton
         color: isSkeleton ? Kirigami.Theme.disabledTextColor : rowRoot.fillColor
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+        // Natural width for "0%".."100%" — no fixed 2gu dead band before countdown.
+        Layout.preferredWidth: implicitWidth
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 1.25
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 1.75
+        Layout.fillWidth: false
         horizontalAlignment: Text.AlignRight
     }
 
@@ -86,8 +94,11 @@ RowLayout {
         }
         font.pixelSize: rowRoot.textPixelSize
         color: Kirigami.Theme.disabledTextColor
+        // Thin countdown: natural text width, capped so long "6d 12h" cannot starve the bar.
         Layout.preferredWidth: implicitWidth
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 5
+        Layout.maximumWidth: compact ? Kirigami.Units.gridUnit * 2.75
+                                     : Kirigami.Units.gridUnit * 3.25
+        Layout.fillWidth: false
         elide: Text.ElideRight
         horizontalAlignment: Text.AlignRight
     }

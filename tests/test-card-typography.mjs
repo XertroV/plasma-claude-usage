@@ -86,19 +86,24 @@ const percentageLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
 const countdownLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
     "QC.formatCountdown(windowData.resetAtMs, nowMs)")
 
-assert(periodLabel.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 2")
-       && periodLabel.includes("elide: Text.ElideRight"),
-    "period column remains fixed and elided")
-assert(paceBar.includes("Layout.fillWidth: true"),
+assert(periodLabel.includes("Layout.preferredWidth: Math.min(implicitWidth, Kirigami.Units.gridUnit * 2)")
+       && periodLabel.includes("elide: Text.ElideRight")
+       && periodLabel.includes("Layout.fillWidth: false"),
+    "period column stays tight and elided")
+assert(paceBar.includes("Layout.fillWidth: true")
+       && paceBar.includes("Layout.preferredWidth: 0"),
     "pace bar receives remaining quota-row width")
-assert(percentageLabel.includes("Layout.preferredWidth: Kirigami.Units.gridUnit * 2")
-       && percentageLabel.includes("horizontalAlignment: Text.AlignRight"),
-    "percentage column remains fixed and right-aligned")
+assert(percentageLabel.includes("Layout.preferredWidth: implicitWidth")
+       && percentageLabel.includes("Layout.maximumWidth: Kirigami.Units.gridUnit * 1.75")
+       && percentageLabel.includes("horizontalAlignment: Text.AlignRight")
+       && percentageLabel.includes("Layout.fillWidth: false"),
+    "percentage column is natural-width and right-aligned")
 assert(countdownLabel.includes("Layout.preferredWidth: implicitWidth")
-       && countdownLabel.includes("Layout.maximumWidth: Kirigami.Units.gridUnit * 5")
+       && countdownLabel.includes("Kirigami.Units.gridUnit * 2.75")
        && countdownLabel.includes("elide: Text.ElideRight")
-       && countdownLabel.includes("horizontalAlignment: Text.AlignRight"),
-    "countdown uses its natural bounded width and remains right-aligned")
+       && countdownLabel.includes("horizontalAlignment: Text.AlignRight")
+       && countdownLabel.includes("Layout.fillWidth: false"),
+    "countdown uses a thin natural width and remains right-aligned")
 assert(count(quotaRow, "Layout.fillWidth: true") === 2,
     "only the quota row and pace bar opt into fill width")
 assert(accountCard.includes("textPixelSize: cardRoot.contentFontPixelSize"),
