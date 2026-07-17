@@ -32,7 +32,7 @@ tasks:
       file: T003-adapt-production-refresh-ports.todo
       id: T003
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Adapt production refresh ports and switch the controller
     - complexity: medium

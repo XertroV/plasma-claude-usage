@@ -32,7 +32,7 @@ tasks:
       file: T003-share-profile-configuration-ed.todo
       id: T003
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Share profile configuration editing with the KCM
     - complexity: high

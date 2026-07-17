@@ -32,7 +32,7 @@ tasks:
       file: T003-add-the-local-plasma-response.todo
       id: T003
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Add the local Plasma response-cache adapter
     - complexity: high

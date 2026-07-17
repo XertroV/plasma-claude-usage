@@ -32,7 +32,7 @@ tasks:
       file: T003-route-kcm-through-visible-qu.todo
       id: T003
       priority: high
-      status: in_progress
+      status: done
       tags: []
       title: Route KCM controls through the visible quota seam
     - complexity: high
