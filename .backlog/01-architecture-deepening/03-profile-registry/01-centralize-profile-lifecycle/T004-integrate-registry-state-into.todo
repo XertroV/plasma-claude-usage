@@ -1,4 +1,7 @@
 ---
+claimed_at: "2026-07-17T15:23:51Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T10:18:39Z"
 depends_on:
@@ -6,16 +9,11 @@ depends_on:
 estimate_hours: 2
 id: P1.M3.E1.T004
 priority: high
-status: pending
-tags:
-    - i003
-    - qml
-    - registry
-    - controller
-    - integration
-    - tdd
+started_at: "2026-07-17T15:23:51Z"
+status: in_progress
+tags: []
 title: Integrate registry state into the post-I002 controller
-updated_at: "2026-07-17T10:18:39Z"
+updated_at: "2026-07-17T15:23:51Z"
 ---
 Source: I003 and `docs/superpowers/plans/2026-07-17-profile-registry.md`, Task 4.
 

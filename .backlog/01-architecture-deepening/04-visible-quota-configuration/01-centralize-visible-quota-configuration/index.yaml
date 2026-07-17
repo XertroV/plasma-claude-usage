@@ -53,5 +53,6 @@ tasks:
       file: T005-enforce-visible-quota-seam.todo
       id: T005
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Enforce the visible quota seam and verify migration

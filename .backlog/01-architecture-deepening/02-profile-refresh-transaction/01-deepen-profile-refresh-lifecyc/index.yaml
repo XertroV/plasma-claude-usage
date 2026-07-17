@@ -42,7 +42,8 @@ tasks:
       file: T004-remove-the-standard-provider-l.todo
       id: T004
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Remove the standard-provider legacy refresh lifecycle
     - complexity: medium
       depends_on:

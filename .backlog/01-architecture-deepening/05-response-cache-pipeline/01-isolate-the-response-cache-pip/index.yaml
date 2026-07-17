@@ -42,7 +42,8 @@ tasks:
       file: T004-migrate-the-cache-port-and-del.todo
       id: T004
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Migrate the cache port and delete controller internals
     - complexity: medium
       depends_on:

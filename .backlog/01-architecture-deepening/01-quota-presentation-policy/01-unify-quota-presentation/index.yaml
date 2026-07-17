@@ -53,5 +53,6 @@ tasks:
       file: T005-enforce-the-presentation-seam.todo
       id: T005
       priority: high
-      status: pending
+      status: in_progress
+      tags: []
       title: Enforce the presentation seam and remove old selectors

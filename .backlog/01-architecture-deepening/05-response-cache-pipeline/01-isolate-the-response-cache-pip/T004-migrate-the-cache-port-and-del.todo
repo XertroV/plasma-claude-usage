@@ -1,4 +1,7 @@
 ---
+claimed_at: "2026-07-17T15:23:51Z"
+claimed_by: grok-bl-p1
+completed_at: null
 complexity: high
 created_at: "2026-07-17T10:54:55Z"
 depends_on:
@@ -6,15 +9,10 @@ depends_on:
 estimate_hours: 2
 id: P1.M5.E1.T004
 priority: high
-status: pending
-tags:
-    - i005
-    - architecture
-    - response-cache
-    - qml
-    - migration
-    - deletion
+started_at: "2026-07-17T15:23:51Z"
+status: in_progress
+tags: []
 title: Migrate the cache port and delete controller internals
-updated_at: "2026-07-17T10:54:55Z"
+updated_at: "2026-07-17T15:23:51Z"
 ---
 Source: I005 and docs/superpowers/plans/2026-07-17-response-cache-pipeline.md, Task 4. Instantiate LocalResponseCache in post-I002/I003 ProfileController.qml, forward recordRefreshExchange(exchange), and delete cache-only functions, fields, DataSource, Timer, and script property while retaining shared shellQuote/HOME facilities. Acceptance: I002 still calls ports.recordExchange(exchange) once before provider finalisation and stale-generation rejection; disabled string/boolean configuration semantics remain exact; controller source has only the direct forwarder; I002/I003/pure/shell/path tests pass; refresh, registry, visibility, settings, provider parsers, and cache-response.sh are unchanged.
