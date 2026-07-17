@@ -767,10 +767,10 @@ Expected: every Node and shell test exits `0`; both Qt commands explicitly repor
 Run:
 
 ```bash
-rg -n 'primaryWindows|extraWindows|visibleWindows' contents/ui
+rg -n '\b(primaryWindows|extraWindows|visibleWindows)\s*\(' contents/ui
 ```
 
-Expected: no rendering or library references. Regression tests may name the deleted symbols only to assert their absence; historical prose comments in `contents/ui` must be updated or removed rather than left stale.
+Expected: no old selector calls or function definitions. Legitimate persisted-configuration names such as `visibleWindowsJson`, `visibleWindowsConfig`, and `visibleWindowIds` remain in scope and must not be renamed. Regression tests may name the deleted selectors only to assert their absence; historical prose comments in `contents/ui` must be updated or removed rather than left stale.
 
 - [ ] **Step 7: Commit selector deletion and final gates**
 

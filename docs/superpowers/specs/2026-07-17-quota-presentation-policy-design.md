@@ -80,7 +80,7 @@ This is a deep module because one small interface owns policy used by four rende
 6. Preserve the order of `profile.windows`; role must not regroup rows.
 7. Return fresh presentation-row objects without mutating the profile or window objects.
 8. Retain the original window by reference as `windowData` for live usage/reset fields.
-9. Resolve each row’s label once using the existing fallback policy: meaningful label, then ID, then recognised column label, then empty text.
+9. Resolve each row’s label once by delegating to `QuotaCommon.displayWindowLabel()`, including its provider/id canonicalisation rules before its generic label, ID, recognised-column, and empty-text fallbacks.
 10. Resolve each row’s colour mode using existing session/weekly preference semantics and defaults.
 11. Exclude `nowMs` from the snapshot so countdown and pacing updates do not rebuild presentation rows each tick.
 
