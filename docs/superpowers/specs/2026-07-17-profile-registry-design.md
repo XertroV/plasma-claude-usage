@@ -105,11 +105,13 @@ id, provider, configDir, credPath, displayName, enabled,
 loading, error, planName, bankedResets, windows, lastFetchMs
 ```
 
-Public projection keeps those fields, deep-copies window objects/arrays, and omits all auth tokens, account IDs, resource URLs, failed-token snapshots, generations, retry state, and internal transaction data.
+Public projection keeps those fields, deep-copies window objects/arrays, and omits all auth tokens, account IDs, resource URLs, failed-token snapshots, generations, retry state, and internal transaction data. This intentionally narrows the internal QML object shape from the current denylist copy to an allowlist; it is not user-visible because source inspection confirms no view consumes the omitted fields.
 
 ## Chosen Architecture
 
-Create `contents/ui/js/ProfileRegistry.js`, a pure module with two public interfaces:
+Create `contents/ui/js/ProfileRegistry.js`, a pure module. It imports `QuotaCommon.js` only for existing path equality, default profile label, and default credential-path helpers. Visibility behaviour is injected rather than imported so I004 can replace it independently.
+
+The module has two public interfaces:
 
 ```js
 ProfileRegistry.transition(input) -> result
