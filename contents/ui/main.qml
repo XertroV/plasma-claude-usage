@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents
@@ -442,31 +443,16 @@ PlasmoidItem {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
+                visible: root.isLoading
 
-                Kirigami.Icon {
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                    source: Qt.resolvedUrl("../icons/claude.svg")
-                }
-                PlasmaComponents.Label {
+                Item {
                     Layout.fillWidth: true
-                    text: root.i18nObj ? root.i18nObj.tr("AI Usage") : "AI Usage"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
-                    elide: Text.ElideRight
                 }
                 PlasmaComponents.Label {
                     visible: root.isLoading
                     text: root.loadingCountText || (root.profilesDone + "/" + Math.max(root.profilesTotal, 1))
                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                     color: Kirigami.Theme.disabledTextColor
-                }
-                PlasmaComponents.Button {
-                    icon.name: "view-refresh"
-                    text: root.i18nObj ? root.i18nObj.tr("Refresh") : "Refresh"
-                    onClicked: {
-                        if (root.usageController) root.usageController.refreshAll()
-                    }
                 }
             }
 
@@ -476,6 +462,7 @@ PlasmoidItem {
                 Layout.fillHeight: true
                 clip: true
                 contentWidth: availableWidth
+                QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
 
                 CardsView {
                     id: cardsFull
@@ -506,6 +493,15 @@ PlasmoidItem {
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents.Button {
+                    icon.name: "view-refresh"
+                    text: root.i18nObj ? root.i18nObj.tr("Refresh") : "Refresh"
+                    onClicked: {
+                        if (root.usageController) root.usageController.refreshAll()
+                    }
+                }
                 PlasmaComponents.Label {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
