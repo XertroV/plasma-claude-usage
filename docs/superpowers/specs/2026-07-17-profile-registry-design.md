@@ -27,7 +27,7 @@ The current implementation never established that registry seam.
 
 ## Decisions
 
-- I003 is behaviour-preserving for valid existing discovery/configuration inputs.
+- I003 is behaviour-preserving for valid existing discovery/configuration inputs, except for one explicit identity hardening: custom-profile IDs gain a persisted monotonic allocator so removed IDs cannot be reused after KCM reload.
 - Exact profile `id` remains the runtime identity key. Mutable array index never crosses the registry interface.
 - The production discovery shell remains responsible for filesystem scanning, canonical paths, inode deduplication, and stable discovery IDs.
 - A pure QML-compatible JavaScript module owns registry transitions and configuration edits.
@@ -67,7 +67,11 @@ The current implementation never established that registry seam.
 - Runtime discovery candidates retain script order.
 - In multi-profile mode, valid custom profiles are appended in configuration order.
 - In legacy mode, customs are ignored and discovered candidates are filtered to the configured provider/path; when no explicit credential path exists, one canonical shortest-path candidate is retained.
-- If legacy discovery is empty and an explicit credential path exists, a synthetic legacy candidate is created.
+- Legacy synthetic identity is intentionally characterised exactly:
+  - startup with explicit `credentialsPath` creates ID `legacy-config`, maps OpenCode subproviders to their effective provider, and detects flat Kimi/Z.ai/MiniMax paths;
+  - startup without an explicit path creates ID `legacy-bootstrap` using the current provider-specific default path and effective-provider mapping;
+  - a later empty discovery with explicit credentials falls back inside reconciliation to ID `legacy-${configuredProvider}` with provider equal to the configured provider, matching current `mergeDiscovered()` behaviour even when that differs from startup identity.
+- These three forms are preserved and tested rather than silently unified; their current ID changes therefore retain current live-state reset semantics.
 
 ### Identity and reconciliation
 
@@ -83,7 +87,8 @@ The current implementation never established that registry seam.
 - `enabledProfilesJson === ["__none__"]` means none enabled.
 - Otherwise it is an ID allowlist.
 - Display-name overrides are non-empty values keyed by profile ID.
-- Custom profiles are multi-profile-only, append after discovered profiles, resolve default credential paths by provider, and receive stable non-reused IDs.
+- Custom profiles are multi-profile-only, append after discovered profiles, and resolve default credential paths by provider.
+- Today `customIdSeq` avoids reuse only within one KCM session; after reload it is rebuilt from remaining entries, so removing the highest ID allows reuse and stale name/enablement config can bind to a new profile. I003 intentionally adds persisted `customProfileNextId`, initialised as at least one greater than every existing suffix and never decremented.
 - Rediscover-impact keys: `multiProfileMode`, `credentialsPath`, `provider`, `opencodeSubProvider`, `customProfilesJson`.
 - Membership-impact key: `enabledProfilesJson`.
 - Soft-impact keys: `profileDisplayNamesJson`, `visibleWindowsJson`, `displayName`.
@@ -136,6 +141,7 @@ Supported events:
 { type: "discovered", candidates }
 { type: "configurationChanged", keys }
 { type: "patch", profileId, expectedGeneration, patch }
+{ type: "usageResult", profileId, expectedGeneration, usageResult, patch }
 { type: "setHidden", profileId, hidden }
 ```
 
@@ -154,6 +160,7 @@ Supported events:
     enabledProfilesJson,
     profileDisplayNamesJson,
     customProfilesJson,
+    customProfileNextId,
     visibleWindowsJson
 }
 ```
@@ -167,7 +174,7 @@ Supported events:
 }
 ```
 
-The production adapter initially wraps existing `QuotaCommon` visibility functions. Registry tests inject a deterministic substitute. I004 may replace the implementation without changing the registry interface.
+`apply()` returns cloned windows with current visibility and time percentages applied; it wraps both current `QC.applyVisibility()` and `QC.updateTimePercent()` behaviour. The production adapter initially wraps existing `QuotaCommon` visibility functions. Registry tests inject a deterministic substitute. I004 may replace the implementation without changing the registry interface.
 
 `result` is:
 
@@ -210,7 +217,7 @@ Supported events:
 { type: "removeCustom", profileId }
 ```
 
-It owns the shared semantics for `[]`/`__none__` enablement, name trimming/removal, default credential paths, stable custom IDs, and custom enablement. KCM writes only returned `patch` values to cfg.
+It owns the shared semantics for `[]`/`__none__` enablement, name trimming/removal, default credential paths, durable custom IDs, and custom enablement. `addCustom` chooses `max(customProfileNextId, highestExistingSuffix + 1)`, returns the incremented allocator in `patch.customProfileNextId`, and removal never decrements it. KCM writes only returned `patch` values to cfg.
 
 Visibility editing remains in the future I004 interface and is not added to `editConfig()` here.
 
@@ -276,8 +283,17 @@ The module classifies all supplied keys and applies precedence:
 
 - Find by stable ID.
 - If `expectedGeneration` is supplied and mismatched, return unchanged state with `accepted: false`.
-- Clone the target/internal array, apply only the supplied patch, regenerate public snapshots, and return `accepted: true`.
+- Clone the target/internal array, apply only the supplied non-usage patch, regenerate public snapshots, and return `accepted: true`.
 - Unknown ID returns unchanged state and `accepted: false`.
+
+### `usageResult`
+
+- Resolve stable ID and require `expectedGeneration` to match.
+- Apply the I002 transaction patch and normalised `usageResult` together.
+- Re-read the current visibility spec from `config.visibleWindowsJson` at commit time.
+- Run `usageResult.windows` through `visibility.apply(windows, spec, nowMs)`, preserving B034 live-config and time-percent behaviour.
+- Commit plan name, banked resets, windows, last-update/fetch fields, retry reset, and explicit public snapshots in one accepted transition.
+- Visibility adapter failure leaves prior windows intact, applies the non-window terminal patch safely, and emits a warning rather than exposing unconfigured fresh windows.
 
 ### `setHidden`
 
@@ -316,7 +332,7 @@ UI sync reads the controller’s already-safe `publicProfiles` property rather t
 
 ### `configGeneral.qml`
 
-Imports registry configuration editing for enabled profiles, names, and custom add/remove. It retains UI form state, discovery display, and visible-quota editing (until I004), but no longer implements allowlist/sentinel, stable custom-ID, name cleanup, or default credential-path rules independently.
+Imports registry configuration editing for enabled profiles, names, and custom add/remove. Add `customProfileNextId` to `contents/config/main.xml` and expose its KCM cfg property; existing installations default to `0`, while `editConfig()` always raises it above every existing custom suffix before allocation. The KCM retains UI form state, discovery display, and visible-quota editing (until I004), but no longer implements allowlist/sentinel, durable custom-ID, name cleanup, or default credential-path rules independently.
 
 ### `discover-profiles.sh`
 
@@ -345,14 +361,15 @@ The discovery script uses inode for deduplication, but current refresh/config/UI
 5. Removed IDs disappear; new IDs receive the central blank schema.
 6. Discovery/custom ordering is deterministic and preserved.
 7. Runtime patching uses ID and optional generation, never array index.
-8. Public snapshots contain only the explicit public allowlist.
-9. Public window arrays and window objects do not alias internal arrays/objects.
-10. Enablement `[]`, `__none__`, allowlist, hide/show, and KCM edit semantics are identical.
-11. Name and custom-ID semantics are shared by runtime and KCM.
-12. Visibility is reapplied at the same discovery/config points through the adapter.
-13. Registry returns effects; it never performs I/O, timers, refresh, or cfg writes.
-14. Invalid JSON uses current safe fallbacks and never throws across the interface.
-15. Malformed duplicate IDs are deterministic and observable through warning effects.
+8. Refresh success uses `usageResult`, never generic raw-window patching; current visibility and time percentages are applied inside the accepted generation-checked transition.
+9. Public snapshots contain only the explicit public allowlist.
+10. Public window arrays and window objects do not alias internal arrays/objects.
+11. Enablement `[]`, `__none__`, allowlist, hide/show, and KCM edit semantics are identical.
+12. Name and custom-ID semantics are shared by runtime and KCM; `customProfileNextId` is monotonic and persisted.
+13. Visibility is reapplied at discovery, config, and refresh-success points through the adapter.
+14. Registry returns effects; it never performs I/O, timers, refresh, or cfg writes.
+15. Invalid JSON uses current safe fallbacks and never throws across the interface.
+16. Malformed duplicate IDs are deterministic and observable through warning effects.
 
 ## Error Handling
 
@@ -375,7 +392,7 @@ Add deterministic Node tests for:
 - post-I002 live-field preservation;
 - metadata/config replacement;
 - source/custom ordering;
-- legacy filtering and synthetic fallback;
+- legacy filtering plus exact `legacy-config`, `legacy-bootstrap`, and `legacy-${configuredProvider}` synthetic paths/effective-provider rules;
 - custom credential path/default label;
 - duplicate collision warning;
 - no input mutation;
@@ -383,6 +400,7 @@ Add deterministic Node tests for:
 - soft/membership/rediscover impact and precedence;
 - newly enabled targeted refresh;
 - stable ID/generation patch acceptance/rejection;
+- generation-checked `usageResult` with live visibility/time application and failure safety;
 - setHidden persistence and immediate state;
 - explicit public allowlist and deep window copying;
 - visibility adapter invocation and failure safety.
@@ -396,9 +414,10 @@ Test `editConfig()` for:
 - partial allowlist;
 - discovered plus custom IDs;
 - trimmed/removed names;
-- stable custom IDs after removal/reload;
+- `customProfileNextId` migration above existing suffixes;
+- durable non-reuse after removing the highest ID and reloading;
 - default credential path and explicit override;
-- removing custom without reusing IDs;
+- removing custom without decrementing/reusing IDs;
 - malformed raw JSON fallback.
 
 ### Discovery adapter tests
@@ -413,7 +432,7 @@ Verify:
 - `main.qml` contains no dirty-category knowledge;
 - `configGeneral.qml` delegates enabled/name/custom rules;
 - discovery executable adapter remains thin and unchanged;
-- I002 transaction outcomes patch through registry ID/generation interface after P1.M2 completes.
+- I002 non-usage transitions patch through registry ID/generation, while success uses the dedicated `usageResult` transition so current visibility/time policy cannot be bypassed.
 
 Existing refresh, visibility, discovery, cache, layout, and Qt Quick tests remain regression gates.
 
@@ -429,9 +448,10 @@ Existing refresh, visibility, discovery, cache, layout, and Qt Quick tests remai
 ## Acceptance Criteria
 
 - Production discovery and local candidate fixtures cross the same pure registry transition.
-- Exact ID is the sole runtime identity; no patch/reconcile callback uses array index.
+- Exact ID is the sole runtime identity; no patch/reconcile callback uses array index, and all three current legacy synthetic-ID paths are characterised.
 - Reconciliation preserves post-I002 live state and refreshes metadata/config once.
-- Runtime and KCM share enabled/name/custom semantics.
+- I002 success commits through generation-checked `usageResult` with current visibility and time percentages.
+- Runtime and KCM share enabled/name/custom semantics, including persisted monotonic custom-ID allocation.
 - Main no longer knows rediscover/membership/soft categories.
 - ProfileController no longer owns blank schema, merge/reapply copy loops, public snapshot denylist, or index-based patching.
 - Public snapshots expose only the 12 currently consumed fields and deep-copy windows.
