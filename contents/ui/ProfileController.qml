@@ -835,20 +835,7 @@ Item {
         return out || "unknown"
     }
 
-    function responseCacheRoot() {
-        var override = String(cfgValue("responseCachePath", "") || "").trim()
-        if (override) {
-            var abs = QC.expandToAbsolute(override, homeDir)
-            if (abs) return abs
-            // home not ready: keep $HOME token for cache-response.sh resolve_path
-            if (override.indexOf("~/") === 0)
-                return "$HOME/" + override.substring(2)
-            return override
-        }
-        if (homeDir)
-            return homeDir.replace(/\/+$/, "") + "/.cache/plasma-claude-usage"
-        return "$HOME/.cache/plasma-claude-usage"
-    }
+
 
     function endpointSlugForProvider(ep) {
         if (ep === "codex" || ep === "openai") return "wham-usage"
@@ -865,23 +852,7 @@ Item {
         return "billing"
     }
 
-    function buildResponseCachePaths(profile, endpointSlug) {
-        var root = responseCacheRoot().replace(/\/+$/, "")
-        var now = new Date()
-        var y = now.getFullYear()
-        var mo = pad2(now.getMonth() + 1)
-        var d = pad2(now.getDate())
-        var hms = pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds())
-        var ms3 = pad3(now.getMilliseconds())
-        var provider = profileSlug(effectiveProvider(profile) || profile.provider || "unknown")
-        var slug = profileSlug(profile.id)
-        var ep = profileSlug(endpointSlug || "response")
-        var base = hms + "-" + ms3 + "-" + provider + "-" + slug + "-" + ep + ".json"
-        return {
-            hist: root + "/responses/" + y + "/" + mo + "/" + d + "/" + base,
-            latest: root + "/latest/" + provider + "-" + slug + "-" + ep + ".json"
-        }
-    }
+
 
     function cfgBool(key, fallback) {
         var v = cfgValue(key, fallback)
@@ -907,88 +878,22 @@ Item {
     // body on a single Plasma executable argv (ARG_MAX + process-list leak).
     readonly property int cachePayloadChunkSize: 8192
 
-    function enqueueCacheWrite(cmd) {
-        _cacheWriteQueue = _cacheWriteQueue.concat([cmd])
-        drainCacheWriteQueue()
-    }
 
-    function drainCacheWriteQueue() {
-        if (_cacheWriteBusy) return
-        if (!_cacheWriteQueue.length) return
-        var next = _cacheWriteQueue[0]
-        _cacheWriteQueue = _cacheWriteQueue.slice(1)
-        _cacheWriteAttempt = 1
-        launchCacheWrite(next)
-    }
+
+
 
     // Start (or restart after stall) one cache write; requires !_cacheWriteBusy on first call
-    function launchCacheWrite(cmd) {
-        _cacheWriteBusy = true
-        _cacheWriteInFlightCmd = cmd
-        // Unique env prefix so Plasma never collapses identical command strings
-        _cacheWriteSeq = (_cacheWriteSeq + 1) % 100000
-        var sourceName = "CACHE_WRITE_SEQ=" + _cacheWriteSeq + " " + cmd
-        _cacheWriteInFlightSource = sourceName
-        cacheWriteWatchdog.restart()
-        cacheWriter.connectSource(sourceName)
-    }
+
 
     // B024: executable engine never called onNewData — unstick busy and optionally retry once
-    function onCacheWriteWatchdogFired() {
-        if (!_cacheWriteBusy)
-            return
-        var cmd = _cacheWriteInFlightCmd
-        var src = _cacheWriteInFlightSource
-        var attempt = _cacheWriteAttempt
-        var seq = _cacheWriteSeq
-        console.log("Claude Usage: cache write stalled (onNewData never fired), attempt=",
-                    attempt, "seq=", seq)
-        // Clear in-flight identity first so a late onNewData (e.g. from disconnect) is ignored
-        _cacheWriteInFlightSource = ""
-        _cacheWriteInFlightCmd = ""
-        _cacheWriteBusy = false
-        if (src) {
-            try {
-                cacheWriter.disconnectSource(src)
-            } catch (e) {
-                // disconnect may throw if source already gone
-            }
-        }
-        if (cmd && attempt < cacheWriteMaxAttempts) {
-            _cacheWriteAttempt = attempt + 1
-            launchCacheWrite(cmd)
-            return
-        }
-        if (cmd)
-            console.log("Claude Usage: cache write dropped after stall, attempts=", attempt)
-        _cacheWriteAttempt = 0
-        drainCacheWriteQueue()
-    }
+
 
     /**
      * Expand response-cache root to an absolute path for local shell writes.
      * When $HOME is not yet known, fall back under /tmp so we never create a
      * literal "$HOME/..." directory via shell-quoted paths.
      */
-    function absoluteCacheRoot() {
-        var root = responseCacheRoot().replace(/\/+$/, "")
-        if (root.indexOf("$HOME/") === 0) {
-            if (homeDir)
-                return homeDir.replace(/\/+$/, "") + "/" + root.substring("$HOME/".length)
-            return "/tmp/plasma-claude-usage-cache"
-        }
-        if (root.indexOf("${HOME}/") === 0) {
-            if (homeDir)
-                return homeDir.replace(/\/+$/, "") + "/" + root.substring("${HOME}/".length)
-            return "/tmp/plasma-claude-usage-cache"
-        }
-        if (root.charAt(0) === "~" && root.length > 1 && root.charAt(1) === "/") {
-            if (homeDir)
-                return homeDir.replace(/\/+$/, "") + root.substring(1)
-            return "/tmp/plasma-claude-usage-cache"
-        }
-        return root
-    }
+
 
     function nextPendingPayloadPath() {
         _cachePendingSeq = (_cachePendingSeq + 1) % 1000000
@@ -1040,51 +945,7 @@ Item {
             enqueueCacheWrite(cmds[j])
     }
 
-    function cacheResponse(profile, endpointSlug, url, httpStatus, responseText) {
-        if (!cfgBool("cacheResponses", true))
-            return
-        if (!profile)
-            return
-        try {
-            var paths = buildResponseCachePaths(profile, endpointSlug)
-            var rawText = responseText === undefined || responseText === null ? "" : String(responseText)
-            // Truncation backstop: usage JSON is small, but error HTML can be huge
-            var maxRaw = 200000
-            var truncated = false
-            if (rawText.length > maxRaw) {
-                rawText = rawText.substring(0, maxRaw)
-                truncated = true
-            }
-            var body = null
-            var raw = null
-            if (rawText.length) {
-                try {
-                    body = JSON.parse(rawText)
-                } catch (e) {
-                    body = null
-                    raw = rawText
-                }
-            }
-            var now = new Date()
-            var envelope = {
-                savedAt: now.toISOString(),
-                savedAtMs: now.getTime(),
-                provider: effectiveProvider(profile) || profile.provider || "",
-                profileId: profile.id || "",
-                endpoint: endpointSlug || "",
-                url: url || "",
-                httpStatus: httpStatus || 0,
-                body: body,
-                raw: raw,
-                truncated: truncated
-            }
-            var payload = JSON.stringify(envelope)
-            // B023: never put the full envelope on cache-response.sh argv
-            enqueuePayloadFileCacheWrite(paths.hist, paths.latest, payload)
-        } catch (e) {
-            console.log("Claude Usage: cacheResponse error", e)
-        }
-    }
+
 
     /**
      * Build a unique executable source that always shell-quotes the path (B006)
@@ -1252,14 +1113,7 @@ Item {
      * Fire-and-forget; refresh never waits for cache persistence.
      */
     function recordRefreshExchange(exchange) {
-        if (!exchange) return
-        var cacheProf = {
-            id: exchange.profileId || "",
-            provider: exchange.provider || "",
-            opencodeSlot: exchange.opencodeSlot || ""
-        }
-        cacheResponse(cacheProf, exchange.endpoint, exchange.url,
-                      exchange.status || 0, exchange.responseText || "")
+        responseCache.recordExchange(exchange)
     }
 
     /**
@@ -1747,36 +1601,19 @@ Item {
         }
     }
 
-    Plasma5Support.DataSource {
-        id: cacheWriter
-        engine: "executable"
-        connectedSources: []
-        onNewData: function(sourceName, data) {
-            var exitCode = data["exit code"] !== undefined ? data["exit code"] : data["exitCode"]
-            var stderr = data["stderr"] || ""
-            disconnectSource(sourceName)
-            // Stale completion after watchdog already moved on — do not double-drain
-            if (sourceName !== controller._cacheWriteInFlightSource)
-                return
-            cacheWriteWatchdog.stop()
-            controller._cacheWriteBusy = false
-            controller._cacheWriteInFlightCmd = ""
-            controller._cacheWriteInFlightSource = ""
-            controller._cacheWriteAttempt = 0
-            if (exitCode && exitCode !== 0)
-                console.log("Claude Usage: cache write failed exit=", exitCode, stderr)
-            controller.drainCacheWriteQueue()
-        }
+    LocalResponseCache {
+        id: responseCache
+        enabled: controller.cfgValue("cacheResponses", true) !== false
+                 && controller.cfgValue("cacheResponses", true) !== 0
+                 && controller.cfgValue("cacheResponses", true) !== "false"
+                 && controller.cfgValue("cacheResponses", true) !== "0"
+        configuredRoot: String(controller.cfgValue("responseCachePath", "") || "")
+        homeDir: controller.homeDir
     }
 
+    
     // B024: if cacheWriter.onNewData never fires, busy would stay true and drop all later caches
-    Timer {
-        id: cacheWriteWatchdog
-        interval: controller.cacheWriteWatchdogMs
-        repeat: false
-        onTriggered: controller.onCacheWriteWatchdogFired()
-    }
-
+    
     // Resolve $HOME once with a fixed command (B006) — never interpolate user strings here
     Plasma5Support.DataSource {
         id: homeProbe
