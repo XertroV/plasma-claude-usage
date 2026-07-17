@@ -49,13 +49,16 @@ function directChildTypes(objectBlock) {
     return types
 }
 
+function cardsBlockWithin(scrollViewBlock) {
+    return objectBlockAt(scrollViewBlock, scrollViewBlock.indexOf("CardsView {"))
+}
+
 const fullStart = src.indexOf("fullRepresentation: Item {")
 const fullSource = src.slice(fullStart)
 const scrollStart = fullSource.indexOf("PlasmaComponents.ScrollView {")
-const cardsStart = fullSource.indexOf("CardsView {", scrollStart)
 const headerSource = fullSource.slice(0, scrollStart)
 const scrollBlock = objectBlockAt(fullSource, scrollStart)
-const cardsBlock = objectBlockAt(fullSource, cardsStart)
+const cardsBlock = cardsBlockWithin(scrollBlock)
 const updatedIndex = fullSource.indexOf('root.i18nObj.tr("Updated:")')
 const footerStart = fullSource.lastIndexOf("RowLayout {", updatedIndex)
 const footerBlock = objectBlockAt(fullSource, footerStart)
@@ -68,7 +71,7 @@ const expectedFooterChildren = [
 
 assert(fullStart >= 0, "full representation exists")
 assert(scrollStart >= 0 && scrollBlock !== "", "full representation scroll view exists")
-assert(cardsStart > scrollStart && cardsBlock !== "", "cards remain inside the scroll view")
+assert(cardsBlock !== "", "cards remain inside the scroll view")
 assert(scrollBlock.includes("QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff"),
     "horizontal card scrollbar is disabled")
 assert(!scrollBlock.includes("QQC2.ScrollBar.vertical.policy: QQC2.ScrollBar.AlwaysOff"),
@@ -78,7 +81,8 @@ assert(/height:\s*Math\.max\(implicitHeight,\s*fullScroll\.availableHeight\s*>\s
 assert(!headerSource.includes('root.i18nObj.tr("AI Usage")'), "header omits the AI Usage label")
 assert(!headerSource.includes('../icons/claude.svg'), "header omits the Claude logo")
 assert(!headerSource.includes('icon.name: "view-refresh"'), "header omits the refresh button")
-assert(footerStart > cardsStart && footerBlock.includes('root.i18nObj.tr("Updated:")'),
+assert(footerStart >= scrollStart + scrollBlock.length
+       && footerBlock.includes('root.i18nObj.tr("Updated:")'),
     "status label is in the footer below the cards")
 assert(footerChildren.join("|") === expectedFooterChildren.join("|"),
     "footer direct children are Refresh, Updated, then Configure")
@@ -89,6 +93,10 @@ const footerWithSpacer = footerBlock.replace(
 )
 assert(directChildTypes(footerWithSpacer).join("|") !== expectedFooterChildren.join("|"),
     "footer-order check detects an inserted spacer")
+
+const scrollWithoutCards = scrollBlock.replace(cardsBlock, "")
+assert(cardsBlockWithin(scrollWithoutCards) === "",
+    "scroll containment check detects cards moved outside the scroll view")
 
 if (failed) {
     console.error(`\n${failed} failure(s)`)
