@@ -1,14 +1,18 @@
 ---
+claimed_at: "2026-07-17T02:28:17Z"
+claimed_by: cli-user
+completed_at: null
 complexity: medium
 created_at: "2026-07-15T16:08:26Z"
 depends_on: []
 estimate_hours: 1
 id: B037
 priority: high
-status: pending
+started_at: "2026-07-17T02:28:17Z"
+status: in_progress
 tags: []
 title: Card has a bit of dead space on RHS of progress bars
-updated_at: "2026-07-15T16:08:26Z"
+updated_at: "2026-07-17T02:28:17Z"
 ---
 
 Card has a bit of dead space on RHS of progress bars
