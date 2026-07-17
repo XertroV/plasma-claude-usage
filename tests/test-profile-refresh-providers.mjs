@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadQmlJs } from "./helpers/load-qml-js.mjs"
+import { RESPONSE_CACHE_ENDPOINT_CASES } from "./fixtures/response-cache-endpoints.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
@@ -464,5 +465,125 @@ assert.equal(snap.auth.token, "snap-tok")
 assert.equal(snap.auth.planName, "Max 5x")
 assert.equal(snapProfile.planName, "Keep")
 assert.equal(snapProfile.accessToken, undefined)
+
+// ── Shared response-cache endpoint fixture (request seam) ───────────
+// Locks { key, endpoint } at prepare() for every direct alias, OpenCode
+// alias/fallback, and both Grok legs. Same fixture as cache path/envelope.
+assert.ok(!RESPONSE_CACHE_ENDPOINT_CASES.some(c => /gemini/i.test(c.name)
+    || /gemini/i.test(c.provider) || /gemini/i.test(c.endpoint)),
+    "no Gemini fixture/request endpoint exists")
+
+function credsForEndpointCase(c) {
+    // Direct anthropic/openai aliases are endpoint-selector aliases, reached as
+    // OpenCode effective providers (or equivalent credential shapes).
+    if (c.provider === "claude") {
+        return JSON.stringify({ claudeAiOauth: { accessToken: "tok-" + c.name } })
+    }
+    if (c.provider === "anthropic") {
+        return JSON.stringify({ anthropic: { access: "tok-" + c.name } })
+    }
+    if (c.provider === "codex") {
+        return JSON.stringify({ tokens: { access_token: "tok-" + c.name, account_id: "acct" } })
+    }
+    if (c.provider === "openai") {
+        return JSON.stringify({ openai: { access: "tok-" + c.name, accountId: "oa" } })
+    }
+    if (c.provider === "zai") {
+        return JSON.stringify({ "zai-coding-plan": { key: "tok-" + c.name } })
+    }
+    if (c.provider === "kimi") {
+        return JSON.stringify({ key: "tok-" + c.name })
+    }
+    if (c.provider === "minimax") {
+        return JSON.stringify({ oauth: { access_token: "tok-" + c.name } })
+    }
+    if (c.provider === "grok") {
+        return JSON.stringify({
+            accounts: {
+                main: {
+                    key: "tok-" + c.name,
+                    expires_at: "2099-01-01T00:00:00Z",
+                    create_time: "2026-01-01T00:00:00Z"
+                }
+            }
+        })
+    }
+    if (c.provider === "opencode") {
+        // credentialAlias documents OpenCode source keys; pick one matching slot.
+        if (!c.opencodeSlot || c.opencodeSlot === "anthropic") {
+            // missing/default and explicit anthropic both resolve to anthropic
+            return JSON.stringify({ anthropic: { access: "tok-" + c.name } })
+        }
+        if (c.opencodeSlot === "openai") {
+            return JSON.stringify({ openai: { access: "tok-" + c.name, accountId: "oa" } })
+        }
+        if (c.opencodeSlot === "minimax") {
+            return JSON.stringify({ "minimax-coding-plan": { access: "tok-" + c.name } })
+        }
+        if (c.opencodeSlot === "zai") {
+            return JSON.stringify({ "zai-coding-plan": { key: "tok-" + c.name } })
+        }
+        if (c.opencodeSlot === "kimi") {
+            return JSON.stringify({ "kimi-for-coding": { key: "tok-" + c.name } })
+        }
+    }
+    throw new Error("no credentials mapping for " + c.name)
+}
+
+function profileForEndpointCase(c) {
+    // anthropic/openai top-level rows are selector aliases: exercise via opencode
+    // so prepare() yields the same effective provider + endpoint as the cache seam.
+    if (c.provider === "anthropic" || c.provider === "openai") {
+        return { id: "ep-" + c.name, provider: "opencode" }
+    }
+    const p = { id: "ep-" + c.name, provider: c.provider }
+    if (c.provider === "opencode" && c.opencodeSlot)
+        p.opencodeSlot = c.opencodeSlot
+    return p
+}
+
+// Grok appears twice in the fixture (default + credits); prepare once and
+// match each request leg by requestKey.
+const preparedByName = new Map()
+for (const c of RESPONSE_CACHE_ENDPOINT_CASES) {
+    const profile = profileForEndpointCase(c)
+    const key = profile.provider + "|" + (c.opencodeSlot || c.provider) + "|" + c.effectiveProvider
+    if (!preparedByName.has(key)) {
+        const prep = Providers.prepare(
+            profile,
+            credsForEndpointCase(c),
+            NOW
+        )
+        preparedByName.set(key, prep)
+    }
+    const prep = preparedByName.get(key)
+    assert.ok(prep.requests.length > 0, c.name + " must produce requests")
+    assert.equal(prep.effectiveProvider, c.effectiveProvider, c.name + " effectiveProvider")
+    const match = prep.requests.find(r => r.key === c.requestKey)
+    assert.ok(match, c.name + " missing request key " + c.requestKey
+        + " got " + prep.requests.map(r => r.key).join(","))
+    assert.equal(match.endpoint, c.endpoint, c.name + " endpoint")
+    assert.equal(match.key, c.requestKey, c.name + " key")
+}
+
+// anthropic-accounts multi-account OpenCode path also yields oauth-usage
+const ocAccountsEp = Providers.prepare(
+    {
+        id: "oc-accounts-ep",
+        provider: "opencode",
+        profileKey: "anthropic-accounts",
+        opencodeAccountIndex: 0
+    },
+    JSON.stringify({ accounts: [{ access: "acct-tok" }] }),
+    NOW
+)
+assert.equal(ocAccountsEp.effectiveProvider, "anthropic")
+assert.equal(ocAccountsEp.requests[0].key, "default")
+assert.equal(ocAccountsEp.requests[0].endpoint, "oauth-usage")
+
+// Source has no Gemini request construction
+const providersSrc = readFileSync(
+    join(root, "contents/ui/js/ProfileRefreshProviders.js"), "utf8")
+assert.doesNotMatch(providersSrc, /gemini/i)
 
 console.log("All profile refresh provider tests passed.")

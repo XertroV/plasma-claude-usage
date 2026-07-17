@@ -15,17 +15,58 @@ import { RESPONSE_CACHE_ENDPOINT_CASES } from "./fixtures/response-cache-endpoin
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
 const Pipeline = loadQmlJs(
-    join(root, "contents/ui/js/ResponseCachePipeline.js"), {}, ["create"])
+    join(root, "contents/ui/js/ResponseCachePipeline.js"), {},
+    ["create", "buildCommands"])
 
 const PATH_TIME = Date.parse("2026-07-17T10:11:12.013Z")
 const SAVE_TIME = Date.parse("2026-07-17T10:11:12.014Z")
 const PENDING_TIME = Date.parse("2026-07-17T10:11:12.015Z")
+
+// History paths use local wall-clock fields (Date#getHours etc.), not UTC.
+// Derive expected path components from the same epoch so TZ=UTC is not required.
+function pad2(n) {
+    n = Math.floor(Number(n) || 0)
+    return n < 10 ? "0" + n : String(n)
+}
+function pad3(n) {
+    n = Math.floor(Number(n) || 0) % 1000
+    if (n < 10) return "00" + n
+    if (n < 100) return "0" + n
+    return String(n)
+}
+function localHistoryStamp(ms) {
+    const d = new Date(ms)
+    const y = d.getFullYear()
+    const mo = pad2(d.getMonth() + 1)
+    const day = pad2(d.getDate())
+    const hms = pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds())
+    const ms3 = pad3(d.getMilliseconds())
+    return { y, mo, day, hms, ms3, dir: y + "/" + mo + "/" + day, stamp: hms + "-" + ms3 }
+}
+const PATH_STAMP = localHistoryStamp(PATH_TIME)
 
 const exchange = {
     key: "usage", profileId: "open/code one", generation: 3,
     provider: "opencode", opencodeSlot: "anthropic",
     endpoint: "oauth-usage", url: "https://example.test/usage",
     status: 200, responseText: '{"ok":true}', fromTimeout: false
+}
+
+// --- caller interface: recordExchange only on public fake seam -----------
+{
+    const fake = createFakeResponseCache(Pipeline, {}, [])
+    assert.equal(typeof fake.recordExchange, "function")
+    assert.equal(fake.recordExchange.length, 1)
+    // fake exposes test controls; production caller only uses recordExchange
+    assert.deepEqual(
+        Object.keys(fake).filter(k => typeof fake[k] === "function").sort(),
+        ["finish", "fireWatchdog", "recordExchange", "state"].sort()
+    )
+    // pure pipeline factory returns recordExchange as the only caller method
+    // plus internal completion/watchdog/test controls
+    const bare = createFakeResponseCache(Pipeline, {}, [PATH_TIME, SAVE_TIME, PENDING_TIME])
+    bare.recordExchange(exchange)
+    assert.equal(bare.effects.commands.length, 1)
 }
 
 // --- shell/payload helpers -------------------------------------------------
@@ -114,8 +155,9 @@ function baseExchange(over = {}) {
     assert.ok(snapshot.queue.length >= 1)
 
     const queuedText = [fake.effects.commands[0].command, ...snapshot.queue].join("\n")
-    assert.match(queuedText,
-        /responses\/2026\/07\/17\/101112-013-anthropic-open-code-one-oauth-usage\.json/)
+    assert.match(queuedText, new RegExp(
+        "responses/" + PATH_STAMP.dir + "/" + PATH_STAMP.stamp
+        + "-anthropic-open-code-one-oauth-usage\\.json"))
     assert.match(queuedText,
         /latest\/anthropic-open-code-one-oauth-usage\.json/)
     assert.match(queuedText, /pending\/p-1784283072015-1\.json/)
@@ -178,8 +220,9 @@ function baseExchange(over = {}) {
         const ep = c.effectiveProvider
         const slug = "prof-" + i
         const end = c.endpoint
+        const stamp = localHistoryStamp(PATH_TIME + i * 10)
         assert.match(all, new RegExp(
-            "responses/2026/07/17/\\d{6}-\\d{3}-"
+            "responses/" + stamp.dir + "/" + stamp.stamp + "-"
             + ep + "-" + slug + "-" + end + "\\.json"))
         assert.match(all, new RegExp(
             "latest/" + ep + "-" + slug + "-" + end + "\\.json"))
@@ -291,15 +334,21 @@ function baseExchange(over = {}) {
 
 {
     // first value → history date/time only; second → savedAt; third → pending name
+    // Use far-apart local calendar days so path components cannot leak into envelope.
     const tPath = Date.parse("2026-01-02T03:04:05.006Z")
     const tSave = Date.parse("2026-08-09T10:11:12.123Z")
     const tPend = 999000111222
+    const pathStamp = localHistoryStamp(tPath)
+    const saveStamp = localHistoryStamp(tSave)
     const fake = createFakeResponseCache(Pipeline, {}, [tPath, tSave, tPend])
     fake.recordExchange(exchange)
     const text = allCommandStrings(fake).join("\n")
     assert.deepEqual(fake.effects.clockReads, [tPath, tSave, tPend])
-    assert.match(text, /responses\/2026\/01\/02\/030405-006-/)
-    assert.doesNotMatch(text, /responses\/2026\/08\/09\//)
+    assert.match(text, new RegExp(
+        "responses/" + pathStamp.dir + "/" + pathStamp.stamp + "-"))
+    // path clock owns history date; save clock must not rewrite the path directory
+    if (pathStamp.dir !== saveStamp.dir)
+        assert.doesNotMatch(text, new RegExp("responses/" + saveStamp.dir + "/"))
     assert.match(text, /"savedAt":"2026-08-09T10:11:12\.123Z"/)
     assert.match(text, new RegExp('"savedAtMs":' + tSave))
     assert.match(text, /pending\/p-999000111222-1\.json/)
@@ -566,11 +615,8 @@ function countFirstChunks(commandStrings) {
 }
 
 // --- empty payload staging (`: > pending`) via zero-length body path -------
-// Force empty staging by using buildCommands contract: when payload is "",
-// first command uses `: >` not printf. Since envelope always stringifies non-empty,
-// verify the empty branch by loading a tiny direct check against algorithm:
-// After full FIFO drain of a normal exchange, command list must not use `: >`
-// for non-empty payloads; and empty-string staging is present in source (parity).
+// Envelope stringify is always non-empty through recordExchange; exercise the
+// empty branch of buildCommands directly, and prove recordExchange never uses it.
 {
     const fake = createFakeResponseCache(Pipeline, {}, [PATH_TIME, SAVE_TIME, PENDING_TIME])
     fake.recordExchange(baseExchange({ responseText: "" }))
@@ -578,6 +624,24 @@ function countFirstChunks(commandStrings) {
     // empty response still produces non-empty envelope JSON → printf, not `: >`
     assert.ok(cmds.some(c => c.indexOf("printf %s ") >= 0))
     assert.ok(!cmds.some(c => /&& : > /.test(c)))
+
+    const settings = {
+        cacheScript: "/widget/contents/scripts/cache-response.sh",
+        payloadChunkSize: 8192
+    }
+    const paths = {
+        hist: "/home/tester/.cache/plasma-claude-usage/responses/2026/07/17/x.json",
+        latest: "/home/tester/.cache/plasma-claude-usage/latest/x.json"
+    }
+    const pending = "/home/tester/.cache/plasma-claude-usage/pending/p-1-1.json"
+    const emptyCmds = Pipeline.buildCommands(settings, paths, pending, "")
+    assert.equal(emptyCmds.length, 2)
+    assert.match(emptyCmds[0],
+        /umask 077; mkdir -p -- '\/home\/tester\/\.cache\/plasma-claude-usage\/pending' && : > '\/home\/tester\/\.cache\/plasma-claude-usage\/pending\/p-1-1\.json'/)
+    assert.doesNotMatch(emptyCmds[0], /printf %s/)
+    assert.match(emptyCmds[1],
+        /^bash '\/widget\/contents\/scripts\/cache-response\.sh' '.*' '.*' '.*'$/)
+    assert.ok(emptyCmds[1].indexOf("{") < 0, "final argv remains path-only for empty payload")
 }
 
 // --- normal FIFO advancement ----------------------------------------------
