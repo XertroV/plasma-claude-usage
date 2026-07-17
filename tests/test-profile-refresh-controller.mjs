@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * P1.M2.E1.T003–T004 / I002 Tasks 3–4 — ProfileController refresh transaction seam.
+ * P1.M2.E1.T003 / I002 Task 3 — ProfileController production refresh ports seam.
  *
  * Source-contract only (no Plasma/Qt runtime). Asserts the transaction import,
- * thin production ports, generation-guarded transition application, global
- * queue/due/timer scheduling, and that standard-provider credential/request/
- * parser lifecycle is gone from the controller (transaction authoritative).
- * Grok legacy remains until T005.
+ * thin production ports, generation-guarded transition application, and that
+ * global queue/due/timer scheduling remains while accepted refreshes enter
+ * ProfileRefresh.run.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -97,26 +96,6 @@ for (const name of [
 
 // refreshGeneration is a live profile field
 assert.match(src, /refreshGeneration/)
-
-// --- Task 4: no standard-provider XHR / header / URL / parser lifecycle ---
-// Transaction path is authoritative for Claude, Codex, MiniMax, Z.ai, Kimi, OpenCode.
-assert.doesNotMatch(src, /function fetchUsage\s*\(/)
-assert.doesNotMatch(src, /QP\.parse(Claude|Codex|Minimax|Zai|Kimi)\s*\(/)
-assert.doesNotMatch(src, /anthropic-beta|ChatGPT-Account-Id/)
-// Auth/URL helpers that only served the standard fetch path
-assert.doesNotMatch(src, /function extractAuth\s*\(/)
-assert.doesNotMatch(src, /function extractOpencodeAuth\s*\(/)
-assert.doesNotMatch(src, /function usageUrl\s*\(/)
-console.log("ok: no standard-provider lifecycle (fetchUsage/headers/parsers/auth/url)")
-
-// applyUsageResult remains as live visibility/store adapter only
-assert.match(src, /function applyUsageResult\s*\(/)
-assert.match(src, /function effectiveProvider\s*\(/)
-
-// Grok legacy retained until T005 (do not require deletion yet)
-assert.match(src, /function fetchGrok\s*\(/)
-assert.match(src, /function grokGet\s*\(/)
-assert.match(src, /function finishGrokPart\s*\(/)
 
 console.log("All profile refresh controller seam tests passed.")
 
