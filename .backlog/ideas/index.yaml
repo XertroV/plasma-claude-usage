@@ -8,8 +8,15 @@ ideas:
       status: done
       tags: []
       title: Collapse quota presentation policy
-    - file: I002-deepen-the-profile-refresh-tra.todo
+    - complexity: high
+      depends_on: []
+      estimate_hours: 10
+      file: I002-deepen-the-profile-refresh-tra.todo
       id: I002
+      priority: high
+      status: in_progress
+      tags: []
+      title: Deepen the profile refresh transaction
     - file: I003-deepen-the-profile-registry.todo
       id: I003
     - file: I004-deepen-visible-quota-configura.todo
