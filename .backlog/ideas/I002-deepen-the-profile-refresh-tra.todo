@@ -1,0 +1,48 @@
+---
+complexity: high
+created_at: "2026-07-17T01:47:37Z"
+depends_on: []
+estimate_hours: 10
+id: I002
+priority: high
+status: pending
+tags:
+    - architecture-review
+    - deep-module
+    - profile-refresh
+    - mock-seam
+title: Deepen the profile refresh transaction
+updated_at: "2026-07-17T01:47:37Z"
+---
+Source: `file:///tmp/architecture-review-20260715-224729.html` (Candidate 02)
+
+Rating: **Strong**
+Test seam: **mock**
+
+Relevant files:
+- `contents/ui/ProfileController.qml`
+- `contents/ui/js/QuotaParsers.js`
+- `fixture-examples/*.json`
+
+## Problem
+
+`fetchUsage` is 98 lines and coordinates identity, credentials, provider branching, transport, parsing, caching, backoff, and profile mutation; fixture data never crosses that interface. The current lifecycle leaks through the controller from refresh callers through provider-specific XHR or Grok multi-request handling, parsing, state mutation/backoff, and the response-cache queue.
+
+## Proposed direction
+
+Deepen refresh into one transaction module that owns identity, credentials, transport, parsing, backoff, and outcome. Keep third-party transport behind Claude, Codex, Grok, other-provider, and mock adapters at a real seam. Return a coherent profile outcome.
+
+## Deletion test
+
+Delete the current orchestration and asynchronous invariants spread through timers, callbacks, parsers, and index-based mutation.
+
+## Expected wins
+
+- One refresh transaction gives lifecycle rules locality.
+- Profile identity survives asynchronous work.
+- Fixture tests exercise the actual interface.
+- A mock adapter exercises failures.
+
+## Evidence trail
+
+B001, B002, B008, B013, B025, B026, B029, and B033 all touched this lifecycle.
