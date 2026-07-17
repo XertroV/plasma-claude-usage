@@ -31,6 +31,16 @@ RowLayout {
     spacing: Kirigami.Units.smallSpacing
     Layout.fillWidth: true
 
+    // Fixed text columns (same on every row) so pace bars share one width and columns align.
+    // Keep text slots lean; the bar is the only fillWidth child.
+    readonly property real periodColWidth: compact
+            ? Kirigami.Units.gridUnit * 2
+            : Kirigami.Units.gridUnit * 2.5
+    readonly property real percentColWidth: Kirigami.Units.gridUnit * 1.6
+    readonly property real countdownColWidth: compact
+            ? Kirigami.Units.gridUnit * 2.5
+            : Kirigami.Units.gridUnit * 3
+
     readonly property real usagePct: windowData ? (windowData.usagePercent || 0) : 0
     // B027: derive from nowMs so pace bars tick without rebuilding window/profile models
     readonly property real timePct: {
@@ -51,16 +61,15 @@ RowLayout {
         color: isSkeleton
                ? Kirigami.Theme.disabledTextColor
                : Kirigami.Theme.textColor
-        // Tight period slot so short labels (5h/7d) do not reserve extra bar width.
-        Layout.preferredWidth: Math.min(implicitWidth, Kirigami.Units.gridUnit * 2)
-        Layout.maximumWidth: compact ? Kirigami.Units.gridUnit * 2.5
-                                     : Kirigami.Units.gridUnit * 3
+        Layout.preferredWidth: rowRoot.periodColWidth
+        Layout.minimumWidth: rowRoot.periodColWidth
+        Layout.maximumWidth: rowRoot.periodColWidth
         Layout.fillWidth: false
         elide: Text.ElideRight
     }
 
     PaceBar {
-        // preferredWidth 0 + fillWidth: claim all leftover after fixed text columns
+        // Sole expanding column — equal leftover width on every row of the card.
         Layout.fillWidth: true
         Layout.preferredWidth: 0
         Layout.minimumWidth: Kirigami.Units.gridUnit * 2
@@ -78,10 +87,9 @@ RowLayout {
         font.pixelSize: rowRoot.textPixelSize
         font.bold: !isSkeleton
         color: isSkeleton ? Kirigami.Theme.disabledTextColor : rowRoot.fillColor
-        // Natural width for "0%".."100%" — no fixed 2gu dead band before countdown.
-        Layout.preferredWidth: implicitWidth
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 1.25
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 1.75
+        Layout.preferredWidth: rowRoot.percentColWidth
+        Layout.minimumWidth: rowRoot.percentColWidth
+        Layout.maximumWidth: rowRoot.percentColWidth
         Layout.fillWidth: false
         horizontalAlignment: Text.AlignRight
     }
@@ -94,10 +102,10 @@ RowLayout {
         }
         font.pixelSize: rowRoot.textPixelSize
         color: Kirigami.Theme.disabledTextColor
-        // Thin countdown: natural text width, capped so long "6d 12h" cannot starve the bar.
-        Layout.preferredWidth: implicitWidth
-        Layout.maximumWidth: compact ? Kirigami.Units.gridUnit * 2.75
-                                     : Kirigami.Units.gridUnit * 3.25
+        // Fixed thin countdown slot: short text sits right-aligned; long text elides.
+        Layout.preferredWidth: rowRoot.countdownColWidth
+        Layout.minimumWidth: rowRoot.countdownColWidth
+        Layout.maximumWidth: rowRoot.countdownColWidth
         Layout.fillWidth: false
         elide: Text.ElideRight
         horizontalAlignment: Text.AlignRight

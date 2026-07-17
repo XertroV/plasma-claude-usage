@@ -86,24 +86,32 @@ const percentageLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
 const countdownLabel = findObjectBlock(quotaRow, "PlasmaComponents.Label",
     "QC.formatCountdown(windowData.resetAtMs, nowMs)")
 
-assert(periodLabel.includes("Layout.preferredWidth: Math.min(implicitWidth, Kirigami.Units.gridUnit * 2)")
+assert(quotaRow.includes("periodColWidth")
+       && quotaRow.includes("percentColWidth")
+       && quotaRow.includes("countdownColWidth"),
+    "quota rows declare shared fixed column widths for alignment")
+assert(periodLabel.includes("Layout.preferredWidth: rowRoot.periodColWidth")
+       && periodLabel.includes("Layout.minimumWidth: rowRoot.periodColWidth")
+       && periodLabel.includes("Layout.maximumWidth: rowRoot.periodColWidth")
        && periodLabel.includes("elide: Text.ElideRight")
        && periodLabel.includes("Layout.fillWidth: false"),
-    "period column stays tight and elided")
+    "period column is a fixed aligned slot and elides")
 assert(paceBar.includes("Layout.fillWidth: true")
        && paceBar.includes("Layout.preferredWidth: 0"),
-    "pace bar receives remaining quota-row width")
-assert(percentageLabel.includes("Layout.preferredWidth: implicitWidth")
-       && percentageLabel.includes("Layout.maximumWidth: Kirigami.Units.gridUnit * 1.75")
+    "pace bar receives remaining equal quota-row width")
+assert(percentageLabel.includes("Layout.preferredWidth: rowRoot.percentColWidth")
+       && percentageLabel.includes("Layout.minimumWidth: rowRoot.percentColWidth")
+       && percentageLabel.includes("Layout.maximumWidth: rowRoot.percentColWidth")
        && percentageLabel.includes("horizontalAlignment: Text.AlignRight")
        && percentageLabel.includes("Layout.fillWidth: false"),
-    "percentage column is natural-width and right-aligned")
-assert(countdownLabel.includes("Layout.preferredWidth: implicitWidth")
-       && countdownLabel.includes("Kirigami.Units.gridUnit * 2.75")
+    "percentage column is a fixed aligned slot and right-aligned")
+assert(countdownLabel.includes("Layout.preferredWidth: rowRoot.countdownColWidth")
+       && countdownLabel.includes("Layout.minimumWidth: rowRoot.countdownColWidth")
+       && countdownLabel.includes("Layout.maximumWidth: rowRoot.countdownColWidth")
        && countdownLabel.includes("elide: Text.ElideRight")
        && countdownLabel.includes("horizontalAlignment: Text.AlignRight")
        && countdownLabel.includes("Layout.fillWidth: false"),
-    "countdown uses a thin natural width and remains right-aligned")
+    "countdown is a thin fixed aligned slot and right-aligned")
 assert(count(quotaRow, "Layout.fillWidth: true") === 2,
     "only the quota row and pace bar opt into fill width")
 assert(accountCard.includes("textPixelSize: cardRoot.contentFontPixelSize"),

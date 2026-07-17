@@ -148,13 +148,17 @@ TestCase {
         compare(secondPct.length, 1)
         compare(firstTime.length, 1)
         compare(secondTime.length, 1)
+        // Fixed column slots: equal widths and shared left edges for % and countdown.
         compare(firstPct[0].width, secondPct[0].width)
+        compare(firstTime[0].width, secondTime[0].width)
+        var firstPctX = firstPct[0].mapToItem(view, 0, 0).x
+        var secondPctX = secondPct[0].mapToItem(view, 0, 0).x
         var firstTimeX = firstTime[0].mapToItem(view, 0, 0).x
         var secondTimeX = secondTime[0].mapToItem(view, 0, 0).x
-        compare(firstTime[0].width, firstTime[0].implicitWidth)
-        compare(secondTime[0].width, secondTime[0].implicitWidth)
-        verify(firstTime[0].width !== secondTime[0].width,
-               "different countdown lengths should consume different natural widths")
+        verify(Math.abs(firstPctX - secondPctX) < 1,
+               "percentage columns should share a left edge")
+        verify(Math.abs(firstTimeX - secondTimeX) < 1,
+               "countdown columns should share a left edge")
         verify(Math.abs((firstTimeX + firstTime[0].width)
                         - (secondTimeX + secondTime[0].width)) < 1,
                "countdown right edges should align within one pixel")
