@@ -725,7 +725,7 @@ Also assert `ProfileRefresh.run`, stable ID/generation checks, thin port functio
 
 - [ ] **Step 2: Remove dead imports/functions/fields/comments**
 
-Delete any now-unused controller lifecycle helper, `QuotaParsers.js` import, old generation fields (`usageFetchGen`, `grokFetchGen`), and stale B001/B008/B033 comments. Retain one generic `refreshGeneration`, comments documenting the transaction seam, and cache-owned helpers such as `effectiveProvider`, `endpointSlugForProvider`, and `grokEndpointSlug` until I005 relocates the cache pipeline.
+Delete any now-unused controller lifecycle helper—including `endpointSlugForProvider` and `grokEndpointSlug` after request specs carry endpoint slugs—plus the `QuotaParsers.js` import, old generation fields (`usageFetchGen`, `grokFetchGen`), and stale B001/B008/B033 comments. Retain one generic `refreshGeneration`, comments documenting the transaction seam, and the still-used cache metadata helper `effectiveProvider` until I005 relocates the cache pipeline.
 
 - [ ] **Step 3: Run the complete serial suite**
 
