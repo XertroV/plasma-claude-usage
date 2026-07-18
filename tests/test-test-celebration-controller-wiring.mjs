@@ -149,10 +149,19 @@ function functionBlock(source, name) {
     return blockAt(source, `function ${name}(`)
 }
 
-function position(block, text, description) {
-    const found = block.indexOf(text)
-    assert.notEqual(found, -1, `missing ${description}`)
+function position(code, text, description) {
+    const found = code.indexOf(text)
+    assert.notEqual(found, -1, `missing executable ${description}`)
     return found
+}
+
+function emptyOutputGuardPosition(block) {
+    const code = codeMask(block)
+    const match = /\bif\s*\(\s*String\s*\(\s*stdout\s*\)\.trim\s*\(\s*\)\s*===\s*\)\s*return\b/.exec(code)
+    assert.ok(match, "missing executable exact empty-output guard")
+    const rawStatement = block.slice(match.index, match.index + match[0].length)
+    assert.match(rawStatement, /===\s*""/, "empty-output guard must compare against the empty string")
+    return match.index
 }
 
 function validate(controller, main, cardsView) {
@@ -169,35 +178,41 @@ function validate(controller, main, cardsView) {
 
     // Polling is periodic and guard-first before the executable source is connected.
     const poll = functionBlock(controller, "pollTestCelebration")
-    assert.match(controller, /property bool testCelebrationPollBusy:\s*false\b/)
-    const guardAt = position(poll, "if (testCelebrationPollBusy) return", "poll busy guard")
-    const setBusyAt = position(poll, "testCelebrationPollBusy = true", "poll busy assignment")
-    const commandAt = position(poll, "var command =", "bridge command construction")
-    const connectAt = position(poll, "testCelebrationSource.connectSource(command)", "source connection")
+    const pollCode = codeMask(poll)
+    assert.match(codeMask(controller), /property bool testCelebrationPollBusy:\s*false\b/)
+    const guardAt = position(pollCode, "if (testCelebrationPollBusy) return", "poll busy guard")
+    const setBusyAt = position(pollCode, "testCelebrationPollBusy = true", "poll busy assignment")
+    const commandAt = position(pollCode, "var command =", "bridge command construction")
+    const connectAt = position(pollCode, "testCelebrationSource.connectSource(command)", "source connection")
     assert.ok(guardAt < setBusyAt && setBusyAt < commandAt && commandAt < connectAt,
         "poll must guard, set busy, construct command, then connect in that order")
-    assert.match(poll, /bash\s+"\s*\+\s*QuotaReset\.shellQuote\(testCelebrationBridgeScript\)\s*\+\s*" take"/)
-    assert.match(poll, /catch\s*\([^)]*\)[\s\S]*testCelebrationPollBusy\s*=\s*false/)
+    assert.match(pollCode, /QuotaReset\.shellQuote\(testCelebrationBridgeScript\)/)
+    assert.match(pollCode, /catch\s*\([^)]*\)[\s\S]*testCelebrationPollBusy\s*=\s*false/)
 
     const pollTimer = componentBlock(controller, "Timer", "testCelebrationPollTimer")
-    const interval = Number(pollTimer.match(/interval:\s*(\d+)/)?.[1])
+    const pollTimerCode = codeMask(pollTimer)
+    const interval = Number(pollTimerCode.match(/interval:\s*(\d+)/)?.[1])
     assert.equal(interval, 900)
     assert.ok(interval >= 750)
-    assert.match(pollTimer, /running:\s*true/)
-    assert.match(pollTimer, /repeat:\s*true/)
-    assert.match(pollTimer, /onTriggered:\s*controller\.pollTestCelebration\(\)/)
+    assert.match(pollTimerCode, /running:\s*true/)
+    assert.match(pollTimerCode, /repeat:\s*true/)
+    assert.match(pollTimerCode, /onTriggered:\s*controller\.pollTestCelebration\(\)/)
 
     // The installed-relative bridge path is resolved, and the dedicated executable
     // completion always releases its source and busy guard before inspecting output.
     assert.match(controller, /Qt\.resolvedUrl\("\.\.\/scripts\/test-celebration-bridge\.sh"\)/)
     const source = componentBlock(controller, "Plasma5Support.DataSource", "testCelebrationSource")
-    assert.match(source, /engine:\s*"executable"/)
-    assert.match(source, /connectedSources:\s*\[\]/)
+    const sourceCode = codeMask(source)
+    assert.match(sourceCode, /\bengine\s*:/)
+    const engineAt = sourceCode.search(/\bengine\s*:/)
+    assert.match(source.slice(engineAt, engineAt + 40), /^engine\s*:\s*"executable"/)
+    assert.match(sourceCode, /connectedSources:\s*\[\]/)
     const completion = blockAt(source, "onNewData:")
-    const disconnectAt = position(completion, "disconnectSource(sourceName)", "source disconnect")
-    const releaseAt = position(completion, "controller.testCelebrationPollBusy = false", "busy release")
-    const emptyAt = position(completion, 'if (String(stdout).trim() === "") return', "exact empty-output guard")
-    const consumeAt = position(completion, "controller.consumeTestCelebration(String(stdout))", "request consumption")
+    const completionCode = codeMask(completion)
+    const disconnectAt = position(completionCode, "disconnectSource(sourceName)", "source disconnect")
+    const releaseAt = position(completionCode, "controller.testCelebrationPollBusy = false", "busy release")
+    const emptyAt = emptyOutputGuardPosition(completion)
+    const consumeAt = position(completionCode, "controller.consumeTestCelebration(String(stdout))", "request consumption")
     assert.ok(disconnectAt < releaseAt && releaseAt < emptyAt && emptyAt < consumeAt,
         "completion must disconnect, release busy, ignore exactly empty output, then consume")
 
@@ -205,14 +220,15 @@ function validate(controller, main, cardsView) {
     // replaced; accepted requests randomly select an eligible public card and invoke
     // the existing generation seam directly. Empty eligibility is an acknowledged no-op.
     const consume = functionBlock(controller, "consumeTestCelebration")
-    assert.match(consume, /TestCelebrationRequests\.consume\(\s*raw,\s*testCelebrationReplayState,\s*Date\.now\(\)\)/)
-    assert.match(consume, /TestCelebrationRequests\.selectProfileId\(\s*publicProfileList,\s*\{[\s\S]*compactMaxCards:\s*compactCardLimit[\s\S]*fullMaxCards:\s*fullCardLimit[\s\S]*\},\s*(?:Math\.random|function\s*\()/)
-    const pureConsumeAt = position(consume, "TestCelebrationRequests.consume(", "pure consumer call")
-    const replayAt = position(consume, "testCelebrationReplayState = result.state", "replay-state update")
-    const acceptedAt = position(consume, "if (!result.accepted) return", "accepted guard")
-    const selectAt = position(consume, "TestCelebrationRequests.selectProfileId(", "eligible random selection")
-    const noIdAt = position(consume, "if (!selectedId) return", "empty-selection guard")
-    const triggerCalls = [...codeMask(consume).matchAll(/\btriggerCardCelebration\s*\([^)]*\)/g)]
+    const consumeCode = codeMask(consume)
+    assert.match(consumeCode, /TestCelebrationRequests\.consume\(\s*raw,\s*testCelebrationReplayState,\s*Date\.now\(\)\)/)
+    assert.match(consumeCode, /TestCelebrationRequests\.selectProfileId\(\s*publicProfileList,\s*\{[\s\S]*compactMaxCards:\s*compactCardLimit[\s\S]*fullMaxCards:\s*fullCardLimit[\s\S]*\},\s*(?:Math\.random|function\s*\()/)
+    const pureConsumeAt = position(consumeCode, "TestCelebrationRequests.consume(", "pure consumer call")
+    const replayAt = position(consumeCode, "testCelebrationReplayState = result.state", "replay-state update")
+    const acceptedAt = position(consumeCode, "if (!result.accepted) return", "accepted guard")
+    const selectAt = position(consumeCode, "TestCelebrationRequests.selectProfileId(", "eligible random selection")
+    const noIdAt = position(consumeCode, "if (!selectedId) return", "empty-selection guard")
+    const triggerCalls = [...consumeCode.matchAll(/\btriggerCardCelebration\s*\([^)]*\)/g)]
     assert.equal(triggerCalls.length, 1,
         "consume must contain exactly one direct celebration trigger")
     assert.equal(triggerCalls[0][0], "triggerCardCelebration(selectedId)",
@@ -221,7 +237,7 @@ function validate(controller, main, cardsView) {
     assert.ok(pureConsumeAt < replayAt && replayAt < acceptedAt && acceptedAt < selectAt
               && selectAt < noIdAt && noIdAt < triggerAt,
         "consume must update replay state and pass accepted/no-id guards before triggering")
-    assert.doesNotMatch(consume, /handleQuotaResets|detectResets|Notification|notify|logQuotaReset|resetLog|console\.(?:log|warn|error)/i)
+    assert.doesNotMatch(consumeCode, /handleQuotaResets|detectResets|Notification|notify|logQuotaReset|resetLog|console\.(?:log|warn|error)/i)
 
     // Existing bindings fan one generation out to both mounted compact/full cards.
     assert.match(compactCards, /celebrateProfileId:\s*root\.usageController/)
@@ -255,11 +271,16 @@ const mutants = [
     ["inverted empty-output predicate", replaced(controller,
         'if (String(stdout).trim() === "") return',
         "if (String(stdout).trim()) return", "empty-output guard"), main,
-        /missing exact empty-output guard/],
-    ["trigger before accepted/no-id guards", replaced(controller,
+        /missing executable exact empty-output guard/],
+    ["trigger before accepted/no-id guards", replaced(replaced(controller,
+        "        triggerCardCelebration(selectedId)\n", "", "original celebration trigger"),
         "testCelebrationReplayState = result.state\n        if (!result.accepted) return",
-        'testCelebrationReplayState = result.state\n        triggerCardCelebration("premature")\n        if (!result.accepted) return', "accepted guard"), main,
-        /consume must contain exactly one direct celebration trigger/],
+        "testCelebrationReplayState = result.state\n        triggerCardCelebration(selectedId)\n        if (!result.accepted) return", "accepted guard"), main,
+        /consume must update replay state and pass accepted\/no-id guards before triggering/],
+    ["commented poll guard", replaced(controller,
+        "        if (testCelebrationPollBusy) return\n",
+        "        // if (testCelebrationPollBusy) return\n", "poll guard"), main,
+        /missing executable poll busy guard/],
     ["limits outside CardsView components", controller,
         "// maxCards: root.usageController.compactCardLimit\n"
         + "// maxCards: root.usageController.fullCardLimit\n"
