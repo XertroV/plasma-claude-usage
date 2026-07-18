@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
 import "js/QuotaPresentation.js" as QP
+import "js/CelebrationMotion.js" as CelebrationMotion
 
 // One profile/account card for the panel flow layout.
 Rectangle {
@@ -20,6 +21,12 @@ Rectangle {
     /** When celebrateGeneration bumps and celebrateProfileId matches, party. */
     property string celebrateProfileId: ""
     property int celebrateGeneration: 0
+    /** Injectable for deterministic tests; callers use Plasma's duration convention. */
+    property bool reducedMotion: false
+    /** Writable deterministic visual-review seam, animated from 0 to 1 in production. */
+    property real celebrationProgress: 0
+    readonly property var celebrationState: CelebrationMotion.at(
+        celebrationProgress, reducedMotion)
 
     readonly property int contentFontPixelSize: Math.round(
         (Kirigami.Theme.smallFont.pixelSize + Kirigami.Theme.defaultFont.pixelSize) / 2)
@@ -65,10 +72,33 @@ Rectangle {
     property bool celebrating: false
     property real partyGlow: 0
     property real partyEmojiOpacity: 0
-    property real partyEmojiScale: 0.4
+    property real partyEmojiScale: 0.78
+    property real partyGlyphY: 7
     property color fillColor: idleFill
     property color borderColor: idleBorder
-    property int borderPx: 1
+    property real borderPx: 1
+
+    function mixedColor(from, to, amount) {
+        var t = Math.max(0, Math.min(1, amount))
+        return Qt.rgba(from.r + (to.r - from.r) * t,
+                       from.g + (to.g - from.g) * t,
+                       from.b + (to.b - from.b) * t,
+                       from.a + (to.a - from.a) * t)
+    }
+
+    function applyCelebrationState() {
+        var state = celebrationState
+        partyGlow = state.washOpacity
+        partyEmojiOpacity = state.glyphOpacity
+        partyEmojiScale = state.glyphScale
+        partyGlyphY = state.glyphY
+        fillColor = mixedColor(idleFill, partyFill, state.washOpacity)
+        borderColor = mixedColor(idleBorder, partyBorder, state.borderMix)
+        borderPx = state.borderWidth
+        shakeX.x = state.translateX
+        bounceScale.xScale = state.scale
+        bounceScale.yScale = state.scale
+    }
 
     implicitWidth: Math.max(minWidth, contentCol.implicitWidth + Kirigami.Units.smallSpacing * 2)
     implicitHeight: contentCol.implicitHeight + Kirigami.Units.smallSpacing * 2
@@ -103,123 +133,53 @@ Rectangle {
         playCelebration()
     }
 
+    onCelebrationProgressChanged: {
+        if (celebrating)
+            applyCelebrationState()
+    }
+    onReducedMotionChanged: {
+        if (celebrating)
+            applyCelebrationState()
+    }
+
     function restoreIdleChrome() {
-        // ColorAnimation / assignment break property bindings — rebind so theme
-        // switches still update fill/border after a party.
+        // Progress assignments temporarily override these values. Rebind them so
+        // a theme switch after completion or an interrupted retrigger stays live.
         fillColor = Qt.binding(function() { return idleFill })
         borderColor = Qt.binding(function() { return idleBorder })
         borderPx = 1
+        celebrationProgress = 0
         celebrating = false
         shakeX.x = 0
         bounceScale.xScale = 1
         bounceScale.yScale = 1
         partyGlow = 0
         partyEmojiOpacity = 0
-        partyEmojiScale = 0.4
+        partyEmojiScale = 0.78
+        partyGlyphY = 7
     }
 
     function playCelebration() {
-        if (celebrateAnim.running)
-            celebrateAnim.stop()
+        celebrateAnim.stop()
         restoreIdleChrome()
+        celebrationProgress = 0
         celebrating = true
+        applyCelebrationState()
         celebrateAnim.start()
     }
 
-    SequentialAnimation {
+    NumberAnimation {
         id: celebrateAnim
-        // Pop in: glow + bounce
-        ParallelAnimation {
-            NumberAnimation {
-                target: cardRoot; property: "partyGlow"
-                from: 0; to: 1; duration: 140
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                target: cardRoot; property: "borderPx"
-                from: 1; to: 2; duration: 140
-            }
-            ColorAnimation {
-                target: cardRoot; property: "borderColor"
-                to: cardRoot.partyBorder; duration: 140
-            }
-            ColorAnimation {
-                target: cardRoot; property: "fillColor"
-                to: cardRoot.partyFill; duration: 140
-            }
-            NumberAnimation {
-                target: bounceScale; property: "xScale"
-                from: 1; to: 1.055; duration: 160
-                easing.type: Easing.OutBack
-            }
-            NumberAnimation {
-                target: bounceScale; property: "yScale"
-                from: 1; to: 1.055; duration: 160
-                easing.type: Easing.OutBack
-            }
-            NumberAnimation {
-                target: cardRoot; property: "partyEmojiOpacity"
-                from: 0; to: 1; duration: 120
-            }
-            NumberAnimation {
-                target: cardRoot; property: "partyEmojiScale"
-                from: 0.35; to: 1.15; duration: 220
-                easing.type: Easing.OutBack
-            }
-        }
-        // Happy shake
-        SequentialAnimation {
-            NumberAnimation { target: shakeX; property: "x"; to: 5; duration: 35 }
-            NumberAnimation { target: shakeX; property: "x"; to: -5; duration: 40 }
-            NumberAnimation { target: shakeX; property: "x"; to: 4; duration: 35 }
-            NumberAnimation { target: shakeX; property: "x"; to: -3; duration: 35 }
-            NumberAnimation { target: shakeX; property: "x"; to: 2; duration: 30 }
-            NumberAnimation { target: shakeX; property: "x"; to: 0; duration: 30
-                easing.type: Easing.OutCubic }
-        }
-        // Settle: scale home, fade glow, float emoji away
-        ParallelAnimation {
-            NumberAnimation {
-                target: bounceScale; property: "xScale"
-                to: 1; duration: 280
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                target: bounceScale; property: "yScale"
-                to: 1; duration: 280
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                target: cardRoot; property: "partyGlow"
-                to: 0; duration: 520
-                easing.type: Easing.InOutQuad
-            }
-            NumberAnimation {
-                target: cardRoot; property: "borderPx"
-                to: 1; duration: 400
-            }
-            ColorAnimation {
-                target: cardRoot; property: "borderColor"
-                to: cardRoot.idleBorder; duration: 450
-            }
-            ColorAnimation {
-                target: cardRoot; property: "fillColor"
-                to: cardRoot.idleFill; duration: 450
-            }
-            NumberAnimation {
-                target: cardRoot; property: "partyEmojiOpacity"
-                to: 0; duration: 420
-                easing.type: Easing.InQuad
-            }
-            NumberAnimation {
-                target: cardRoot; property: "partyEmojiScale"
-                to: 1.45; duration: 420
-                easing.type: Easing.InQuad
-            }
-        }
-        ScriptAction {
-            script: cardRoot.restoreIdleChrome()
-        }
+        target: cardRoot
+        property: "celebrationProgress"
+        from: 0
+        to: 1
+        // Reduced-motion environments can expose zero duration tokens. Keep the
+        // colour/border/glyph acknowledgement visible while spatial state stays neutral.
+        duration: Math.max(cardRoot.reducedMotion ? 480 : 1,
+            Kirigami.Units.longDuration * 3 + Kirigami.Units.shortDuration)
+        easing.type: Easing.Linear
+        onFinished: cardRoot.restoreIdleChrome()
     }
 
     // Soft highlight wash over the card face during celebration
@@ -234,18 +194,36 @@ Rectangle {
         enabled: false
     }
 
-    // Party emoji that pops then floats off
-    Text {
+    // Theme-resilient positive halo and glyph: legible in light and dark themes.
+    Item {
+        id: partyGlyph
         anchors.centerIn: parent
+        anchors.verticalCenterOffset: cardRoot.partyGlyphY
+        width: Math.max(28, Math.round(cardRoot.height * 0.38))
+        height: width
         z: 2
-        text: "🎉"
-        font.pixelSize: Math.max(18, Math.round(cardRoot.height * 0.42))
         opacity: cardRoot.partyEmojiOpacity
         scale: cardRoot.partyEmojiScale
         visible: opacity > 0.01
-        style: Text.Outline
-        styleColor: Qt.rgba(0, 0, 0, 0.25)
         enabled: false
+
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: cardRoot.partyBorder
+            opacity: 0.92
+            border.color: Qt.rgba(1, 1, 1, 0.38)
+            border.width: 1
+        }
+
+        Kirigami.Icon {
+            anchors.centerIn: parent
+            width: parent.width * 0.58
+            height: width
+            source: "emblem-favorite-symbolic"
+            isMask: true
+            color: Kirigami.Theme.highlightedTextColor
+        }
     }
 
     ColumnLayout {

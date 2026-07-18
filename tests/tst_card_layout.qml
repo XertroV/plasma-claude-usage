@@ -173,4 +173,37 @@ TestCase {
         compare(cards.length, 1)
         compare(cards[0].width, view.cardMinWidth)
     }
+
+    function test_celebrationTargetsSelectedCardAndReducedMotionStaysSpatiallyNeutral() {
+        var view = createTemporaryObject(cardsComponent, null, {
+            profiles: [profile("selected"), profile("other")],
+            reducedMotion: true
+        })
+        verify(view !== null)
+        wait(0)
+        var cards = accountCards(view)
+        compare(cards.length, 2)
+
+        view.celebrateProfileId = "selected"
+        view.celebrateGeneration = 1
+        wait(0)
+
+        compare(cards[0].celebrating, true)
+        compare(cards[1].celebrating, false)
+        // Drive the explicit deterministic seam; wall-clock animation advancement
+        // is intentionally not assumed by an offscreen Qt Test event loop.
+        cards[0].restoreIdleChrome()
+        cards[0].celebrating = true
+        cards[0].celebrationProgress = 0.38
+        cards[0].applyCelebrationState()
+        compare(cards[0].celebrationState.scale, 1)
+        compare(cards[0].celebrationState.translateX, 0)
+        verify(cards[0].partyGlow > 0,
+               "reduced motion should retain non-spatial highlight feedback")
+
+        view.celebrateGeneration = 2
+        wait(20)
+        compare(cards[0].celebrating, true,
+                "matching retrigger should restart deterministically")
+    }
 }

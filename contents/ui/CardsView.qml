@@ -28,6 +28,7 @@ Item {
     // Quota-reset card celebration (from ProfileController)
     property string celebrateProfileId: ""
     property int celebrateGeneration: 0
+    property bool reducedMotion: Kirigami.Units.longDuration <= 0
 
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
@@ -76,6 +77,7 @@ Item {
                 showBankedBadge: cardsRoot.showBankedBadge
                 celebrateProfileId: cardsRoot.celebrateProfileId
                 celebrateGeneration: cardsRoot.celebrateGeneration
+                reducedMotion: cardsRoot.reducedMotion
                 minWidth: cardsRoot.cardMinWidth
                 width: {
                     var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)

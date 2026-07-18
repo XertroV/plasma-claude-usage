@@ -317,6 +317,7 @@ PlasmoidItem {
                     ? root.usageController.celebrateProfileId : ""
             celebrateGeneration: root.usageController
                     ? root.usageController.celebrateGeneration : 0
+            reducedMotion: Kirigami.Units.longDuration <= 0
             maxCards: root.usageController.compactCardLimit
             cardMinWidth: Kirigami.Units.gridUnit * 10
             fillWidth: true
@@ -376,6 +377,7 @@ PlasmoidItem {
                             ? root.usageController.celebrateProfileId : ""
                     celebrateGeneration: root.usageController
                             ? root.usageController.celebrateGeneration : 0
+                    reducedMotion: Kirigami.Units.longDuration <= 0
                     maxCards: root.usageController.fullCardLimit
                     cardMinWidth: Kirigami.Units.gridUnit * 11
                     fillWidth: true
