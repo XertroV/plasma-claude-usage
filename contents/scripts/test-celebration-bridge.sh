@@ -80,8 +80,13 @@ take_request() {
 
     if ! mv -- "$REQUEST_FILE" "$CLAIM_FILE" 2>/dev/null; then
         CLAIM_FILE=""
-        return 0
+        if [[ ! -e "$REQUEST_FILE" ]]; then
+            return 0
+        fi
+        echo "test-celebration-bridge.sh: failed to claim pending request" >&2
+        return 1
     fi
+    chmod 600 -- "$CLAIM_FILE"
 
     cat -- "$CLAIM_FILE"
     rm -f -- "$CLAIM_FILE"
