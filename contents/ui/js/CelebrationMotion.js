@@ -39,7 +39,7 @@ function at(progress, reducedMotion) {
     var reduced = reducedMotion === true
 
     if (p <= 0 || p >= 1)
-        return state(1, 0, 0, 0, 0.78, 7, 0, 1, reduced)
+        return state(1, 0, 0, 0, 0.78, 0, 0, 1, reduced)
 
     if (p < 0.12) {
         var anticipation = smooth(p / 0.12)
@@ -49,7 +49,7 @@ function at(progress, reducedMotion) {
             mix(0, 0.14, anticipation),
             mix(0, 0.24, anticipation),
             mix(0.78, 0.86, anticipation),
-            mix(7, 3, anticipation),
+            mix(0, 2, anticipation),
             mix(0, 0.28, anticipation),
             mix(1, 1.35, anticipation),
             reduced)
@@ -63,7 +63,7 @@ function at(progress, reducedMotion) {
             mix(0.14, 0.68, peak),
             mix(0.24, 1, peak),
             mix(0.86, 1.08, peak),
-            mix(3, -2, peak),
+            mix(2, -2, peak),
             mix(0.28, 1, peak),
             mix(1.35, 2, peak),
             reduced)
@@ -78,7 +78,7 @@ function at(progress, reducedMotion) {
             mix(0.68, 0.42, accent),
             mix(1, 0.72, accent),
             mix(1.08, 0.96, accent),
-            mix(-2, -6, accent),
+            mix(-2, -4, accent),
             mix(1, 0.65, accent),
             mix(2, 1.7, accent),
             reduced)
@@ -91,7 +91,7 @@ function at(progress, reducedMotion) {
         mix(0.42, 0, resolve),
         mix(0.72, 0, resolve),
         mix(0.96, 0.82, resolve),
-        mix(-6, -10, resolve),
+        mix(-4, -8, resolve),
         mix(0.65, 0, resolve),
         mix(1.7, 1, resolve),
         reduced)

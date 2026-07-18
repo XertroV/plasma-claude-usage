@@ -9,7 +9,7 @@ const Motion = loadQmlJs(join(here, "../contents/ui/js/CelebrationMotion.js"), {
 
 const idle = {
     scale: 1, translateX: 0, washOpacity: 0, glyphOpacity: 0,
-    glyphScale: 0.78, glyphY: 7, borderMix: 0, borderWidth: 1
+    glyphScale: 0.78, glyphY: 0, borderMix: 0, borderWidth: 1
 }
 assert.deepEqual(Motion.at(0, false), idle)
 assert.deepEqual(Motion.at(1, false), idle)

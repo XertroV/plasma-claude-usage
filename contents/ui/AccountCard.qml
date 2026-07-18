@@ -73,7 +73,7 @@ Rectangle {
     property real partyGlow: 0
     property real partyEmojiOpacity: 0
     property real partyEmojiScale: 0.78
-    property real partyGlyphY: 7
+    property real partyGlyphY: 0
     property color fillColor: idleFill
     property color borderColor: idleBorder
     property real borderPx: 1
@@ -156,7 +156,7 @@ Rectangle {
         partyGlow = 0
         partyEmojiOpacity = 0
         partyEmojiScale = 0.78
-        partyGlyphY = 7
+        partyGlyphY = 0
     }
 
     function playCelebration() {
@@ -197,9 +197,10 @@ Rectangle {
     // Theme-resilient positive halo and glyph: legible in light and dark themes.
     Item {
         id: partyGlyph
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: cardRoot.partyGlyphY
-        width: Math.max(28, Math.round(cardRoot.height * 0.38))
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: -height * 0.42 + cardRoot.partyGlyphY
+        width: Math.max(24, Math.round(cardRoot.height * 0.31))
         height: width
         z: 2
         opacity: cardRoot.partyEmojiOpacity
