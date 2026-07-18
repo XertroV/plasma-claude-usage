@@ -6,6 +6,7 @@ import "js/VisibleQuotaConfig.js" as VQ
 import "js/ProfileRefresh.js" as ProfileRefresh
 import "js/ProfileRegistry.js" as Registry
 import "js/QuotaResetEvents.js" as QuotaReset
+import "js/TestCelebrationRequests.js" as TestCelebrationRequests
 
 Item {
     id: controller
@@ -27,6 +28,12 @@ Item {
     // when their profile.id matches celebrateProfileId.
     property string celebrateProfileId: ""
     property int celebrateGeneration: 0
+
+    // One source of truth for mounted CardsView caps and test-request selection.
+    readonly property int compactCardLimit: 8
+    readonly property int fullCardLimit: 12
+    property var testCelebrationReplayState: ({})
+    property bool testCelebrationPollBusy: false
 
     // Config-impact coalescing (moved from main.qml in T005): accumulate kcfg keys
     // then classify via ProfileRegistry.configurationChanged (rediscover > membership > soft).
@@ -63,6 +70,12 @@ Item {
 
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
+        if (u.indexOf("file://") === 0) return u.substring(7)
+        return u
+    }
+
+    readonly property string testCelebrationBridgeScript: {
+        var u = Qt.resolvedUrl("../scripts/test-celebration-bridge.sh").toString()
         if (u.indexOf("file://") === 0) return u.substring(7)
         return u
     }
@@ -175,6 +188,34 @@ Item {
         if (!profileId) return
         celebrateProfileId = String(profileId)
         celebrateGeneration = celebrateGeneration + 1
+    }
+
+    function pollTestCelebration() {
+        if (testCelebrationPollBusy) return
+        testCelebrationPollBusy = true
+        var command = "bash " + QuotaReset.shellQuote(testCelebrationBridgeScript) + " take"
+        try {
+            testCelebrationSource.connectSource(command)
+        } catch (e) {
+            testCelebrationPollBusy = false
+        }
+    }
+
+    function consumeTestCelebration(raw) {
+        var result = TestCelebrationRequests.consume(
+            raw, testCelebrationReplayState, Date.now())
+        testCelebrationReplayState = result.state
+        if (!result.accepted) return
+
+        var selectedId = TestCelebrationRequests.selectProfileId(
+            publicProfileList,
+            {
+                compactMaxCards: compactCardLimit,
+                fullMaxCards: fullCardLimit
+            },
+            Math.random)
+        if (!selectedId) return
+        triggerCardCelebration(selectedId)
     }
 
     function sendQuotaResetNotification(title, text) {
@@ -1188,8 +1229,20 @@ Item {
         }
     }
 
-    
-    
+    // Atomic one-shot bridge claim. The payload is data only and is never evaluated.
+    Plasma5Support.DataSource {
+        id: testCelebrationSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            var stdout = data["stdout"] || ""
+            disconnectSource(sourceName)
+            controller.testCelebrationPollBusy = false
+            if (String(stdout).trim() === "") return
+            controller.consumeTestCelebration(String(stdout))
+        }
+    }
+
     // Resolve $HOME once with a fixed command (B006) — never interpolate user strings here
     Plasma5Support.DataSource {
         id: homeProbe
@@ -1308,6 +1361,14 @@ Item {
             if (!controller.drainOneRefresh() || controller.refreshQueue.length === 0)
                 stop()
         }
+    }
+
+    Timer {
+        id: testCelebrationPollTimer
+        interval: 900
+        running: true
+        repeat: true
+        onTriggered: controller.pollTestCelebration()
     }
 
     Timer {
