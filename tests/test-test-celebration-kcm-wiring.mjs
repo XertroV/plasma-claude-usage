@@ -6,16 +6,13 @@
  * needed by the wiring contract; it is not a general QML parser.
  */
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import vm from "node:vm"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
 const configQml = readFileSync(join(root, "contents/ui/configGeneral.qml"), "utf8")
-const requestsJs = readFileSync(join(root, "contents/ui/js/TestCelebrationRequests.js"), "utf8")
 
 // QML embeds JavaScript. This masker preserves every source position while
 // hiding comments, strings and the regex literals used by these wiring scopes.
@@ -155,6 +152,146 @@ function functionRange(source, name) {
     const declaration = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(codeMask(source))
     assert.ok(declaration, `missing ${name}()`)
     return bracedRangeAfter(source, declaration.index + declaration[0].length, `${name}()`)
+}
+
+function rootFunctionRange(source, name) {
+    const masked = codeMask(source)
+    const pattern = new RegExp(`\\bfunction\\s+${name}\\s*\\(`, "g")
+    const candidates = []
+    let match
+    while ((match = pattern.exec(masked)) !== null) {
+        let depth = 0
+        for (let i = 0; i < match.index; ++i) {
+            if (masked[i] === "{") ++depth
+            else if (masked[i] === "}") --depth
+        }
+        if (depth !== 1) continue
+        const parametersOpening = masked.indexOf("(", match.index)
+        const parametersClosing = matchingDelimiter(source, parametersOpening, "(", ")")
+        const body = bracedRangeAfter(source, parametersClosing + 1, `${name}()`)
+        candidates.push({
+            ...body,
+            parameter: source.slice(parametersOpening + 1, parametersClosing).trim(),
+            declarationStart: match.index
+        })
+        pattern.lastIndex = body.end
+    }
+    assert.equal(candidates.length, 1, `expected one root ${name}()`)
+    return candidates[0]
+}
+
+function callRange(source, calleePattern, label) {
+    const masked = codeMask(source)
+    const pattern = new RegExp(`${calleePattern}\\s*\\(`, "g")
+    const calls = []
+    let match
+    while ((match = pattern.exec(masked)) !== null) {
+        const opening = masked.indexOf("(", match.index)
+        const closing = matchingDelimiter(source, opening, "(", ")")
+        calls.push({
+            start: match.index,
+            end: closing + 1,
+            args: source.slice(opening + 1, closing)
+        })
+        pattern.lastIndex = closing + 1
+    }
+    assert.equal(calls.length, 1, `expected one ${label}`)
+    return calls[0]
+}
+
+function splitTopLevel(source) {
+    const masked = codeMask(source)
+    const parts = []
+    let start = 0
+    let braces = 0
+    let brackets = 0
+    let parentheses = 0
+    for (let i = 0; i <= masked.length; ++i) {
+        const current = masked[i]
+        if (current === "{") ++braces
+        else if (current === "}") --braces
+        else if (current === "[") ++brackets
+        else if (current === "]") --brackets
+        else if (current === "(") ++parentheses
+        else if (current === ")") --parentheses
+        if ((current === "," && braces === 0 && brackets === 0 && parentheses === 0)
+                || i === masked.length) {
+            parts.push(source.slice(start, i).trim())
+            start = i + 1
+        }
+    }
+    return parts
+}
+
+function objectProperties(expression, label) {
+    const masked = codeMask(expression)
+    const opening = skipWhitespace(masked, 0)
+    assert.equal(masked[opening], "{", `${label} must be an object literal`)
+    const closing = matchingDelimiter(expression, opening, "{", "}")
+    assert.equal(masked.slice(closing + 1).trim(), "", `${label} must contain only its object literal`)
+    const properties = new Map()
+    for (const entry of splitTopLevel(expression.slice(opening + 1, closing))) {
+        const entryMask = codeMask(entry)
+        const property = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:/.exec(entryMask)
+        assert.ok(property, `${label} contains an unsupported property`)
+        assert.equal(properties.has(property[1]), false, `${label} must not duplicate ${property[1]}`)
+        properties.set(property[1], entry.slice(property[0].length).trim())
+    }
+    return properties
+}
+
+function literalEquals(expression, expected) {
+    const trimmed = expression.trim()
+    return trimmed === `"${expected}"` || trimmed === `'${expected}'`
+}
+
+function expressionGuaranteesName(expression, name) {
+    const masked = codeMask(expression)
+    const reference = new RegExp(`\\b${name}\\b`)
+    let braces = 0
+    let brackets = 0
+    let parentheses = 0
+    let question = -1
+    for (let i = 0; i < masked.length; ++i) {
+        if (masked[i] === "{") ++braces
+        else if (masked[i] === "}") --braces
+        else if (masked[i] === "[") ++brackets
+        else if (masked[i] === "]") --brackets
+        else if (masked[i] === "(") ++parentheses
+        else if (masked[i] === ")") --parentheses
+        else if (masked[i] === "?" && !braces && !brackets && !parentheses) question = i
+        else if (masked[i] === ":" && question >= 0 && !braces && !brackets && !parentheses) {
+            return reference.test(masked.slice(question + 1, i))
+                && reference.test(masked.slice(i + 1))
+        }
+    }
+    return reference.test(masked)
+}
+
+function topLevelVarInitializers(source) {
+    const masked = codeMask(source)
+    const declarations = []
+    let braces = 0
+    let brackets = 0
+    let parentheses = 0
+    for (let i = 0; i < masked.length; ++i) {
+        if (masked[i] === "{") ++braces
+        else if (masked[i] === "}") --braces
+        else if (masked[i] === "[") ++brackets
+        else if (masked[i] === "]") --brackets
+        else if (masked[i] === "(") ++parentheses
+        else if (masked[i] === ")") --parentheses
+        if (braces || brackets || parentheses || !isWordAt(masked, i, "var")) continue
+        const match = /^var\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/.exec(masked.slice(i))
+        if (match) declarations.push({ name: match[1], start: i, valueStart: i + match[0].length })
+    }
+    return declarations.map((declaration, index) => ({
+        ...declaration,
+        value: source.slice(
+            declaration.valueStart,
+            declarations[index + 1]?.start ?? source.length
+        ).trim().replace(/;$/, "")
+    }))
 }
 
 function propertyFunctionRange(source, propertyName) {
@@ -329,15 +466,27 @@ function validateConfig(source) {
     const producerRange = functionRange(source, "sendTestCelebration")
     const producer = producerRange.body
     const producerCode = codeMask(producer)
-    assert.match(producerCode, /QuotaReset\.formatNotification\s*\(/)
-    assertExecutableMatch(producer, /windowId:\s*"5h"/, "formatter fixture must use the 5h window id")
-    assertExecutableMatch(producer, /windowLabel:\s*"5h"/, "formatter fixture must use the 5h label")
-    assertExecutableMatch(producer, /kind:\s*"natural"/, "formatter fixture must be natural")
-    assertExecutableMatch(
+    const formatterCall = callRange(
         producer,
-        /var\s+previewSuffix\s*=\s*"Preview from Settings — no reset was logged\."/,
-        "notification must assign the exact preview suffix"
+        "QuotaReset\\.formatNotification",
+        "QuotaReset.formatNotification() call"
     )
+    const formatterArgs = splitTopLevel(formatterCall.args)
+    assert.equal(formatterArgs.length, 2, "formatter call must have exactly two arguments")
+    const eventsMask = codeMask(formatterArgs[0])
+    const eventsOpening = skipWhitespace(eventsMask, 0)
+    assert.equal(eventsMask[eventsOpening], "[", "formatter events argument must be an array literal")
+    const eventsClosing = matchingDelimiter(formatterArgs[0], eventsOpening, "[", "]")
+    assert.equal(eventsMask.slice(eventsClosing + 1).trim(), "", "formatter events argument must contain only its array")
+    const events = splitTopLevel(formatterArgs[0].slice(eventsOpening + 1, eventsClosing))
+    assert.equal(events.length, 1, "formatter must receive exactly one event")
+    const eventProperties = objectProperties(events[0], "formatter event")
+    assert.ok(literalEquals(eventProperties.get("windowId") || "", "5h"),
+        "formatter event must use the five-hour window id")
+    assert.ok(literalEquals(eventProperties.get("windowLabel") || "", "5h"),
+        "formatter event must use the five-hour label")
+    assert.ok(literalEquals(eventProperties.get("kind") || "", "natural"),
+        "formatter event must be natural")
     assert.match(producerCode, /TestCelebrationRequests\.createRequest\s*\(/)
     assert.match(producerCode, /TestCelebrationRequests\.serializeRequest\s*\(/)
     assert.match(producerCode, /Date\.now\s*\(\)/)
@@ -352,11 +501,32 @@ function validateConfig(source) {
     const [notificationAttempt, writerAttempt] = attempts
     const notificationCode = codeMask(notificationAttempt.tryBody)
     const writerCode = codeMask(writerAttempt.tryBody)
-    assert.match(
-        notificationCode,
-        /testResetNotificationComponent\.createObject\s*\(/,
+    const notificationCall = callRange(
+        notificationAttempt.tryBody,
+        "testResetNotificationComponent\\.createObject",
         "notification attempt must create the notification in executable code"
     )
+    const notificationArgs = splitTopLevel(notificationCall.args)
+    assert.equal(notificationArgs.length, 2, "notification creation must have parent and properties")
+    const notificationProperties = objectProperties(notificationArgs[1], "notification properties")
+    const textExpression = notificationProperties.get("text") || ""
+    const variables = topLevelVarInitializers(notificationAttempt.tryBody)
+    const suffixes = variables.filter(variable =>
+        literalEquals(variable.value, "Preview from Settings — no reset was logged."))
+    assert.equal(suffixes.length, 1, "notification must declare the exact preview suffix once")
+    const suffix = suffixes[0]
+    assert.ok(suffix.start < notificationCall.start, "preview suffix must be declared before notification use")
+    const directSuffixUse = new RegExp(`^\\s*(?:String\\s*\\(\\s*)?${suffix.name}(?:\\s*\\))?\\s*$`)
+    let suffixUsed = directSuffixUse.test(codeMask(textExpression))
+    if (!suffixUsed) {
+        const textVariable = variables.find(variable =>
+            variable.start < notificationCall.start
+            && new RegExp(`^\\s*(?:String\\s*\\(\\s*)?${variable.name}(?:\\s*\\))?\\s*$`)
+                .test(codeMask(textExpression)))
+        suffixUsed = !!textVariable
+            && expressionGuaranteesName(textVariable.value, suffix.name)
+    }
+    assert.ok(suffixUsed, "notification text must directly use the preview suffix")
     assert.match(notificationCode, /\.sendEvent\s*\(\)/, "notification attempt must execute sendEvent()")
     assert.doesNotMatch(notificationCode, /testCelebrationWriter\.connectSource/)
     assert.match(codeMask(notificationAttempt.catchBody), /console\.log/)
@@ -505,6 +675,93 @@ function regexBraceTruncationMutation(source) {
     return replaceRange(source, producerRange, mutatedBody)
 }
 
+function unsafeShellQuoteDecoyMutation(source) {
+    const shellQuote = rootFunctionRange(source, "shellQuote")
+    return replaceRange(source, shellQuote, String.raw`
+        var expectedText = "return \"'\" + String(path).replace(/'/g, \"'\\\\''\") + \"'\""
+        // return "'" + String(path).replace(/'/g, "'\\''") + "'"
+        return "'" + String(path) + "'"
+    `)
+}
+
+function nestedShellQuoteDecoyMutation(source) {
+    const shellQuote = rootFunctionRange(source, "shellQuote")
+    return replaceRange(source, shellQuote, String.raw`
+        function shellQuote(path) {
+            return "'" + String(path).replace(/'/g, "'\\''") + "'"
+        }
+        return "'" + String(path) + "'"
+    `)
+}
+
+function detachedNaturalFixtureMutation(source) {
+    const producerRange = functionRange(source, "sendTestCelebration")
+    const fixture = `{
+                    windowId: "5h",
+                    windowLabel: "5h",
+                    kind: "natural",
+                    unexpected: false,
+                    previousUsagePercent: 87,
+                    expectedResetAtMs: 0
+                }`
+    const wrongFixture = fixture
+        .replace('windowId: "5h"', 'windowId: "wrong_window"')
+        .replace('windowLabel: "5h"', 'windowLabel: "wrong label"')
+        .replace('kind: "natural"', 'kind: "unexpected"')
+    const mutatedBody = producerRange.body.replace(
+        fixture,
+        wrongFixture
+    )
+    assert.notEqual(mutatedBody, producerRange.body, "detached fixture mutation must apply")
+    return replaceRange(source, producerRange, "\n        var detachedNaturalFixture = " + fixture + mutatedBody)
+}
+
+function duplicateFixturePropertiesMutation(source) {
+    const producerRange = functionRange(source, "sendTestCelebration")
+    const mutatedBody = producerRange.body.replace(
+        'kind: "natural",',
+        'kind: "natural",\n                    windowId: "wrong_window",\n                    windowLabel: "wrong label",\n                    kind: "unexpected",'
+    )
+    assert.notEqual(mutatedBody, producerRange.body, "duplicate fixture mutation must apply")
+    return replaceRange(source, producerRange, mutatedBody)
+}
+
+function detachedPreviewSuffixMutation(source) {
+    const producerRange = functionRange(source, "sendTestCelebration")
+    const mutatedBody = producerRange.body.replace(
+        "text: String(text)",
+        'text: "Detached notification text"'
+    )
+    assert.notEqual(mutatedBody, producerRange.body, "detached suffix mutation must apply")
+    return replaceRange(source, producerRange, mutatedBody)
+}
+
+function deadPreviewSuffixMutation(source) {
+    const producerRange = functionRange(source, "sendTestCelebration")
+    const mutatedBody = producerRange.body.replace(
+        "text: String(text)",
+        'text: String(false ? previewSuffix : "Wrong")'
+    )
+    assert.notEqual(mutatedBody, producerRange.body, "dead suffix mutation must apply")
+    return replaceRange(source, producerRange, mutatedBody)
+}
+
+function validateShellQuote(source) {
+    const shellQuote = rootFunctionRange(source, "shellQuote")
+    assert.equal(shellQuote.parameter, "path", "root shellQuote() must take exactly path")
+    const expectedBody = String.raw`return "'" + String(path).replace(/'/g, "'\\''") + "'"`
+    assert.equal(
+        normalizeWhitespace(shellQuote.body),
+        expectedBody,
+        "root shellQuote() must exactly implement POSIX single-quote escaping"
+    )
+}
+
+function validateSource(source) {
+    validateConfig(source)
+    validateShellQuote(source)
+}
+
 const mutations = {
     "nested-writer": {
         apply: nestedWriterMutation,
@@ -529,37 +786,48 @@ const mutations = {
     "regex-brace-truncation": {
         apply: regexBraceTruncationMutation,
         rejection: /sendTestCelebration\(\) must not reference buildLogCommand/
+    },
+    "unsafe-shell-quote-decoy": {
+        apply: unsafeShellQuoteDecoyMutation,
+        rejection: /root shellQuote\(\) must exactly implement POSIX single-quote escaping/
+    },
+    "nested-shell-quote-decoy": {
+        apply: nestedShellQuoteDecoyMutation,
+        rejection: /root shellQuote\(\) must exactly implement POSIX single-quote escaping/
+    },
+    "detached-natural-fixture": {
+        apply: detachedNaturalFixtureMutation,
+        rejection: /formatter event must use the five-hour window id/
+    },
+    "duplicate-fixture-properties": {
+        apply: duplicateFixturePropertiesMutation,
+        rejection: /formatter event must not duplicate windowId/
+    },
+    "detached-preview-suffix": {
+        apply: detachedPreviewSuffixMutation,
+        rejection: /notification text must directly use the preview suffix/
+    },
+    "dead-preview-suffix": {
+        apply: deadPreviewSuffixMutation,
+        rejection: /notification text must directly use the preview suffix/
     }
 }
 
 const selectedMutation = process.env.TEST_KCM_WIRING_MUTANT
 if (selectedMutation) {
     assert.ok(mutations[selectedMutation], `unknown TEST_KCM_WIRING_MUTANT=${selectedMutation}`)
-    validateConfig(mutations[selectedMutation].apply(configQml))
+    validateSource(mutations[selectedMutation].apply(configQml))
     assert.fail(`representative mutant ${selectedMutation} was accepted`)
 }
 
-validateConfig(configQml)
+validateSource(configQml)
 
 for (const [name, mutant] of Object.entries(mutations)) {
     assert.throws(
-        () => validateConfig(mutant.apply(configQml)),
+        () => validateSource(mutant.apply(configQml)),
         mutant.rejection,
         `representative mutant ${name} must be rejected by the same assertions`
     )
 }
 
-assert.match(configQml, /function shellQuote\s*\([^)]+\)\s*\{[^}]*replace\(\/'\/g, "'\\\\''"\)/)
-const shellQuote = value => "'" + String(value).replace(/'/g, "'\\''") + "'"
-const requestModule = {}
-vm.runInNewContext(requestsJs.replace(/^\.pragma library\s*$/m, ""), requestModule)
-const arbitraryRequest = requestModule.createRequest(123456789, function() {
-    return "single'quote newline\n unicode— shell;$()"
-})
-const arbitraryPayload = requestModule.serializeRequest(arbitraryRequest)
-const roundTrip = execFileSync("bash", ["-c", "printf %s " + shellQuote(arbitraryPayload)], {
-    encoding: "utf8"
-})
-assert.equal(roundTrip, arbitraryPayload, "shell quoting must preserve arbitrary serialized JSON")
-
-console.log("All Settings test-celebration wiring tests passed (including six mutation guards).")
+console.log(`All Settings test-celebration wiring tests passed (including ${Object.keys(mutations).length} mutation guards).`)
