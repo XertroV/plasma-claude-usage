@@ -412,6 +412,33 @@ function formatNotification(events, profile) {
     return { title: title, text: text }
 }
 
+/**
+ * Settings-only notification preview. This composes production notification
+ * copy without entering reset detection, logging, or notification runtime code.
+ */
+function formatSettingsPreviewNotification() {
+    var sample = formatNotification([{
+        windowId: "5h",
+        windowLabel: "5h",
+        kind: "natural",
+        unexpected: false,
+        previousUsagePercent: 87,
+        expectedResetAtMs: 0
+    }], {
+        displayName: "Test",
+        provider: "claude",
+        id: "test"
+    })
+    var title = sample && sample.title
+        ? sample.title
+        : "Woo-hoo! Test quota reset 🎉"
+    var suffix = "Preview from Settings — no reset was logged."
+    var text = sample && sample.text
+        ? sample.text + " · " + suffix
+        : suffix
+    return { title: title, text: text }
+}
+
 function buildResetPaths(settings, event, pathTimeMs) {
     var root = cacheRoot(settings).replace(/\/+$/, "")
     var now = new Date(pathTimeMs || (event && event.observedAtMs) || Date.now())

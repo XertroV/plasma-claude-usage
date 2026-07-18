@@ -17,6 +17,7 @@ const QR = loadQmlJs(
         "detectResets",
         "buildLogEnvelope",
         "formatNotification",
+        "formatSettingsPreviewNotification",
         "buildResetPaths",
         "buildLogCommand",
         "classifyKind",
@@ -263,6 +264,25 @@ function win(id, usage, resetAtMs, periodMs, label) {
     })
     assert.equal(r.events[0].kind, "late")
     assert.equal(r.events[0].unexpected, true)
+}
+
+// --- Settings preview composes the production formatter ---------------------
+{
+    const preview = QR.formatSettingsPreviewNotification()
+    assert.equal(preview.title, "Woo-hoo! Test quota reset 🎉")
+    assert.match(preview.text, /5h reset/)
+    assert.match(preview.text, /87%/)
+    assert.match(preview.text, /right on time/)
+    assert.ok(preview.text.endsWith("Preview from Settings — no reset was logged."))
+}
+
+// --- shared shell quoting is pure and exact; never execute it as shell -------
+{
+    const hostile = "it's\nUnicode — snowman ☃; $(touch /tmp/nope) & | < > * ? [x]"
+    assert.equal(
+        QR.shellQuote(hostile),
+        "'it'\\''s\nUnicode — snowman ☃; $(touch /tmp/nope) & | < > * ? [x]'"
+    )
 }
 
 // --- paths + log command -----------------------------------------------------

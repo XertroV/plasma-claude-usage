@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
- * Structural wiring checks for the Settings test-celebration producer.
- *
- * This intentionally parses only the brace-balanced QML/JavaScript scopes
- * needed by the wiring contract; it is not a general QML parser.
+ * Proportionate structural checks for the Settings celebration producer.
+ * Behaviour of the shared formatter and shellQuote seams is exercised by
+ * test-quota-reset-events.mjs; this file checks only QML wiring and isolation.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -14,208 +13,138 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, "..")
 const configQml = readFileSync(join(root, "contents/ui/configGeneral.qml"), "utf8")
 
-// QML embeds JavaScript. This masker preserves every source position while
-// hiding comments, strings and the regex literals used by these wiring scopes.
-// Regex-vs-division is decided from the preceding significant token: a slash
-// after a value/closing delimiter is division; at expression starts it is regex.
+// Position-preserving mask for QML's embedded JavaScript. It hides literals,
+// comments, and regex bodies so decoys and braces in /[}]/ do not affect scans.
 function codeMask(source) {
-    const masked = source.split("")
+    const out = source.split("")
     let state = "code"
     let quote = ""
     let escaped = false
     let regexClass = false
-    let previousToken = "start"
-
-    function blank(index) {
-        if (source[index] !== "\n" && source[index] !== "\r") masked[index] = " "
-    }
-
-    function regexCanStart() {
-        return previousToken !== "value" && previousToken !== "close"
-    }
-
+    let prior = "start"
+    const blank = i => { if (source[i] !== "\n" && source[i] !== "\r") out[i] = " " }
     for (let i = 0; i < source.length; ++i) {
-        const current = source[i]
-        const next = source[i + 1]
-
-        if (state === "line-comment") {
-            if (current === "\n") state = "code"
+        const c = source[i]
+        const n = source[i + 1]
+        if (state === "line") {
+            if (c === "\n") state = "code"
             else blank(i)
             continue
         }
-        if (state === "block-comment") {
+        if (state === "block") {
             blank(i)
-            if (current === "*" && next === "/") {
-                blank(i + 1)
-                state = "code"
-                ++i
-            }
+            if (c === "*" && n === "/") { blank(++i); state = "code" }
             continue
         }
         if (state === "string") {
             blank(i)
             if (escaped) escaped = false
-            else if (current === "\\") escaped = true
-            else if (current === quote) {
-                state = "code"
-                previousToken = "value"
-            }
+            else if (c === "\\") escaped = true
+            else if (c === quote) { state = "code"; prior = "value" }
             continue
         }
         if (state === "regex") {
             blank(i)
             if (escaped) escaped = false
-            else if (current === "\\") escaped = true
-            else if (current === "[" && !regexClass) regexClass = true
-            else if (current === "]" && regexClass) regexClass = false
-            else if (current === "/" && !regexClass) {
-                while (/[A-Za-z]/.test(source[i + 1] || "")) {
-                    blank(i + 1)
-                    ++i
-                }
+            else if (c === "\\") escaped = true
+            else if (c === "[") regexClass = true
+            else if (c === "]") regexClass = false
+            else if (c === "/" && !regexClass) {
+                while (/[A-Za-z]/.test(source[i + 1] || "")) blank(++i)
                 state = "code"
-                previousToken = "value"
+                prior = "value"
             }
             continue
         }
-        if (current === "/" && next === "/") {
-            blank(i)
-            blank(i + 1)
-            state = "line-comment"
-            ++i
-            continue
+        if (c === "/" && n === "/") { blank(i); blank(++i); state = "line"; continue }
+        if (c === "/" && n === "*") { blank(i); blank(++i); state = "block"; continue }
+        if (c === '"' || c === "'" || c === "`") {
+            blank(i); quote = c; escaped = false; state = "string"; continue
         }
-        if (current === "/" && next === "*") {
-            blank(i)
-            blank(i + 1)
-            state = "block-comment"
-            ++i
-            continue
+        if (c === "/" && prior !== "value" && prior !== "close") {
+            blank(i); escaped = false; regexClass = false; state = "regex"; continue
         }
-        if (current === '"' || current === "'" || current === "`") {
-            blank(i)
-            quote = current
-            escaped = false
-            state = "string"
-            continue
-        }
-        if (current === "/" && regexCanStart()) {
-            blank(i)
-            escaped = false
-            regexClass = false
-            state = "regex"
-            continue
-        }
-        if (/\s/.test(current)) continue
-        if (/[A-Za-z0-9_$]/.test(current)) {
+        if (/\s/.test(c)) continue
+        if (/[A-Za-z0-9_$]/.test(c)) {
             let end = i + 1
             while (/[A-Za-z0-9_$]/.test(source[end] || "")) ++end
             const token = source.slice(i, end)
-            previousToken = /^(return|throw|case|delete|void|typeof|new|in|of|yield|await)$/.test(token)
+            prior = /^(return|throw|case|delete|void|typeof|new|in|of|yield|await)$/.test(token)
                 ? "operator" : "value"
             i = end - 1
-            continue
-        }
-        if (current === ")" || current === "]" || current === "}") previousToken = "close"
-        else if (current === ".") previousToken = "value"
-        else previousToken = "operator"
+        } else if (c === ")" || c === "]" || c === "}") prior = "close"
+        else if (c === ".") prior = "value"
+        else prior = "operator"
     }
-    return masked.join("")
+    return out.join("")
 }
 
-function matchingDelimiter(source, openingIndex, opening, closing) {
-    const masked = codeMask(source)
-    assert.equal(masked[openingIndex], opening, `expected ${opening} at ${openingIndex}`)
+function matching(source, open, left = "{", right = "}") {
+    const mask = codeMask(source)
+    assert.equal(mask[open], left, `expected ${left} at ${open}`)
     let depth = 0
-    for (let i = openingIndex; i < masked.length; ++i) {
-        if (masked[i] === opening) ++depth
-        else if (masked[i] === closing && --depth === 0) return i
+    for (let i = open; i < mask.length; ++i) {
+        if (mask[i] === left) ++depth
+        else if (mask[i] === right && --depth === 0) return i
     }
-    assert.fail(`unterminated ${opening}${closing} scope`)
+    assert.fail(`unterminated ${left}${right} scope`)
 }
 
-function bracedRangeAfter(source, startIndex, label) {
-    const opening = codeMask(source).indexOf("{", startIndex)
-    assert.notEqual(opening, -1, `missing body for ${label}`)
-    const closing = matchingDelimiter(source, opening, "{", "}")
-    return {
-        start: opening,
-        end: closing + 1,
-        bodyStart: opening + 1,
-        bodyEnd: closing,
-        body: source.slice(opening + 1, closing),
-        full: source.slice(opening, closing + 1)
-    }
+function bracedAfter(source, start, label) {
+    const open = codeMask(source).indexOf("{", start)
+    assert.notEqual(open, -1, `missing ${label} body`)
+    const close = matching(source, open)
+    return { start: open, end: close + 1, bodyStart: open + 1, bodyEnd: close,
+        body: source.slice(open + 1, close), full: source.slice(open, close + 1) }
 }
 
 function functionRange(source, name) {
-    const declaration = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(codeMask(source))
-    assert.ok(declaration, `missing ${name}()`)
-    return bracedRangeAfter(source, declaration.index + declaration[0].length, `${name}()`)
+    const found = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(codeMask(source))
+    assert.ok(found, `missing ${name}()`)
+    return bracedAfter(source, found.index + found[0].length, `${name}()`)
 }
 
-function rootFunctionRange(source, name) {
-    const masked = codeMask(source)
-    const pattern = new RegExp(`\\bfunction\\s+${name}\\s*\\(`, "g")
-    const candidates = []
-    let match
-    while ((match = pattern.exec(masked)) !== null) {
-        let depth = 0
-        for (let i = 0; i < match.index; ++i) {
-            if (masked[i] === "{") ++depth
-            else if (masked[i] === "}") --depth
-        }
-        if (depth !== 1) continue
-        const parametersOpening = masked.indexOf("(", match.index)
-        const parametersClosing = matchingDelimiter(source, parametersOpening, "(", ")")
-        const body = bracedRangeAfter(source, parametersClosing + 1, `${name}()`)
-        candidates.push({
-            ...body,
-            parameter: source.slice(parametersOpening + 1, parametersClosing).trim(),
-            declarationStart: match.index
-        })
-        pattern.lastIndex = body.end
+function objectRanges(source, type) {
+    const ranges = []
+    const mask = codeMask(source)
+    const pattern = new RegExp(`\\b${type.replaceAll(".", "\\.")}\\s*\\{`, "g")
+    let found
+    while ((found = pattern.exec(mask))) {
+        const range = bracedAfter(source, found.index, type)
+        ranges.push(range)
+        pattern.lastIndex = range.end
     }
-    assert.equal(candidates.length, 1, `expected one root ${name}()`)
-    return candidates[0]
+    return ranges
 }
 
-function callRange(source, calleePattern, label) {
-    const masked = codeMask(source)
-    const pattern = new RegExp(`${calleePattern}\\s*\\(`, "g")
-    const calls = []
-    let match
-    while ((match = pattern.exec(masked)) !== null) {
-        const opening = masked.indexOf("(", match.index)
-        const closing = matchingDelimiter(source, opening, "(", ")")
-        calls.push({
-            start: match.index,
-            end: closing + 1,
-            args: source.slice(opening + 1, closing)
-        })
-        pattern.lastIndex = closing + 1
-    }
-    assert.equal(calls.length, 1, `expected one ${label}`)
-    return calls[0]
+function objectById(source, type, id) {
+    const matches = objectRanges(source, type).filter(range =>
+        new RegExp(`\\bid\\s*:\\s*${id}\\b`).test(codeMask(range.body)))
+    assert.equal(matches.length, 1, `expected one ${type} id ${id}`)
+    return matches[0]
+}
+
+function propertyFunction(source, name) {
+    const found = new RegExp(`\\b${name}\\s*:\\s*function\\s*\\([^)]*\\)`).exec(codeMask(source))
+    assert.ok(found, `missing ${name} callback`)
+    return bracedAfter(source, found.index + found[0].length, name)
 }
 
 function splitTopLevel(source) {
-    const masked = codeMask(source)
+    const mask = codeMask(source)
     const parts = []
     let start = 0
     let braces = 0
     let brackets = 0
-    let parentheses = 0
-    for (let i = 0; i <= masked.length; ++i) {
-        const current = masked[i]
-        if (current === "{") ++braces
-        else if (current === "}") --braces
-        else if (current === "[") ++brackets
-        else if (current === "]") --brackets
-        else if (current === "(") ++parentheses
-        else if (current === ")") --parentheses
-        if ((current === "," && braces === 0 && brackets === 0 && parentheses === 0)
-                || i === masked.length) {
+    let parens = 0
+    for (let i = 0; i <= mask.length; ++i) {
+        if (mask[i] === "{") ++braces
+        else if (mask[i] === "}") --braces
+        else if (mask[i] === "[") ++brackets
+        else if (mask[i] === "]") --brackets
+        else if (mask[i] === "(") ++parens
+        else if (mask[i] === ")") --parens
+        if ((mask[i] === "," && !braces && !brackets && !parens) || i === mask.length) {
             parts.push(source.slice(start, i).trim())
             start = i + 1
         }
@@ -223,16 +152,29 @@ function splitTopLevel(source) {
     return parts
 }
 
+function callRanges(source, callee) {
+    const ranges = []
+    const mask = codeMask(source)
+    const pattern = new RegExp(`${callee}\\s*\\(`, "g")
+    let found
+    while ((found = pattern.exec(mask))) {
+        const open = mask.indexOf("(", found.index)
+        const close = matching(source, open, "(", ")")
+        ranges.push({ start: found.index, end: close + 1, args: source.slice(open + 1, close) })
+        pattern.lastIndex = close + 1
+    }
+    return ranges
+}
+
 function objectProperties(expression, label) {
-    const masked = codeMask(expression)
-    const opening = skipWhitespace(masked, 0)
-    assert.equal(masked[opening], "{", `${label} must be an object literal`)
-    const closing = matchingDelimiter(expression, opening, "{", "}")
-    assert.equal(masked.slice(closing + 1).trim(), "", `${label} must contain only its object literal`)
+    const mask = codeMask(expression)
+    const open = mask.search(/\S/)
+    assert.equal(mask[open], "{", `${label} must be an object literal`)
+    const close = matching(expression, open)
+    assert.equal(mask.slice(close + 1).trim(), "", `${label} must contain only its object`)
     const properties = new Map()
-    for (const entry of splitTopLevel(expression.slice(opening + 1, closing))) {
-        const entryMask = codeMask(entry)
-        const property = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:/.exec(entryMask)
+    for (const entry of splitTopLevel(expression.slice(open + 1, close))) {
+        const property = /^\s*([A-Za-z_$][\w$]*)\s*:/.exec(codeMask(entry))
         assert.ok(property, `${label} contains an unsupported property`)
         assert.equal(properties.has(property[1]), false, `${label} must not duplicate ${property[1]}`)
         properties.set(property[1], entry.slice(property[0].length).trim())
@@ -240,594 +182,173 @@ function objectProperties(expression, label) {
     return properties
 }
 
-function literalEquals(expression, expected) {
-    const trimmed = expression.trim()
-    return trimmed === `"${expected}"` || trimmed === `'${expected}'`
-}
-
-function expressionGuaranteesName(expression, name) {
-    const masked = codeMask(expression)
-    const reference = new RegExp(`\\b${name}\\b`)
-    let braces = 0
-    let brackets = 0
-    let parentheses = 0
-    let question = -1
-    for (let i = 0; i < masked.length; ++i) {
-        if (masked[i] === "{") ++braces
-        else if (masked[i] === "}") --braces
-        else if (masked[i] === "[") ++brackets
-        else if (masked[i] === "]") --brackets
-        else if (masked[i] === "(") ++parentheses
-        else if (masked[i] === ")") --parentheses
-        else if (masked[i] === "?" && !braces && !brackets && !parentheses) question = i
-        else if (masked[i] === ":" && question >= 0 && !braces && !brackets && !parentheses) {
-            return reference.test(masked.slice(question + 1, i))
-                && reference.test(masked.slice(i + 1))
-        }
+function topLevelTries(source) {
+    const mask = codeMask(source)
+    const tries = []
+    let depth = 0
+    for (let i = 0; i < mask.length; ++i) {
+        if (mask[i] === "{") { ++depth; continue }
+        if (mask[i] === "}") { --depth; continue }
+        if (depth || mask.slice(i, i + 3) !== "try" || /[\w$]/.test(mask[i - 1] || "")
+                || /[\w$]/.test(mask[i + 3] || "")) continue
+        const tryOpen = mask.indexOf("{", i + 3)
+        const tryClose = matching(source, tryOpen)
+        const catchAt = mask.slice(tryClose + 1).search(/\bcatch\b/) + tryClose + 1
+        assert.ok(catchAt > tryClose, "top-level try must have catch")
+        const catchOpen = mask.indexOf("{", catchAt)
+        const catchClose = matching(source, catchOpen)
+        tries.push({ start: i, end: catchClose + 1,
+            tryBody: source.slice(tryOpen + 1, tryClose),
+            catchBody: source.slice(catchOpen + 1, catchClose), full: source.slice(i, catchClose + 1) })
+        i = catchClose
     }
-    return reference.test(masked)
+    return tries
 }
 
-function topLevelVarInitializers(source) {
-    const masked = codeMask(source)
-    const declarations = []
-    let braces = 0
-    let brackets = 0
-    let parentheses = 0
-    for (let i = 0; i < masked.length; ++i) {
-        if (masked[i] === "{") ++braces
-        else if (masked[i] === "}") --braces
-        else if (masked[i] === "[") ++brackets
-        else if (masked[i] === "]") --brackets
-        else if (masked[i] === "(") ++parentheses
-        else if (masked[i] === ")") --parentheses
-        if (braces || brackets || parentheses || !isWordAt(masked, i, "var")) continue
-        const match = /^var\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/.exec(masked.slice(i))
-        if (match) declarations.push({ name: match[1], start: i, valueStart: i + match[0].length })
-    }
-    return declarations.map((declaration, index) => ({
-        ...declaration,
-        value: source.slice(
-            declaration.valueStart,
-            declarations[index + 1]?.start ?? source.length
-        ).trim().replace(/;$/, "")
-    }))
+function normalize(source) { return codeMask(source).replace(/\s+/g, " ").trim() }
+function replaceBody(source, range, body) {
+    return source.slice(0, range.bodyStart) + body + source.slice(range.bodyEnd)
 }
 
-function propertyFunctionRange(source, propertyName) {
-    const declaration = new RegExp(`\\b${propertyName}\\s*:\\s*function\\s*\\([^)]*\\)`).exec(codeMask(source))
-    assert.ok(declaration, `missing ${propertyName} callback`)
-    return bracedRangeAfter(source, declaration.index + declaration[0].length, `${propertyName} callback`)
-}
+function validate(source) {
+    assert.match(source, /^import "js\/QuotaResetEvents\.js" as QuotaReset$/m)
+    assert.match(source, /^import "js\/TestCelebrationRequests\.js" as TestCelebrationRequests$/m)
+    assert.match(source, /Qt\.resolvedUrl\("\.\.\/scripts\/test-celebration-bridge\.sh"\)/)
 
-function objectRanges(source, typeName) {
-    const ranges = []
-    const masked = codeMask(source)
-    const pattern = new RegExp(`\\b${typeName.replaceAll(".", "\\.")}\\s*\\{`, "g")
-    let match
-    while ((match = pattern.exec(masked)) !== null) {
-        const range = bracedRangeAfter(source, match.index, typeName)
-        ranges.push({ ...range, declarationStart: match.index })
-        pattern.lastIndex = range.end
-    }
-    return ranges
-}
-
-function objectRangeById(source, typeName, id) {
-    const candidates = objectRanges(source, typeName).filter(range =>
-        new RegExp(`\\bid\\s*:\\s*${id}\\b`).test(codeMask(range.body)))
-    assert.equal(candidates.length, 1, `expected one ${typeName} with id ${id}`)
-    return candidates[0]
-}
-
-function propertyBlockRange(source, declarationPattern, label) {
-    const declaration = declarationPattern.exec(codeMask(source))
-    assert.ok(declaration, `missing ${label}`)
-    return bracedRangeAfter(source, declaration.index + declaration[0].length, label)
-}
-
-function isWordAt(masked, index, word) {
-    if (masked.slice(index, index + word.length) !== word) return false
-    const before = masked[index - 1] || ""
-    const after = masked[index + word.length] || ""
-    return !/[A-Za-z0-9_$]/.test(before) && !/[A-Za-z0-9_$]/.test(after)
-}
-
-function skipWhitespace(masked, index) {
-    while (index < masked.length && /\s/.test(masked[index])) ++index
-    return index
-}
-
-function topLevelTryStatements(source) {
-    const masked = codeMask(source)
-    const statements = []
-    let braceDepth = 0
-
-    for (let i = 0; i < masked.length; ++i) {
-        if (masked[i] === "{") {
-            ++braceDepth
-            continue
-        }
-        if (masked[i] === "}") {
-            --braceDepth
-            continue
-        }
-        if (braceDepth !== 0 || !isWordAt(masked, i, "try")) continue
-
-        const tryOpening = skipWhitespace(masked, i + 3)
-        assert.equal(masked[tryOpening], "{", "top-level try must have a block")
-        const tryClosing = matchingDelimiter(source, tryOpening, "{", "}")
-        const catchIndex = skipWhitespace(masked, tryClosing + 1)
-        assert.ok(isWordAt(masked, catchIndex, "catch"), "top-level try must have a catch")
-        const catchOpening = masked.indexOf("{", catchIndex + 5)
-        assert.notEqual(catchOpening, -1, "catch must have a block")
-        const catchClosing = matchingDelimiter(source, catchOpening, "{", "}")
-        statements.push({
-            start: i,
-            end: catchClosing + 1,
-            tryBody: source.slice(tryOpening + 1, tryClosing),
-            catchBody: source.slice(catchOpening + 1, catchClosing),
-            catchClosing,
-            full: source.slice(i, catchClosing + 1)
-        })
-        i = catchClosing
-    }
-    return statements
-}
-
-function topLevelIfStatements(source) {
-    const masked = codeMask(source)
-    const statements = []
-    let braceDepth = 0
-
-    for (let i = 0; i < masked.length; ++i) {
-        if (masked[i] === "{") {
-            ++braceDepth
-            continue
-        }
-        if (masked[i] === "}") {
-            --braceDepth
-            continue
-        }
-        if (braceDepth !== 0 || !isWordAt(masked, i, "if")) continue
-
-        const conditionOpening = skipWhitespace(masked, i + 2)
-        assert.equal(masked[conditionOpening], "(", "top-level if must have a condition")
-        const conditionClosing = matchingDelimiter(source, conditionOpening, "(", ")")
-        const bodyOpening = skipWhitespace(masked, conditionClosing + 1)
-        assert.equal(masked[bodyOpening], "{", "top-level if must have a block")
-        const bodyClosing = matchingDelimiter(source, bodyOpening, "{", "}")
-        statements.push({
-            start: i,
-            end: bodyClosing + 1,
-            condition: source.slice(conditionOpening + 1, conditionClosing),
-            body: source.slice(bodyOpening + 1, bodyClosing)
-        })
-        i = bodyClosing
-    }
-    return statements
-}
-
-function normalizeWhitespace(source) {
-    return source.replace(/\s+/g, " ").trim()
-}
-
-function executableMatch(source, pattern) {
-    const flags = pattern.flags.indexOf("g") >= 0 ? pattern.flags : pattern.flags + "g"
-    const scanner = new RegExp(pattern.source, flags)
-    const masked = codeMask(source)
-    let match
-    while ((match = scanner.exec(source)) !== null) {
-        const firstRawCodeOffset = match[0].search(/\S/)
-        if (firstRawCodeOffset >= 0 && masked[match.index + firstRawCodeOffset] !== " ") return match
-        if (match[0].length === 0) ++scanner.lastIndex
-    }
-    return null
-}
-
-function assertExecutableMatch(source, pattern, message) {
-    const match = executableMatch(source, pattern)
-    assert.ok(match, message)
-    return match
-}
-
-function replaceRange(source, range, replacementBody) {
-    return source.slice(0, range.bodyStart) + replacementBody + source.slice(range.bodyEnd)
-}
-
-function validateConfig(source) {
-    assertExecutableMatch(
-        source,
-        /^import "js\/TestCelebrationRequests\.js" as TestCelebrationRequests$/m,
-        "request module must be imported in executable QML"
-    )
-
-    const bridge = propertyBlockRange(
-        source,
-        /readonly property string testCelebrationBridgeScript\s*:/,
-        "testCelebrationBridgeScript"
-    )
-    assertExecutableMatch(
-        bridge.body,
-        /Qt\.resolvedUrl\("\.\.\/scripts\/test-celebration-bridge\.sh"\)/,
-        "bridge path must be passed to Qt.resolvedUrl"
-    )
-    assertExecutableMatch(bridge.body, /u\.indexOf\("file:\/\/"\)/, "bridge path must handle file URLs")
-
-    const testButtons = objectRanges(source, "QQC2.Button").filter(range =>
-        executableMatch(range.body, /text:\s*tr\("Send test celebration"\)/))
-    assert.equal(testButtons.length, 1, "expected one test-celebration button")
-    assertExecutableMatch(
-        testButtons[0].body,
-        /onClicked:\s*configPage\.sendTestCelebration\(\)/,
-        "test button must execute sendTestCelebration()"
-    )
+    const buttons = objectRanges(source, "QQC2.Button").filter(range =>
+        /text:\s*tr\("Send test celebration"\)/.test(range.body))
+    assert.equal(buttons.length, 1, "expected one test-celebration button")
+    assert.match(codeMask(buttons[0].body), /onClicked:\s*configPage\.sendTestCelebration\(\)/)
 
     const producerRange = functionRange(source, "sendTestCelebration")
     const producer = producerRange.body
     const producerCode = codeMask(producer)
-    const formatterCall = callRange(
-        producer,
-        "QuotaReset\\.formatNotification",
-        "QuotaReset.formatNotification() call"
-    )
-    const formatterArgs = splitTopLevel(formatterCall.args)
-    assert.equal(formatterArgs.length, 2, "formatter call must have exactly two arguments")
-    const eventsMask = codeMask(formatterArgs[0])
-    const eventsOpening = skipWhitespace(eventsMask, 0)
-    assert.equal(eventsMask[eventsOpening], "[", "formatter events argument must be an array literal")
-    const eventsClosing = matchingDelimiter(formatterArgs[0], eventsOpening, "[", "]")
-    assert.equal(eventsMask.slice(eventsClosing + 1).trim(), "", "formatter events argument must contain only its array")
-    const events = splitTopLevel(formatterArgs[0].slice(eventsOpening + 1, eventsClosing))
-    assert.equal(events.length, 1, "formatter must receive exactly one event")
-    const eventProperties = objectProperties(events[0], "formatter event")
-    assert.ok(literalEquals(eventProperties.get("windowId") || "", "5h"),
-        "formatter event must use the five-hour window id")
-    assert.ok(literalEquals(eventProperties.get("windowLabel") || "", "5h"),
-        "formatter event must use the five-hour label")
-    assert.ok(literalEquals(eventProperties.get("kind") || "", "natural"),
-        "formatter event must be natural")
-    assert.match(producerCode, /TestCelebrationRequests\.createRequest\s*\(/)
-    assert.match(producerCode, /TestCelebrationRequests\.serializeRequest\s*\(/)
-    assert.match(producerCode, /Date\.now\s*\(\)/)
-    assert.match(producerCode, /Math\.random\s*\(\)/)
+    const attempts = topLevelTries(producer)
+    assert.equal(attempts.length, 2, "notification and writer attempts must be sibling top-level try/catches")
+    const [notification, writer] = attempts
+    assert.match(codeMask(notification.catchBody), /console\.log/)
+    assert.match(codeMask(writer.catchBody), /console\.log/)
 
-    const attempts = topLevelTryStatements(producer)
-    assert.equal(
-        attempts.length,
-        2,
-        "notification and writer try/catch attempts must be sibling top-level statements"
-    )
-    const [notificationAttempt, writerAttempt] = attempts
-    const notificationCode = codeMask(notificationAttempt.tryBody)
-    const writerCode = codeMask(writerAttempt.tryBody)
-    const notificationCall = callRange(
-        notificationAttempt.tryBody,
-        "testResetNotificationComponent\\.createObject",
-        "notification attempt must create the notification in executable code"
-    )
-    const notificationArgs = splitTopLevel(notificationCall.args)
-    assert.equal(notificationArgs.length, 2, "notification creation must have parent and properties")
-    const notificationProperties = objectProperties(notificationArgs[1], "notification properties")
-    const textExpression = notificationProperties.get("text") || ""
-    const variables = topLevelVarInitializers(notificationAttempt.tryBody)
-    const suffixes = variables.filter(variable =>
-        literalEquals(variable.value, "Preview from Settings — no reset was logged."))
-    assert.equal(suffixes.length, 1, "notification must declare the exact preview suffix once")
-    const suffix = suffixes[0]
-    assert.ok(suffix.start < notificationCall.start, "preview suffix must be declared before notification use")
-    const directSuffixUse = new RegExp(`^\\s*(?:String\\s*\\(\\s*)?${suffix.name}(?:\\s*\\))?\\s*$`)
-    let suffixUsed = directSuffixUse.test(codeMask(textExpression))
-    if (!suffixUsed) {
-        const textVariable = variables.find(variable =>
-            variable.start < notificationCall.start
-            && new RegExp(`^\\s*(?:String\\s*\\(\\s*)?${variable.name}(?:\\s*\\))?\\s*$`)
-                .test(codeMask(textExpression)))
-        suffixUsed = !!textVariable
-            && expressionGuaranteesName(textVariable.value, suffix.name)
-    }
-    assert.ok(suffixUsed, "notification text must directly use the preview suffix")
-    assert.match(notificationCode, /\.sendEvent\s*\(\)/, "notification attempt must execute sendEvent()")
-    assert.doesNotMatch(notificationCode, /testCelebrationWriter\.connectSource/)
-    assert.match(codeMask(notificationAttempt.catchBody), /console\.log/)
+    const helperCalls = callRanges(notification.tryBody, "QuotaReset\\.formatSettingsPreviewNotification")
+    assert.equal(helperCalls.length, 1, "notification attempt must directly call the pure preview helper once")
+    assert.equal(helperCalls[0].args.trim(), "", "preview helper takes no arguments")
+    const previewDeclaration = /\bvar\s+preview\s*=\s*QuotaReset\.formatSettingsPreviewNotification\s*\(\s*\)/
+        .exec(codeMask(notification.tryBody))
+    assert.ok(previewDeclaration, "preview helper result must be declared as preview")
+
+    const creates = callRanges(notification.tryBody, "testResetNotificationComponent\\.createObject")
+    assert.equal(creates.length, 1, "notification attempt must create exactly one notification")
+    assert.ok(previewDeclaration.index < creates[0].start, "preview declaration must precede notification use")
+    const createArgs = splitTopLevel(creates[0].args)
+    assert.equal(createArgs.length, 2, "createObject must receive parent and properties")
+    const properties = objectProperties(createArgs[1], "notification properties")
+    assert.equal(normalize(properties.get("title") || ""), "String(preview.title)",
+        "notification title must directly use preview.title")
+    assert.equal(normalize(properties.get("text") || ""), "String(preview.text)",
+        "notification text must directly use preview.text")
+    assert.match(codeMask(notification.tryBody), /\.sendEvent\s*\(\)/)
+    assert.doesNotMatch(codeMask(notification.tryBody), /testCelebrationWriter\.connectSource/)
+
+    const writerCode = codeMask(writer.tryBody)
     assert.match(writerCode, /TestCelebrationRequests\.createRequest\s*\(/)
-    assert.match(writerCode, /testCelebrationWriter\.connectSource\s*\(/)
-    assert.match(codeMask(writerAttempt.catchBody), /console\.log/)
+    assert.match(writerCode, /TestCelebrationRequests\.serializeRequest\s*\(/)
+    assert.match(writerCode, /Date\.now\s*\(\)/)
+    assert.match(writerCode, /Math\.random\s*\(\)/)
+    const expectedCommand = `"printf %s " + QuotaReset.shellQuote(payload)
+        + " | bash " + QuotaReset.shellQuote(testCelebrationBridgeScript) + " write"`
+    const command = /\bvar\s+command\s*=([\s\S]*?)\btestCelebrationWriter\.connectSource\s*\(([^)]*)\)/
+        .exec(writer.tryBody)
+    assert.ok(command, "writer must build and connect its command")
+    assert.equal(command[1].replace(/\s+/g, " ").trim().replace(/;$/, ""),
+        expectedCommand.replace(/\s+/g, " ").trim(),
+        "writer command must directly use shared shellQuote for payload and bridge")
+    assert.equal(command[2].trim(), "command", "connectSource must receive command")
 
-    const commandDeclaration = /\bvar\s+command\s*=/.exec(writerCode)
-    assert.ok(commandDeclaration, "writer attempt must construct command")
-    const connectCall = /testCelebrationWriter\.connectSource\s*\(([^)]*)\)/.exec(
-        writerCode.slice(commandDeclaration.index + commandDeclaration[0].length)
-    )
-    assert.ok(connectCall, "writer attempt must connect the constructed command")
-    const commandExpression = writerAttempt.tryBody
-        .slice(commandDeclaration.index + commandDeclaration[0].length)
-        .slice(0, connectCall.index)
-        .trim()
-        .replace(/;$/, "")
-    const expectedCommandExpression = `"printf %s " + shellQuote(payload)
-        + " | bash " + shellQuote(testCelebrationBridgeScript) + " write"`
-    assert.equal(
-        normalizeWhitespace(commandExpression),
-        normalizeWhitespace(expectedCommandExpression),
-        "connected command must quote the payload and resolved bridge path as one safe pipeline"
-    )
-    assert.equal(connectCall[1].trim(), "command", "connectSource must receive the safely built command")
+    for (const forbidden of ["handleQuotaResets", "buildLogCommand", "logQuotaResetEnvelopes"])
+        assert.doesNotMatch(producerCode, new RegExp(`\\b${forbidden}\\s*\\(`))
+    assert.doesNotMatch(producer, /["']log-reset\.sh["']/)
 
-    for (const forbiddenCall of [
-        "handleQuotaResets",
-        "buildLogCommand",
-        "logQuotaResetEnvelopes"
-    ]) {
-        assert.equal(
-            new RegExp(`\\b${forbiddenCall}\\s*\\(`).test(producerCode),
-            false,
-            `sendTestCelebration() must not reference ${forbiddenCall}`
-        )
-    }
-    assert.equal(
-        executableMatch(producer, /["']log-reset\.sh["']/),
-        null,
-        "sendTestCelebration() must not reference log-reset.sh"
-    )
+    const wrapper = functionRange(source, "sendTestQuotaResetNotification")
+    assert.equal(normalize(wrapper.body).replace(/;$/, ""), "sendTestCelebration()",
+        "compatibility wrapper must delegate only")
 
-    const compatibility = functionRange(source, "sendTestQuotaResetNotification")
-    const normalizedCompatibility = codeMask(compatibility.body).replace(/\s+/g, "").replace(/;$/, "")
-    assert.equal(
-        normalizedCompatibility,
-        "sendTestCelebration()",
-        "compatibility wrapper must contain only sendTestCelebration()"
-    )
+    assert.doesNotMatch(producerCode, /(?<!QuotaReset\.)\bshellQuote\s*\(/,
+        "producer must not use a local shellQuote")
+    assert.doesNotMatch(codeMask(source), /\bfunction\s+shellQuote\s*\(/,
+        "configGeneral must not define shellQuote")
+    const discovery = functionRange(source, "runDiscover")
+    assert.match(discovery.body.replace(/\s+/g, " "),
+        /discoverSource\.connectSource\("bash " \+ QuotaReset\.shellQuote\(discoverScript\)\)/,
+        "discovery command must preserve semantics through shared shellQuote")
 
-    const writerSource = objectRangeById(source, "Plasma5Support.DataSource", "testCelebrationWriter")
-    assertExecutableMatch(writerSource.body, /engine:\s*"executable"/, "writer must use the executable engine")
-    const completion = propertyFunctionRange(writerSource.body, "onNewData")
-    assertExecutableMatch(completion.body, /data\["exit code"\]/, "writer callback must read exit code in its own block")
-    assertExecutableMatch(completion.body, /data\["exit status"\]/, "writer callback must read exit status in its own block")
-    assertExecutableMatch(completion.body, /data\["stderr"\]/, "writer callback must read stderr in its own block")
-    assertExecutableMatch(completion.body, /data\["error"\]/, "writer callback must read executable error in its own block")
-    assertExecutableMatch(completion.body, /data\["errorString"\]/, "writer callback must read executable errorString in its own block")
-
+    const dataSource = objectById(source, "Plasma5Support.DataSource", "testCelebrationWriter")
+    assert.match(dataSource.body, /engine:\s*"executable"/)
+    const completion = propertyFunction(dataSource.body, "onNewData")
     const completionCode = codeMask(completion.body)
+    for (const field of ["exit code", "exit status", "stderr", "error", "errorString"])
+        assert.ok(completion.body.includes(`["${field}"]`), `writer must read ${field} locally`)
     const disconnect = /disconnectSource\s*\(sourceName\)/.exec(completionCode)
-    assert.ok(disconnect, "writer completion must disconnect its source")
-    const outcomeBranches = topLevelIfStatements(completion.body)
-    assert.equal(outcomeBranches.length, 1, "writer completion must have one scoped outcome branch")
-    const outcome = outcomeBranches[0]
-    assert.ok(disconnect.index < outcome.start, "writer completion must disconnect before outcome reporting")
-    const outcomeConditionCode = normalizeWhitespace(codeMask(outcome.condition))
-    const outcomeBodyCode = codeMask(outcome.body)
-    assert.match(
-        outcomeConditionCode,
-        /exitCode !== undefined && Number\(exitCode\) !== 0/,
-        "writer failure condition must include non-zero exit code"
-    )
-    assert.match(
-        outcomeConditionCode,
-        /exitStatus !== undefined && Number\(exitStatus\) !== 0/,
-        "writer failure condition must include non-zero exit status"
-    )
-    assert.match(outcomeConditionCode, /\|\|\s*error/, "writer failure condition must include executable error")
-    assert.match(outcomeBodyCode, /console\.log/, "writer failures must be reported conditionally")
-    assert.match(outcomeBodyCode, /stderr/, "writer failure report must include stderr")
-    assert.match(outcomeBodyCode, /error/, "writer failure report must include executable error text")
-    assert.equal(
-        (completionCode.match(/console\.log/g) || []).length,
-        (outcomeBodyCode.match(/console\.log/g) || []).length,
-        "writer logging must remain inside the failure condition"
-    )
+    const failure = /\bif\s*\(/.exec(completionCode)
+    assert.ok(disconnect && failure && disconnect.index < failure.index,
+        "writer must disconnect before local failure handling")
+    assert.match(completionCode, /console\.log/)
 }
 
-function nestedWriterMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const attempts = topLevelTryStatements(producerRange.body)
-    assert.equal(attempts.length, 2, "nested-writer mutation needs two original attempts")
-    const [notificationAttempt, writerAttempt] = attempts
-    const mutatedBody = producerRange.body.slice(0, notificationAttempt.catchClosing)
-        + "\n        " + writerAttempt.full
-        + producerRange.body.slice(notificationAttempt.catchClosing, writerAttempt.start)
-        + producerRange.body.slice(writerAttempt.end)
-    return replaceRange(source, producerRange, mutatedBody)
+function mutateNestedWriter(source) {
+    const range = functionRange(source, "sendTestCelebration")
+    const attempts = topLevelTries(range.body)
+    const body = range.body.slice(0, attempts[0].end - 1) + "\n" + attempts[1].full
+        + range.body.slice(attempts[0].end - 1, attempts[1].start) + range.body.slice(attempts[1].end)
+    return replaceBody(source, range, body)
+}
+function mutateDisconnected(source) {
+    return source.replace("testCelebrationWriter.connectSource(command)",
+        "testCelebrationWriter.connectSource(payload)")
+}
+function mutateDataSourceBleed(source) {
+    return source.replace("id: testCelebrationWriter", "id: decoyWriter")
+        .replace("id: discoverSource", "id: testCelebrationWriter")
+}
+function mutateWrapper(source) {
+    const range = functionRange(source, "sendTestQuotaResetNotification")
+    return replaceBody(source, range, "sendTestCelebration(); buildLogCommand()")
+}
+function mutateCommentDecoy(source) {
+    const range = functionRange(source, "sendTestCelebration")
+    const body = range.body.replace(
+        /var preview = QuotaReset\.formatSettingsPreviewNotification\(\)/,
+        'var preview = null\n            // QuotaReset.formatSettingsPreviewNotification()')
+    return replaceBody(source, range, body)
+}
+function mutateRegexBrace(source) {
+    const range = functionRange(source, "sendTestCelebration")
+    return replaceBody(source, range, range.body + "\nvar brace = /[}]/; buildLogCommand()")
+}
+function mutateDuplicateProperty(source) {
+    return source.replace("title: String(preview.title),",
+        'title: String(preview.title),\n                title: "wrong",')
 }
 
-function disconnectedCommandMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const mutatedBody = producerRange.body.replace(
-        "testCelebrationWriter.connectSource(command)",
-        "testCelebrationWriter.connectSource(payload)"
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "command mutation must apply")
-    return replaceRange(source, producerRange, mutatedBody)
+const mutants = {
+    "nested-writer": mutateNestedWriter,
+    "disconnected-command": mutateDisconnected,
+    "datasource-bleed": mutateDataSourceBleed,
+    "wrapper-side-effect": mutateWrapper,
+    "comment-string-decoy": mutateCommentDecoy,
+    "regex-brace-truncation": mutateRegexBrace,
+    "duplicate-notification-property": mutateDuplicateProperty
 }
 
-function dataSourceBleedMutation(source) {
-    const withoutWriterId = source.replace(
-        "id: testCelebrationWriter",
-        "id: decoyCelebrationWriter"
-    )
-    const mutated = withoutWriterId.replace("id: discoverSource", "id: testCelebrationWriter")
-    assert.notEqual(mutated, source, "DataSource mutation must apply")
-    return mutated
+const selected = process.env.TEST_KCM_WIRING_MUTANT
+if (selected) {
+    assert.ok(mutants[selected], `unknown mutant ${selected}`)
+    validate(mutants[selected](configQml))
+    assert.fail(`representative mutant ${selected} was accepted`)
 }
 
-function sideEffectWrapperMutation(source) {
-    const wrapperRange = functionRange(source, "sendTestQuotaResetNotification")
-    return replaceRange(source, wrapperRange, "\n        sendTestCelebration()\n        buildLogCommand()\n    ")
-}
+validate(configQml)
+for (const [name, mutate] of Object.entries(mutants))
+    assert.throws(() => validate(mutate(configQml)), undefined,
+        `representative mutant ${name} must be rejected by the normal validator`)
 
-function commentStringDecoyMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const operationalNotification = /var n = testResetNotificationComponent\.createObject\([\s\S]*?\n            if \(n\)\n                n\.sendEvent\(\)/
-    const mutatedBody = producerRange.body.replace(
-        operationalNotification,
-        'var notificationDecoy = "testResetNotificationComponent.createObject("\n'
-            + "            // .sendEvent()"
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "comment/string decoy mutation must apply")
-    return replaceRange(source, producerRange, mutatedBody)
-}
-
-function regexBraceTruncationMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const mutatedBody = producerRange.body
-        + "\n        var braceMatcher = /[}]/\n"
-        + "        buildLogCommand()\n    "
-    return replaceRange(source, producerRange, mutatedBody)
-}
-
-function unsafeShellQuoteDecoyMutation(source) {
-    const shellQuote = rootFunctionRange(source, "shellQuote")
-    return replaceRange(source, shellQuote, String.raw`
-        var expectedText = "return \"'\" + String(path).replace(/'/g, \"'\\\\''\") + \"'\""
-        // return "'" + String(path).replace(/'/g, "'\\''") + "'"
-        return "'" + String(path) + "'"
-    `)
-}
-
-function nestedShellQuoteDecoyMutation(source) {
-    const shellQuote = rootFunctionRange(source, "shellQuote")
-    return replaceRange(source, shellQuote, String.raw`
-        function shellQuote(path) {
-            return "'" + String(path).replace(/'/g, "'\\''") + "'"
-        }
-        return "'" + String(path) + "'"
-    `)
-}
-
-function detachedNaturalFixtureMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const fixture = `{
-                    windowId: "5h",
-                    windowLabel: "5h",
-                    kind: "natural",
-                    unexpected: false,
-                    previousUsagePercent: 87,
-                    expectedResetAtMs: 0
-                }`
-    const wrongFixture = fixture
-        .replace('windowId: "5h"', 'windowId: "wrong_window"')
-        .replace('windowLabel: "5h"', 'windowLabel: "wrong label"')
-        .replace('kind: "natural"', 'kind: "unexpected"')
-    const mutatedBody = producerRange.body.replace(
-        fixture,
-        wrongFixture
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "detached fixture mutation must apply")
-    return replaceRange(source, producerRange, "\n        var detachedNaturalFixture = " + fixture + mutatedBody)
-}
-
-function duplicateFixturePropertiesMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const mutatedBody = producerRange.body.replace(
-        'kind: "natural",',
-        'kind: "natural",\n                    windowId: "wrong_window",\n                    windowLabel: "wrong label",\n                    kind: "unexpected",'
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "duplicate fixture mutation must apply")
-    return replaceRange(source, producerRange, mutatedBody)
-}
-
-function detachedPreviewSuffixMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const mutatedBody = producerRange.body.replace(
-        "text: String(text)",
-        'text: "Detached notification text"'
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "detached suffix mutation must apply")
-    return replaceRange(source, producerRange, mutatedBody)
-}
-
-function deadPreviewSuffixMutation(source) {
-    const producerRange = functionRange(source, "sendTestCelebration")
-    const mutatedBody = producerRange.body.replace(
-        "text: String(text)",
-        'text: String(false ? previewSuffix : "Wrong")'
-    )
-    assert.notEqual(mutatedBody, producerRange.body, "dead suffix mutation must apply")
-    return replaceRange(source, producerRange, mutatedBody)
-}
-
-function validateShellQuote(source) {
-    const shellQuote = rootFunctionRange(source, "shellQuote")
-    assert.equal(shellQuote.parameter, "path", "root shellQuote() must take exactly path")
-    const expectedBody = String.raw`return "'" + String(path).replace(/'/g, "'\\''") + "'"`
-    assert.equal(
-        normalizeWhitespace(shellQuote.body),
-        expectedBody,
-        "root shellQuote() must exactly implement POSIX single-quote escaping"
-    )
-}
-
-function validateSource(source) {
-    validateConfig(source)
-    validateShellQuote(source)
-}
-
-const mutations = {
-    "nested-writer": {
-        apply: nestedWriterMutation,
-        rejection: /sibling top-level statements/
-    },
-    "disconnected-command": {
-        apply: disconnectedCommandMutation,
-        rejection: /connectSource must receive the safely built command/
-    },
-    "datasource-bleed": {
-        apply: dataSourceBleedMutation,
-        rejection: /writer callback must read exit status in its own block/
-    },
-    "wrapper-side-effect": {
-        apply: sideEffectWrapperMutation,
-        rejection: /compatibility wrapper must contain only sendTestCelebration/
-    },
-    "comment-string-decoy": {
-        apply: commentStringDecoyMutation,
-        rejection: /notification attempt must create the notification in executable code/
-    },
-    "regex-brace-truncation": {
-        apply: regexBraceTruncationMutation,
-        rejection: /sendTestCelebration\(\) must not reference buildLogCommand/
-    },
-    "unsafe-shell-quote-decoy": {
-        apply: unsafeShellQuoteDecoyMutation,
-        rejection: /root shellQuote\(\) must exactly implement POSIX single-quote escaping/
-    },
-    "nested-shell-quote-decoy": {
-        apply: nestedShellQuoteDecoyMutation,
-        rejection: /root shellQuote\(\) must exactly implement POSIX single-quote escaping/
-    },
-    "detached-natural-fixture": {
-        apply: detachedNaturalFixtureMutation,
-        rejection: /formatter event must use the five-hour window id/
-    },
-    "duplicate-fixture-properties": {
-        apply: duplicateFixturePropertiesMutation,
-        rejection: /formatter event must not duplicate windowId/
-    },
-    "detached-preview-suffix": {
-        apply: detachedPreviewSuffixMutation,
-        rejection: /notification text must directly use the preview suffix/
-    },
-    "dead-preview-suffix": {
-        apply: deadPreviewSuffixMutation,
-        rejection: /notification text must directly use the preview suffix/
-    }
-}
-
-const selectedMutation = process.env.TEST_KCM_WIRING_MUTANT
-if (selectedMutation) {
-    assert.ok(mutations[selectedMutation], `unknown TEST_KCM_WIRING_MUTANT=${selectedMutation}`)
-    validateSource(mutations[selectedMutation].apply(configQml))
-    assert.fail(`representative mutant ${selectedMutation} was accepted`)
-}
-
-validateSource(configQml)
-
-for (const [name, mutant] of Object.entries(mutations)) {
-    assert.throws(
-        () => validateSource(mutant.apply(configQml)),
-        mutant.rejection,
-        `representative mutant ${name} must be rejected by the same assertions`
-    )
-}
-
-console.log(`All Settings test-celebration wiring tests passed (including ${Object.keys(mutations).length} mutation guards).`)
+console.log(`All Settings test-celebration wiring tests passed (including ${Object.keys(mutants).length} mutation guards).`)

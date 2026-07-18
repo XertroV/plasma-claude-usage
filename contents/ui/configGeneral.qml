@@ -67,27 +67,10 @@ KCM.SimpleKCM {
      */
     function sendTestCelebration() {
         try {
-            var sample = QuotaReset.formatNotification(
-                [{
-                    windowId: "5h",
-                    windowLabel: "5h",
-                    kind: "natural",
-                    unexpected: false,
-                    previousUsagePercent: 87,
-                    expectedResetAtMs: 0
-                }],
-                { displayName: "Test", provider: "claude", id: "test" }
-            )
-            var title = (sample && sample.title)
-                ? sample.title
-                : "Woo-hoo! Test quota reset 🎉"
-            var previewSuffix = "Preview from Settings — no reset was logged."
-            var text = (sample && sample.text)
-                ? sample.text + " · " + previewSuffix
-                : previewSuffix
+            var preview = QuotaReset.formatSettingsPreviewNotification()
             var n = testResetNotificationComponent.createObject(configPage, {
-                title: String(title),
-                text: String(text),
+                title: String(preview.title),
+                text: String(preview.text),
                 iconName: "face-smile-big",
                 componentName: "plasma_workspace",
                 eventId: "notification"
@@ -104,8 +87,8 @@ KCM.SimpleKCM {
                 return nowMs.toString(36) + "-" + Math.random().toString(36).substring(2)
             })
             var payload = TestCelebrationRequests.serializeRequest(request)
-            var command = "printf %s " + shellQuote(payload)
-                + " | bash " + shellQuote(testCelebrationBridgeScript) + " write"
+            var command = "printf %s " + QuotaReset.shellQuote(payload)
+                + " | bash " + QuotaReset.shellQuote(testCelebrationBridgeScript) + " write"
             testCelebrationWriter.connectSource(command)
         } catch (e) {
             console.log("configGeneral: test celebration request failed", e)
@@ -151,10 +134,6 @@ KCM.SimpleKCM {
         var u = Qt.resolvedUrl("../scripts/test-celebration-bridge.sh").toString()
         if (u.indexOf("file://") === 0) return u.substring(7)
         return u
-    }
-
-    function shellQuote(path) {
-        return "'" + String(path).replace(/'/g, "'\\''") + "'"
     }
 
     function parseJsonSafe(raw, fallback) {
@@ -330,7 +309,7 @@ KCM.SimpleKCM {
 
     function runDiscover() {
         discoverStatus = tr("Discovering…")
-        discoverSource.connectSource("bash " + shellQuote(discoverScript))
+        discoverSource.connectSource("bash " + QuotaReset.shellQuote(discoverScript))
     }
 
     function applyDiscovered(list) {
