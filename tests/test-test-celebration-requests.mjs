@@ -73,6 +73,14 @@ function consumeRequest(request, state = {}, nowMs = NOW) {
     assert.equal(consumeRequest(validRequest({ nonce: "n".repeat(128) })).accepted, true)
     assert.equal(consumeRequest(validRequest({ nonce: "n".repeat(129) })).reason, "nonce")
     assert.equal(consumeRequest(validRequest({ createdAtMs: "123" })).reason, "timestamp")
+    assert.equal(
+        Requests.consume(
+            '{"version":1,"type":"test-celebration","createdAtMs":1e400,"nonce":"nonce-non-finite"}',
+            {},
+            NOW
+        ).reason,
+        "timestamp"
+    )
     assert.equal(consumeRequest(validRequest({ createdAtMs: null })).reason, "timestamp")
     assert.equal(consumeRequest(validRequest({ createdAtMs: undefined })).reason, "timestamp")
 }
