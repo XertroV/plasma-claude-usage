@@ -70,10 +70,11 @@ function consumeRequest(request, state = {}, nowMs = NOW) {
     assert.equal(Requests.consume("null", {}, NOW).reason, "schema")
     assert.equal(consumeRequest(validRequest({ nonce: undefined })).reason, "nonce")
     assert.equal(consumeRequest(validRequest({ nonce: "" })).reason, "nonce")
-    assert.equal(consumeRequest(validRequest({ nonce: "n".repeat(1025) })).reason, "nonce")
+    assert.equal(consumeRequest(validRequest({ nonce: "n".repeat(128) })).accepted, true)
+    assert.equal(consumeRequest(validRequest({ nonce: "n".repeat(129) })).reason, "nonce")
     assert.equal(consumeRequest(validRequest({ createdAtMs: "123" })).reason, "timestamp")
     assert.equal(consumeRequest(validRequest({ createdAtMs: null })).reason, "timestamp")
-    assert.equal(consumeRequest(validRequest({ createdAtMs: Number.POSITIVE_INFINITY })).reason, "timestamp")
+    assert.equal(consumeRequest(validRequest({ createdAtMs: undefined })).reason, "timestamp")
 }
 
 // Freshness and future-skew boundaries are inclusive.
@@ -88,10 +89,11 @@ function consumeRequest(request, state = {}, nowMs = NOW) {
 
 // Consumption accepts once, rejects replay, prunes copied replay state, and leaves inputs intact.
 {
+    const replayRetentionMs = Requests.MAX_AGE_MS + Requests.MAX_FUTURE_SKEW_MS
     const first = Requests.createRequest(NOW, () => "nonce-1")
     const initialState = {
-        recent: NOW - 15000,
-        stale: NOW - 15001,
+        recent: NOW - replayRetentionMs,
+        stale: NOW - replayRetentionMs - 1,
         invalid: "not-a-timestamp"
     }
     const initialSnapshot = { ...initialState }
@@ -99,23 +101,52 @@ function consumeRequest(request, state = {}, nowMs = NOW) {
     assert.equal(accepted.accepted, true)
     assert.deepEqual(accepted.request, first)
     assert.notEqual(accepted.state, initialState)
-    assert.deepEqual(accepted.state, { recent: NOW - 15000, "nonce-1": NOW })
+    assert.deepEqual({ ...accepted.state }, { recent: NOW - replayRetentionMs, "nonce-1": NOW })
     assert.deepEqual(initialState, initialSnapshot, "consume does not mutate replay state")
 
-    const replayState = { "nonce-1": NOW, stale: NOW - 15001 }
+    const replayState = { "nonce-1": NOW, stale: NOW - replayRetentionMs - 1 }
     const replaySnapshot = { ...replayState }
     const replay = Requests.consume(JSON.stringify(first), replayState, NOW)
     assert.equal(replay.accepted, false)
     assert.equal(replay.reason, "replay")
     assert.equal(replay.request, null)
-    assert.deepEqual(replay.state, { "nonce-1": NOW })
+    assert.deepEqual({ ...replay.state }, { "nonce-1": NOW })
     assert.deepEqual(replayState, replaySnapshot)
 
     assert.deepEqual(
-        Requests.consume("bad-json", { stale: NOW - 15001, recent: NOW }, NOW).state,
+        { ...Requests.consume("bad-json", { stale: NOW - replayRetentionMs - 1, recent: NOW }, NOW).state },
         { recent: NOW },
         "state is pruned even when the payload is rejected"
     )
+}
+
+// A request accepted at maximum future skew remains replay-protected through its full freshness window.
+{
+    const futureRequest = validRequest({
+        createdAtMs: NOW + Requests.MAX_FUTURE_SKEW_MS,
+        nonce: "future-boundary"
+    })
+    const accepted = consumeRequest(futureRequest, {}, NOW)
+    assert.equal(accepted.accepted, true)
+
+    const lastFreshNow = NOW + Requests.MAX_AGE_MS + Requests.MAX_FUTURE_SKEW_MS
+    const replay = consumeRequest(futureRequest, accepted.state, lastFreshNow)
+    assert.equal(replay.reason, "replay")
+
+    const stale = consumeRequest(futureRequest, replay.state, lastFreshNow + 1)
+    assert.equal(stale.reason, "stale")
+}
+
+// Replay state treats nonce strings as data even when they name Object prototype properties.
+{
+    for (const nonce of ["__proto__", "constructor"]) {
+        const request = validRequest({ nonce })
+        const accepted = consumeRequest(request)
+        assert.equal(accepted.accepted, true)
+        assert.equal(Object.prototype.hasOwnProperty.call(accepted.state, nonce), true)
+        assert.equal(accepted.state[nonce], NOW)
+        assert.equal(consumeRequest(request, accepted.state).reason, "replay")
+    }
 }
 
 const profiles = Array.from({ length: 15 }, (_, index) => ({

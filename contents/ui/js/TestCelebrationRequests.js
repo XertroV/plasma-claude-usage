@@ -18,10 +18,10 @@ function serializeRequest(request) {
 }
 
 function copiedPrunedState(state, nowMs) {
-    var pruned = {}
+    var pruned = Object.create(null)
     var key
     var value
-    var cutoff = nowMs - MAX_AGE_MS
+    var cutoff = nowMs - MAX_AGE_MS - MAX_FUTURE_SKEW_MS
     var source = state || {}
 
     for (key in source) {
