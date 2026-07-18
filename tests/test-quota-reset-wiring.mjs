@@ -38,6 +38,28 @@ assert.match(controller, /shellQuote\(tag\)/)
 assert.match(controller, /: " \+ shellQuote\(tag\)/)
 assert.match(controller, /resetClassifyGraceMs/)
 assert.match(controller, /graceMs:\s*resetClassifyGraceMs/)
+assert.match(controller, /function triggerCardCelebration\s*\(/)
+assert.match(controller, /triggerCardCelebration\(profileId\)/)
+assert.match(controller, /property string celebrateProfileId/)
+assert.match(controller, /property int celebrateGeneration/)
+
+const card = read("contents/ui/AccountCard.qml")
+assert.match(card, /function playCelebration\s*\(/)
+assert.match(card, /function restoreIdleChrome\s*\(/)
+assert.match(card, /Qt\.binding\(function\(\)\s*\{\s*return idleFill\s*\}\)/)
+assert.match(card, /id: celebrateAnim/)
+assert.match(card, /onCelebrateGenerationChanged/)
+assert.match(card, /shakeX/)
+assert.match(card, /bounceScale/)
+assert.match(card, /partyGlow/)
+
+const cardsView = read("contents/ui/CardsView.qml")
+assert.match(cardsView, /celebrateProfileId: cardsRoot\.celebrateProfileId/)
+assert.match(cardsView, /celebrateGeneration: cardsRoot\.celebrateGeneration/)
+
+const main = read("contents/ui/main.qml")
+assert.match(main, /celebrateProfileId: root\.usageController/)
+assert.match(main, /celebrateGeneration: root\.usageController/)
 
 // Kcfg + KCM
 assert.match(mainXml, /name="notifyOnQuotaReset"/)

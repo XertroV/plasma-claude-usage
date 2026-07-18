@@ -16,7 +16,7 @@ A KDE Plasma 6 widget that displays AI coding usage quotas in the taskbar (Claud
   - Per-model / extra limits (Claude weekly_scoped, Codex Spark, banked resets)
   - Subscription plan badge
 - **Auto-refresh**: Configurable interval
-- **Quota reset celebration**: Desktop notification when a session/weekly window rolls over
+- **Quota reset celebration**: Desktop notification + matching account-card bounce when a session/weekly window rolls over
 - **Reset event log**: Structured logs under `~/.cache/plasma-claude-usage/resets/` (natural vs early/late/surprise)
 - **Error Handling**: Clear messages when not logged in or token expired
 - **No Dependencies**: Pure QML, no Python or external tools required

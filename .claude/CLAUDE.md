@@ -47,7 +47,8 @@ jq . ~/.cache/plasma-claude-usage/latest/*-wham-usage.json | head
 When successive polls show a window rolled to a new period (`resetAtMs` jumped and/or usage collapsed):
 
 1. Desktop notification (toggle `notifyOnQuotaReset`, default on) — batched per profile.
-2. Structured log under the same cache root (toggle `logQuotaResets`, default on):
+2. Matching account card plays a short bounce/glow/emoji celebration (`celebrateGeneration` pulse; always on, local-only).
+3. Structured log under the same cache root (toggle `logQuotaResets`, default on):
 
 ```
 {root}/resets/{YYYY}/{MM}/{DD}/{HHMMSS}-{ms3}-{provider}-{profileSlug}-{windowId}.json

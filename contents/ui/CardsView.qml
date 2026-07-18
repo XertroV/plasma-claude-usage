@@ -25,6 +25,9 @@ Item {
     /** When true, cards expand to fill available width in the flow. */
     property bool fillWidth: true
     property var i18n: null
+    // Quota-reset card celebration (from ProfileController)
+    property string celebrateProfileId: ""
+    property int celebrateGeneration: 0
 
     signal detailRequested(var profile)
     signal refreshRequested(var profile)
@@ -71,6 +74,8 @@ Item {
                 sessionColorMode: cardsRoot.sessionColorMode
                 weeklyColorMode: cardsRoot.weeklyColorMode
                 showBankedBadge: cardsRoot.showBankedBadge
+                celebrateProfileId: cardsRoot.celebrateProfileId
+                celebrateGeneration: cardsRoot.celebrateGeneration
                 minWidth: cardsRoot.cardMinWidth
                 width: {
                     var n = Math.min(cardsRoot.cards.length, cardsRoot.maxCards)

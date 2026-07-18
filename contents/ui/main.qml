@@ -313,6 +313,10 @@ PlasmoidItem {
             isLoading: root.isLoading
             loadingText: root.loadingCountText
             discoveryError: root.discoveryError
+            celebrateProfileId: root.usageController
+                    ? root.usageController.celebrateProfileId : ""
+            celebrateGeneration: root.usageController
+                    ? root.usageController.celebrateGeneration : 0
             maxCards: 8
             cardMinWidth: Kirigami.Units.gridUnit * 10
             fillWidth: true
@@ -368,6 +372,10 @@ PlasmoidItem {
                     isLoading: root.isLoading
                     loadingText: ""
                     discoveryError: root.discoveryError
+                    celebrateProfileId: root.usageController
+                            ? root.usageController.celebrateProfileId : ""
+                    celebrateGeneration: root.usageController
+                            ? root.usageController.celebrateGeneration : 0
                     maxCards: 12
                     cardMinWidth: Kirigami.Units.gridUnit * 11
                     fillWidth: true

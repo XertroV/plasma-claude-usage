@@ -17,6 +17,9 @@ Rectangle {
     property string weeklyColorMode: "efficiency"
     property bool showBankedBadge: true
     property int minWidth: Kirigami.Units.gridUnit * 11
+    /** When celebrateGeneration bumps and celebrateProfileId matches, party. */
+    property string celebrateProfileId: ""
+    property int celebrateGeneration: 0
 
     readonly property int contentFontPixelSize: Math.round(
         (Kirigami.Theme.smallFont.pixelSize + Kirigami.Theme.defaultFont.pixelSize) / 2)
@@ -49,24 +52,208 @@ Rectangle {
     readonly property string title: profile
             ? (profile.displayName || profile.id || "?") : "…"
 
+    // Idle chrome (overridden during celebration)
+    readonly property color idleFill: Qt.rgba(Kirigami.Theme.textColor.r,
+            Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+    readonly property color idleBorder: Qt.rgba(Kirigami.Theme.textColor.r,
+            Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+    readonly property color partyBorder: Kirigami.Theme.positiveTextColor
+            || Kirigami.Theme.highlightColor
+    readonly property color partyFill: Qt.rgba(partyBorder.r, partyBorder.g,
+            partyBorder.b, 0.18)
+
+    property bool celebrating: false
+    property real partyGlow: 0
+    property real partyEmojiOpacity: 0
+    property real partyEmojiScale: 0.4
+    property color fillColor: idleFill
+    property color borderColor: idleBorder
+    property int borderPx: 1
+
     implicitWidth: Math.max(minWidth, contentCol.implicitWidth + Kirigami.Units.smallSpacing * 2)
     implicitHeight: contentCol.implicitHeight + Kirigami.Units.smallSpacing * 2
     width: implicitWidth
     height: implicitHeight
 
     radius: Kirigami.Units.smallSpacing
-    color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
-                   Kirigami.Theme.textColor.b, 0.06)
-    border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
-                          Kirigami.Theme.textColor.b, 0.12)
-    border.width: 1
-    clip: true
+    color: fillColor
+    border.color: borderColor
+    border.width: borderPx
+    // Allow shake/bounce to paint slightly outside bounds during the party.
+    clip: !celebrating
+
+    transform: [
+        Translate { id: shakeX; x: 0 },
+        Scale {
+            id: bounceScale
+            origin.x: cardRoot.width / 2
+            origin.y: cardRoot.height / 2
+            xScale: 1
+            yScale: 1
+        }
+    ]
+
+    onCelebrateGenerationChanged: {
+        if (celebrateGeneration <= 0)
+            return
+        if (!profile || !profile.id)
+            return
+        if (String(profile.id) !== String(celebrateProfileId))
+            return
+        playCelebration()
+    }
+
+    function restoreIdleChrome() {
+        // ColorAnimation / assignment break property bindings — rebind so theme
+        // switches still update fill/border after a party.
+        fillColor = Qt.binding(function() { return idleFill })
+        borderColor = Qt.binding(function() { return idleBorder })
+        borderPx = 1
+        celebrating = false
+        shakeX.x = 0
+        bounceScale.xScale = 1
+        bounceScale.yScale = 1
+        partyGlow = 0
+        partyEmojiOpacity = 0
+        partyEmojiScale = 0.4
+    }
+
+    function playCelebration() {
+        if (celebrateAnim.running)
+            celebrateAnim.stop()
+        restoreIdleChrome()
+        celebrating = true
+        celebrateAnim.start()
+    }
+
+    SequentialAnimation {
+        id: celebrateAnim
+        // Pop in: glow + bounce
+        ParallelAnimation {
+            NumberAnimation {
+                target: cardRoot; property: "partyGlow"
+                from: 0; to: 1; duration: 140
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: cardRoot; property: "borderPx"
+                from: 1; to: 2; duration: 140
+            }
+            ColorAnimation {
+                target: cardRoot; property: "borderColor"
+                to: cardRoot.partyBorder; duration: 140
+            }
+            ColorAnimation {
+                target: cardRoot; property: "fillColor"
+                to: cardRoot.partyFill; duration: 140
+            }
+            NumberAnimation {
+                target: bounceScale; property: "xScale"
+                from: 1; to: 1.055; duration: 160
+                easing.type: Easing.OutBack
+            }
+            NumberAnimation {
+                target: bounceScale; property: "yScale"
+                from: 1; to: 1.055; duration: 160
+                easing.type: Easing.OutBack
+            }
+            NumberAnimation {
+                target: cardRoot; property: "partyEmojiOpacity"
+                from: 0; to: 1; duration: 120
+            }
+            NumberAnimation {
+                target: cardRoot; property: "partyEmojiScale"
+                from: 0.35; to: 1.15; duration: 220
+                easing.type: Easing.OutBack
+            }
+        }
+        // Happy shake
+        SequentialAnimation {
+            NumberAnimation { target: shakeX; property: "x"; to: 5; duration: 35 }
+            NumberAnimation { target: shakeX; property: "x"; to: -5; duration: 40 }
+            NumberAnimation { target: shakeX; property: "x"; to: 4; duration: 35 }
+            NumberAnimation { target: shakeX; property: "x"; to: -3; duration: 35 }
+            NumberAnimation { target: shakeX; property: "x"; to: 2; duration: 30 }
+            NumberAnimation { target: shakeX; property: "x"; to: 0; duration: 30
+                easing.type: Easing.OutCubic }
+        }
+        // Settle: scale home, fade glow, float emoji away
+        ParallelAnimation {
+            NumberAnimation {
+                target: bounceScale; property: "xScale"
+                to: 1; duration: 280
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: bounceScale; property: "yScale"
+                to: 1; duration: 280
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: cardRoot; property: "partyGlow"
+                to: 0; duration: 520
+                easing.type: Easing.InOutQuad
+            }
+            NumberAnimation {
+                target: cardRoot; property: "borderPx"
+                to: 1; duration: 400
+            }
+            ColorAnimation {
+                target: cardRoot; property: "borderColor"
+                to: cardRoot.idleBorder; duration: 450
+            }
+            ColorAnimation {
+                target: cardRoot; property: "fillColor"
+                to: cardRoot.idleFill; duration: 450
+            }
+            NumberAnimation {
+                target: cardRoot; property: "partyEmojiOpacity"
+                to: 0; duration: 420
+                easing.type: Easing.InQuad
+            }
+            NumberAnimation {
+                target: cardRoot; property: "partyEmojiScale"
+                to: 1.45; duration: 420
+                easing.type: Easing.InQuad
+            }
+        }
+        ScriptAction {
+            script: cardRoot.restoreIdleChrome()
+        }
+    }
+
+    // Soft highlight wash over the card face during celebration
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        z: 1
+        color: cardRoot.partyBorder
+        opacity: cardRoot.partyGlow * 0.22
+        visible: opacity > 0.01
+        // Let clicks pass through to controls underneath
+        enabled: false
+    }
+
+    // Party emoji that pops then floats off
+    Text {
+        anchors.centerIn: parent
+        z: 2
+        text: "🎉"
+        font.pixelSize: Math.max(18, Math.round(cardRoot.height * 0.42))
+        opacity: cardRoot.partyEmojiOpacity
+        scale: cardRoot.partyEmojiScale
+        visible: opacity > 0.01
+        style: Text.Outline
+        styleColor: Qt.rgba(0, 0, 0, 0.25)
+        enabled: false
+    }
 
     ColumnLayout {
         id: contentCol
         anchors.fill: parent
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Math.max(2, Kirigami.Units.smallSpacing / 2)
+        z: 0
 
         // Header: name · inline error · banked · refresh/spinner · detail
         RowLayout {

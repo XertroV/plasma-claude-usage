@@ -23,6 +23,10 @@ Item {
     property double nowMs: Date.now()
     // Bumped on every profile mutation so UI can re-sync reliably
     property int dataEpoch: 0
+    // I006 card celebration: cards watching celebrateGeneration play a fun anim
+    // when their profile.id matches celebrateProfileId.
+    property string celebrateProfileId: ""
+    property int celebrateGeneration: 0
 
     // Config-impact coalescing (moved from main.qml in T005): accumulate kcfg keys
     // then classify via ProfileRegistry.configurationChanged (rediscover > membership > soft).
@@ -153,11 +157,24 @@ Item {
             kinds.push(result.events[i].windowId + "=" + result.events[i].kind)
         console.log("Claude Usage: quota reset", profileId, kinds.join(","))
 
+        // Always pulse the matching account card (local, free, delightful).
+        triggerCardCelebration(profileId)
+
         if (cfgTruthy("notifyOnQuotaReset", true) && result.notification)
             sendQuotaResetNotification(result.notification.title, result.notification.text)
 
         if (cfgTruthy("logQuotaResets", true) && result.envelopes)
             logQuotaResetEnvelopes(result.envelopes)
+    }
+
+    /**
+     * Bump celebrateGeneration so any AccountCard bound to this id can party.
+     * Also usable from a future in-widget test control.
+     */
+    function triggerCardCelebration(profileId) {
+        if (!profileId) return
+        celebrateProfileId = String(profileId)
+        celebrateGeneration = celebrateGeneration + 1
     }
 
     function sendQuotaResetNotification(title, text) {
