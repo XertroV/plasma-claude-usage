@@ -14,6 +14,7 @@ import "js/QuotaCommon.js" as QC
 import "js/ProfileRegistry.js" as Registry
 import "js/VisibleQuotaConfig.js" as VQ
 import "js/QuotaResetEvents.js" as QuotaReset
+import "js/TestCelebrationRequests.js" as TestCelebrationRequests
 
 KCM.SimpleKCM {
     id: configPage
@@ -61,29 +62,29 @@ KCM.SimpleKCM {
     function tr(text) { return trans.tr(text); }
 
     /**
-     * Fire the same celebration notification used on real quota resets so
-     * users can verify desktop notifications from settings (KCM is a separate
-     * process from the widget, so this does not go through ProfileController).
+     * Preview the reset celebration in both desktop and widget UI without
+     * entering the real reset detection or logging paths.
      */
-    function sendTestQuotaResetNotification() {
-        var sample = QuotaReset.formatNotification(
-            [{
-                windowId: "5h",
-                windowLabel: "5h",
-                kind: "natural",
-                unexpected: false,
-                previousUsagePercent: 87,
-                expectedResetAtMs: 0
-            }],
-            { displayName: "Test", provider: "claude", id: "test" }
-        )
-        var title = (sample && sample.title)
-            ? sample.title
-            : "Woo-hoo! Test quota reset 🎉"
-        var text = (sample && sample.text)
-            ? sample.text + " · " + tr("test from settings")
-            : tr("test from settings")
+    function sendTestCelebration() {
         try {
+            var sample = QuotaReset.formatNotification(
+                [{
+                    windowId: "5h",
+                    windowLabel: "5h",
+                    kind: "natural",
+                    unexpected: false,
+                    previousUsagePercent: 87,
+                    expectedResetAtMs: 0
+                }],
+                { displayName: "Test", provider: "claude", id: "test" }
+            )
+            var title = (sample && sample.title)
+                ? sample.title
+                : "Woo-hoo! Test quota reset 🎉"
+            var previewSuffix = "Preview from Settings — no reset was logged."
+            var text = (sample && sample.text)
+                ? sample.text + " · " + previewSuffix
+                : previewSuffix
             var n = testResetNotificationComponent.createObject(configPage, {
                 title: String(title),
                 text: String(text),
@@ -94,8 +95,26 @@ KCM.SimpleKCM {
             if (n)
                 n.sendEvent()
         } catch (e) {
-            console.log("configGeneral: test reset notification failed", e)
+            console.log("configGeneral: test celebration notification failed", e)
         }
+
+        try {
+            var nowMs = Date.now()
+            var request = TestCelebrationRequests.createRequest(nowMs, function() {
+                return nowMs.toString(36) + "-" + Math.random().toString(36).substring(2)
+            })
+            var payload = TestCelebrationRequests.serializeRequest(request)
+            var command = "printf %s " + shellQuote(payload)
+                + " | bash " + shellQuote(testCelebrationBridgeScript) + " write"
+            testCelebrationWriter.connectSource(command)
+        } catch (e) {
+            console.log("configGeneral: test celebration request failed", e)
+        }
+    }
+
+    // Compatibility for the existing production wiring contract.
+    function sendTestQuotaResetNotification() {
+        sendTestCelebration()
     }
 
     readonly property var languageValues: [
@@ -124,6 +143,12 @@ KCM.SimpleKCM {
 
     readonly property string discoverScript: {
         var u = Qt.resolvedUrl("../scripts/discover-profiles.sh").toString()
+        if (u.indexOf("file://") === 0) return u.substring(7)
+        return u
+    }
+
+    readonly property string testCelebrationBridgeScript: {
+        var u = Qt.resolvedUrl("../scripts/test-celebration-bridge.sh").toString()
         if (u.indexOf("file://") === 0) return u.substring(7)
         return u
     }
@@ -394,6 +419,28 @@ KCM.SimpleKCM {
         // Durable allocator lives in cfg_customProfileNextId (Registry.editConfig).
         if (cfg_multiProfileMode !== false)
             runDiscover()
+    }
+
+    Plasma5Support.DataSource {
+        id: testCelebrationWriter
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            var exitCode = data["exit code"] !== undefined
+                    ? data["exit code"] : data["exitCode"]
+            var exitStatus = data["exit status"] !== undefined
+                    ? data["exit status"] : data["exitStatus"]
+            var stderr = data["stderr"] || ""
+            var error = data["error"] || data["errorString"] || ""
+            disconnectSource(sourceName)
+            if ((exitCode !== undefined && Number(exitCode) !== 0)
+                    || (exitStatus !== undefined && Number(exitStatus) !== 0)
+                    || error) {
+                console.log("configGeneral: test celebration writer failed",
+                            "exit=", exitCode, "status=", exitStatus,
+                            "error=", error, "stderr=", stderr)
+            }
+        }
     }
 
     Plasma5Support.DataSource {
@@ -916,7 +963,7 @@ KCM.SimpleKCM {
                 icon.name: "notifications"
                 // Still allow testing when the toggle is off so users can preview
                 // before enabling automatic celebrations.
-                onClicked: configPage.sendTestQuotaResetNotification()
+                onClicked: configPage.sendTestCelebration()
             }
 
             QQC2.CheckBox {
