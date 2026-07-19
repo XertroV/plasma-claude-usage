@@ -183,11 +183,33 @@ Item {
     /**
      * Bump celebrateGeneration so any AccountCard bound to this id can party.
      * Also usable from a future in-widget test control.
+     *
+     * The pulse is intentionally ephemeral: CardsView rebuilds delegates whenever
+     * dataEpoch advances (every successful refresh). Leaving celebrateGeneration
+     * sticky re-fires onCelebrateGenerationChanged on the matching card after
+     * unrelated provider refreshes. Clear on the next event loop once bindings
+     * have delivered the one-shot pulse.
      */
     function triggerCardCelebration(profileId) {
         if (!profileId) return
+        clearCelebrationPulse.stop()
+        // Id before generation so onCelebrateGenerationChanged sees a correct match.
+        // Force generation through 0 when retriggering so a same-value bump still
+        // delivers a change (e.g. clear raced and left generation at N, then N again).
+        if (celebrateGeneration !== 0)
+            celebrateGeneration = 0
         celebrateProfileId = String(profileId)
         celebrateGeneration = celebrateGeneration + 1
+        clearCelebrationPulse.restart()
+    }
+
+    function clearCardCelebrationPulse() {
+        // Generation 0 is inert in AccountCard; clearing the id avoids a stale match
+        // if a later rebuild races a non-zero generation (should not happen).
+        if (celebrateGeneration !== 0)
+            celebrateGeneration = 0
+        if (celebrateProfileId !== "")
+            celebrateProfileId = ""
     }
 
     function pollTestCelebration() {
@@ -1361,6 +1383,15 @@ Item {
             if (!controller.drainOneRefresh() || controller.refreshQueue.length === 0)
                 stop()
         }
+    }
+
+    // One-shot: drop sticky celebration after cards receive the generation pulse
+    // (see triggerCardCelebration). interval 0 = next event loop, after binding delivery.
+    Timer {
+        id: clearCelebrationPulse
+        interval: 0
+        repeat: false
+        onTriggered: controller.clearCardCelebrationPulse()
     }
 
     Timer {

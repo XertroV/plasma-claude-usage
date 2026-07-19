@@ -21,6 +21,12 @@ Rectangle {
     /** When celebrateGeneration bumps and celebrateProfileId matches, party. */
     property string celebrateProfileId: ""
     property int celebrateGeneration: 0
+    /**
+     * Same-instance guard: only play when generation advances past the last one
+     * we already handled. Survives profile-id rebinds without replaying; does not
+     * alone fix delegate recreation (controller clears the sticky pulse for that).
+     */
+    property int lastPlayedCelebrateGeneration: 0
     /** Injectable for deterministic tests; callers use Plasma's duration convention. */
     property bool reducedMotion: false
     /** Writable deterministic visual-review seam, animated from 0 to 1 in production. */
@@ -123,13 +129,25 @@ Rectangle {
         }
     ]
 
-    onCelebrateGenerationChanged: {
-        if (celebrateGeneration <= 0)
+    // Only generation bumps start the party. Profile id is set first in the
+    // controller so the match is already correct when this fires; reacting to
+    // profile-id changes would risk playing against a stale non-zero generation.
+    onCelebrateGenerationChanged: tryPlayCelebration()
+
+    function tryPlayCelebration() {
+        // Controller clears the pulse to 0 after delivery; forget the last played
+        // gen so a later 0→1 pulse on this same instance can party again.
+        if (celebrateGeneration <= 0) {
+            lastPlayedCelebrateGeneration = 0
+            return
+        }
+        if (celebrateGeneration <= lastPlayedCelebrateGeneration)
             return
         if (!profile || !profile.id)
             return
         if (String(profile.id) !== String(celebrateProfileId))
             return
+        lastPlayedCelebrateGeneration = celebrateGeneration
         playCelebration()
     }
 
